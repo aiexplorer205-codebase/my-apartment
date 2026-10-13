@@ -1,0 +1,53 @@
+# Dependencies and package-manager state
+node_modules/
+.pnp/
+.pnp.*
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+*.keystore
+google-services.json
+GoogleService-Info.plist
+
+# Build output and caches
+dist/
+build/
+coverage/
+.next/
+.turbo/
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# Flutter / Dart generated files
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+**/ios/Flutter/.last_build_id
+**/ios/Pods/
+**/android/.gradle/
+**/android/local.properties
+
+# Infrastructure state and local runtime data
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+docker-data/
+*.log
+
+# Local editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

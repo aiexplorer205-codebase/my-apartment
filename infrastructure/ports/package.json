@@ -1,0 +1,25 @@
+{
+  "name": "@nivasa/ports",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/infrastructure/ports/src/index.js",
+  "types": "./dist/infrastructure/ports/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/infrastructure/ports/src/index.d.ts",
+      "default": "./dist/infrastructure/ports/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nivasa/domain": "workspace:*",
+    "@nivasa/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

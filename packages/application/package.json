@@ -1,0 +1,26 @@
+{
+  "name": "@nivasa/application",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/application/src/index.js",
+  "types": "./dist/application/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/application/src/index.d.ts",
+      "default": "./dist/application/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nivasa/config": "workspace:*",
+    "@nivasa/domain": "workspace:*",
+    "@nivasa/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

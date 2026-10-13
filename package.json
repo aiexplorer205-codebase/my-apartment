@@ -1,0 +1,24 @@
+{
+  "name": "nivasa",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "typecheck": "tsc -b --pretty false",
+    "lint": "eslint . --ext .ts,.tsx,.mjs --ignore-pattern 'figma-prototype/**' --ignore-pattern '**/dist/**' --ignore-pattern '**/.next/**' --ignore-pattern '**/*.js' --ignore-pattern '**/*.d.ts' --max-warnings 0",
+    "test": "node scripts/run-vitest.mjs",
+    "build": "corepack pnpm -r --if-present run build",
+    "ci": "corepack pnpm run typecheck && corepack pnpm run lint && corepack pnpm run test && corepack pnpm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.11.0",
+    "@typescript-eslint/eslint-plugin": "^8.17.0",
+    "@typescript-eslint/parser": "^8.17.0",
+    "eslint": "^9.17.0",
+    "prisma": "^5.22.0",
+    "tslib": "^2.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  }
+}

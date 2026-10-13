@@ -1,0 +1,40 @@
+// Tenant migration schema for application-owned data.
+// Keep tenant schema contents independent from platform_db.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("TENANT_DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  name      String
+  locale    String
+  currency  String
+  timezone  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Unit {
+  id          String   @id @default(cuid())
+  tenantId    String
+  number      String
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Notice {
+  id        String   @id @default(cuid())
+  tenantId  String
+  title     String
+  body      String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}

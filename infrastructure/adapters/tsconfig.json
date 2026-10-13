@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "outDir": "dist",
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nivasa/domain": ["../../packages/domain/src/index.ts"],
+      "@nivasa/shared": ["../../packages/shared/src/index.ts"],
+      "@nivasa/ports": ["../ports/src/index.ts"],
+      "@nivasa/config": ["../../packages/config/src/index.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "../../packages/domain/src/**/*.ts",
+    "../../packages/shared/src/**/*.ts",
+    "../../packages/config/src/**/*.ts",
+    "../ports/src/**/*.ts"
+  ]
+}

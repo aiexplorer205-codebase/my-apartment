@@ -1,0 +1,10 @@
+{
+  "description": "Streamline apartment maintenance management for small to medium complexes in India with role-based experiences for residents, admins, and operators.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

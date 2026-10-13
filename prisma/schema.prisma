@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TenantRecord {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  slug            String   @unique
+  orgName         String
+  status          String
+  databaseLocator String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ProvisioningState {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  databaseLocator String
+  phase           String
+  status          String
+  lastError       String?
+  schemaVersion   String
+  updatedAt       DateTime @updatedAt
+}
+
+model IdentitySubject {
+  id        String   @id @default(cuid())
+  subject   String   @unique
+  tenantId  String?
+  email     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

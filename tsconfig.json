@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/config" },
+    { "path": "./packages/domain" },
+    { "path": "./packages/application" },
+    { "path": "./packages/contracts" },
+    { "path": "./infrastructure/ports" },
+    { "path": "./infrastructure/adapters" },
+    { "path": "./apps/api" },
+    { "path": "./apps/worker" }
+  ]
+}
