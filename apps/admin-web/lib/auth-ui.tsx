@@ -15,9 +15,11 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
         <section className="auth-card config-card">
           <div className="brand-row"><span className="brand-mark">N</span><span>Nivasa</span></div>
           <div className="eyebrow">SECURE RESIDENT & ADMIN ACCESS</div>
-          <h1>Sign in with your organization</h1>
+          <h1>Sign in with Email OTP</h1>
           <p>Email OTP is handled by your configured Auth0 Universal Login. Nivasa does not issue or verify OTP codes.</p>
-          <button className="primary" type="button" onClick={() => void loginWithRedirect()}>Continue to Auth0</button>
+          <button className="primary" type="button" onClick={() => void loginWithRedirect({
+            authorizationParams: { connection: 'email', scope: 'openid profile email' },
+          })}>Continue with Email OTP</button>
         </section>
       </main>
     )

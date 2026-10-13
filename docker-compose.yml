@@ -48,10 +48,16 @@ services:
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.nivasa.local}
       AUTH0_ISSUER: ${AUTH0_ISSUER:-https://example.auth0.com/}
+      AUTH0_MGMT_CLIENT_ID: ${AUTH0_MGMT_CLIENT_ID:-}
+      AUTH0_MGMT_CLIENT_SECRET: ${AUTH0_MGMT_CLIENT_SECRET:-}
+      AUTH0_PASSWORDLESS_CONNECTION: ${AUTH0_PASSWORDLESS_CONNECTION:-email}
+      ADMIN_WEB_PUBLIC_URL: ${ADMIN_WEB_PUBLIC_URL:-http://localhost:3100}
+      OPERATOR_IDS: ${OPERATOR_IDS:-}
       OPERATOR_ID: ${OPERATOR_ID:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3100,http://localhost:3101}
       AUTH0_OTP_ENABLED: ${AUTH0_OTP_ENABLED:-false}
       RESEND_API_KEY: ${RESEND_API_KEY:-replace-with-resend-key}
+      RESEND_FROM: ${RESEND_FROM:-no-reply@local.nivasa.test}
       FILEBASE_ENDPOINT: ${FILEBASE_ENDPOINT:-https://example.filebase.com}
       FILEBASE_BUCKET: ${FILEBASE_BUCKET:-nivasa-local-dev}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-replace-me}

@@ -16,7 +16,7 @@ export function OperatorAuthProvider({ children, domain, clientId, audience, red
         <section className="auth-card" role="alert">
           <div className="eyebrow">OPERATOR AUTHENTICATION NOT CONFIGURED</div>
           <h1>Configure the private operator Auth0 application</h1>
-          <p>Set AUTH0_DOMAIN, AUTH0_OPERATOR_CLIENT_ID, and AUTH0_AUDIENCE in the local .env file. The API also requires OPERATOR_ID to match the approved Auth0 subject.</p>
+          <p>Set AUTH0_DOMAIN, AUTH0_OPERATOR_CLIENT_ID, and AUTH0_AUDIENCE in the local .env file. The API also requires the signed-in Auth0 subject to match an approved operator identity.</p>
         </section>
       </main>
     )

@@ -34,8 +34,10 @@ export default function LoginPage() {
               </div>
             </>
           ) : (
-            <button className="primary wide" type="button" onClick={() => void loginWithRedirect()}>
-              Continue to Auth0
+            <button className="primary wide" type="button" onClick={() => void loginWithRedirect({
+              authorizationParams: { connection: 'email', scope: 'openid profile email' },
+            })}>
+              Continue with Email OTP
             </button>
           )}
           <p className="security-row">No demo users, role switcher, local OTP verifier, or payment success simulation.</p>

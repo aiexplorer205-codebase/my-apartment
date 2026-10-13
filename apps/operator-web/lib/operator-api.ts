@@ -43,7 +43,20 @@ export type OperatorOverview = {
   onboardingCount: number
   activeOrganizationCount: number
   provisioningFailures: number
-  organizations: Array<{ id: string; slug: string; name: string; status: string; plan_name: string; createdAt: string }>
+  organizations: Array<{
+    id: string
+    slug: string
+    name: string
+    status: string
+    plan_name: string
+    city: string | null
+    adminEmail: string | null
+    estimatedUnits: number | null
+    invitedAt: string | null
+    provisioningStatus: string | null
+    provisioningError: string | null
+    createdAt: string
+  }>
   residentLevelData: false
   revenueStatus: string
   revenueUnavailableReason: string

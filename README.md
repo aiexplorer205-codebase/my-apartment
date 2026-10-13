@@ -25,9 +25,9 @@ step-by-step smoke test, see
 [Local Docker Compose setup and testing](docs/local-compose-testing.md).
 
 Prerequisites: Node.js 22 or later, pnpm 9.15.0 (Corepack is recommended),
-Docker Compose, and a non-production Auth0 tenant. Auth0 is the only external
-service required to sign into the implemented surfaces. Online payments,
-tenant provisioning actions, invoice publication, and queue jobs are not
+Docker Compose, and a non-production Auth0 tenant. Auth0 handles sign-in;
+operator onboarding email delivery additionally requires a configured Resend
+account. Online payments, invoice publication, and queue jobs are not
 simulated; see the gated capabilities below.
 
 ```sh
@@ -55,7 +55,9 @@ forward migrations explicitly:
 ```sh
 docker compose exec -T postgres psql -U postgres -d platform_db \
   -v ON_ERROR_STOP=1 -f /migrations/platform_db/001_init_platform.sql \
-  -f /migrations/platform_db/002_mvp_access.sql
+  -f /migrations/platform_db/002_mvp_access.sql \
+  -f /migrations/platform_db/003_operator_onboarding.sql \
+  -f /migrations/platform_db/004_email_otp_admin_invites.sql
 docker compose exec -T postgres psql -U postgres -d tenant_template \
   -v ON_ERROR_STOP=1 -f /migrations/tenant_db/001_init_tenant.sql \
   -f /migrations/tenant_db/002_mvp_product.sql
@@ -69,10 +71,16 @@ passwordless email OTP in Auth0 and configure each app's callback, logout, and
 web-origin allowlists for `http://localhost:3100` or `http://localhost:3101`.
 Configure the same API audience as a custom API in Auth0. In `.env`, set
 `AUTH0_DOMAIN`, `AUTH0_ISSUER`, `AUTH0_AUDIENCE`,
-`AUTH0_ADMIN_CLIENT_ID`, `AUTH0_OPERATOR_CLIENT_ID`, and `OPERATOR_ID`.
-`OPERATOR_ID` must be the exact approved operator `sub` claim, for example
-`auth0|...`; it is not a password or token. The operator API fails closed if
-it is unset or does not match the signed-in subject.
+`AUTH0_ADMIN_CLIENT_ID`, `AUTH0_OPERATOR_CLIENT_ID`,
+`AUTH0_MGMT_CLIENT_ID`, and `AUTH0_MGMT_CLIENT_SECRET`. Authorize the dedicated
+Management API M2M app for `create:users` and `read:users`; set
+`AUTH0_PASSWORDLESS_CONNECTION` to the exact Email connection name (normally
+`email`). Keep signup disabled on that connection. Set `OPERATOR_IDS` to
+a comma-separated list of exact approved operator `sub` claims, for example
+`auth0|...`; these are not passwords or tokens. The legacy `OPERATOR_ID`
+setting remains supported for one operator when `OPERATOR_IDS` is empty. The
+operator API fails closed if no approved identity is configured or the signed-in
+subject does not match an approved identity.
 
 ### Local tenant test data
 
@@ -129,8 +137,9 @@ SQL
 
 The seed is intentionally SQL-driven so identity subjects remain your real
 Auth0 identities, not built-in demo accounts. Log into the resident or admin
-portal with the corresponding account. Set `OPERATOR_ID` to the approved
-operator subject to access the separate operator console.
+portal with the corresponding account. Add each approved operator's exact
+Auth0 `sub` claim to `OPERATOR_IDS` to grant access to the separate operator
+console.
 
 ### MVP behavior and gated features
 
@@ -143,12 +152,18 @@ operator subject to access the separate operator console.
   `platform_db`; it does not show resident-level data or database locators.
 - Checkout is disabled until a payment provider and settlement model are
   approved. No fake payment success is available.
+- Operator onboarding now provisions a tenant database and sends the first
+  administrator a one-time invitation link by Resend. The administrator signs
+  in with Auth0 Email OTP only; the API matches the verified email to the
+  invitation before granting tenant admin access. Configure the Auth0 email
+  connection and Resend sender as described in
+  [local setup](docs/local-compose-testing.md) before using it.
 - Invoice publishing, resident invitations, offline collection, campaigns,
-  operator provisioning/lifecycle actions, and audit exports are not yet
-  implemented. Their controls are disabled or identified as unavailable.
+  organization lifecycle actions, and audit exports are not yet implemented.
+  Their controls are disabled or identified as unavailable.
 - The worker has truthful health/Redis checks but no job processors yet.
-  Resend, Firebase, and Filebase are not required by these MVP flows and are
-  not replaced with local fake providers.
+  Firebase and Filebase are not required by these MVP flows and are not
+  replaced with local fake providers.
 - The resident experience in this slice is the web surface; the canonical
   Flutter resident client is not implemented yet.
 

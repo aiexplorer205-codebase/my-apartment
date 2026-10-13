@@ -28,14 +28,17 @@ into a Dockerfile, command-line argument, issue, or committed file.
 
 ## 2. Set up Auth0 for authenticated testing
 
-Auth0 is the only external provider needed by the current MVP's sign-in and
-resident/admin/operator flows.
+Auth0 handles sign-in for resident/admin/operator flows. Resend is also needed
+to deliver operator-created administrator invitation links.
 
 1. In a **non-production** Auth0 tenant, create two Single Page Applications:
    one for the resident/admin web app and one for the operator web app.
-2. Enable passwordless email OTP for the applications and set up an email
-   delivery method in Auth0. Auth0 remains the identity authority; do not
-   substitute a local OTP or demo identity.
+2. Enable the Auth0 **Email (passwordless)** connection on the resident/admin
+   SPA and configure email OTP delivery. Admin sign-in explicitly selects this
+   connection, so administrators enter an email and its one-time code; they do
+   not use a username or password. Do not use Auth0 Organization invitations
+   for this flow because Auth0 does not support passwordless connections for
+   Organization invitations.
 3. Create or configure a custom Auth0 API whose identifier is
    `https://api.nivasa.local`. Use that exact identifier for the API audience.
 4. For each SPA, allow its local origin as a Callback URL, Logout URL, and Web
@@ -44,8 +47,27 @@ resident/admin/operator flows.
    - Operator: `http://localhost:3101`
 5. Copy the tenant's domain and each SPA's client ID into `.env`. Obtain the
    exact `sub` claim for the account approved to use the operator console;
-   set it as `OPERATOR_ID`. It is a subject identifier (for example,
+   set it in `OPERATOR_IDS`. It is a subject identifier (for example,
    `auth0|...`), not an email or a token.
+6. Create a non-production Auth0 Machine-to-Machine application and authorize
+   it for the Auth0 Management API with only `create:users` and `read:users`.
+   Set its client ID and secret in `AUTH0_MGMT_CLIENT_ID` and
+   `AUTH0_MGMT_CLIENT_SECRET`. Keep the passwordless Email connection's signup
+   toggle disabled; the API creates each invited email identity through the
+   Management API before sending the app invitation. Set
+   `AUTH0_PASSWORDLESS_CONNECTION` to that connection's exact name (usually
+   `email`). The passwordless connection must also be enabled for the M2M
+   application's client ID, because Auth0 checks the calling client when it
+   creates a user. Keep the connection enabled for the resident/admin SPA too.
+   If the dashboard cannot enable a connection for an M2M client, an Auth0
+   administrator can make this one-time change with the Management API's
+   Update Enabled Clients endpoint and `update:connections`, then remove that
+   extra permission from the app's M2M grant.
+7. Configure `RESEND_API_KEY` and `RESEND_FROM` with a development Resend key
+   and a verified sender. Nivasa sends the administrator a single-use
+   invitation link via Resend; accepting it requires an Auth0 Email OTP login
+   matching the invited address. No Auth0 Organization or
+   username/password database connection is needed.
 
 If the ports or local origins are changed, update the Auth0 allowlists,
 `CORS_ORIGINS`, `ADMIN_WEB_PUBLIC_URL`, `OPERATOR_WEB_PUBLIC_URL`, and the
@@ -87,33 +109,43 @@ connections.
 | `AUTH0_ADMIN_CLIENT_ID` | Client ID of the resident/admin SPA. |
 | `AUTH0_OPERATOR_CLIENT_ID` | Client ID of the operator SPA. |
 | `AUTH0_CLIENT_ID` | Optional compatibility fallback for the admin SPA; prefer setting `AUTH0_ADMIN_CLIENT_ID`. |
-| `AUTH0_OTP_ENABLED` | Keep `false` for this MVP test. The current browser login delegates to Auth0 and does not read this flag; configure the desired passwordless/email sign-in method in Auth0 itself. |
-| `OPERATOR_ID` | Exact approved operator account `sub` claim from Auth0. Required for operator authorization; the API fails closed if it is missing or does not match. |
+| `AUTH0_MGMT_CLIENT_ID`, `AUTH0_MGMT_CLIENT_SECRET` | Credentials for a dedicated Auth0 Machine-to-Machine application authorized for the Management API with `create:users` and `read:users` only. Enable the Email passwordless connection for this M2M client. Keep the secret server-side. |
+| `AUTH0_PASSWORDLESS_CONNECTION` | Exact name of the Auth0 Email passwordless connection used by the admin SPA; normally `email`. |
+| `AUTH0_OTP_ENABLED` | Legacy setting; browser login selects Auth0's `email` passwordless connection directly. Configure and enable that connection on the admin SPA in Auth0. |
+| `RESEND_API_KEY`, `RESEND_FROM` | Configure a development Resend key and verified sender to deliver organization administrator invitation links. |
+| `OPERATOR_IDS` | Comma-separated exact approved operator `sub` claims from Auth0. The API fails closed if the list is empty or the signed-in subject is not listed. |
+| `OPERATOR_ID` | Legacy single-operator fallback used only when `OPERATOR_IDS` is empty. Prefer `OPERATOR_IDS`, including for one operator. |
 | `AUTH0_REDIRECT_URI`, `AUTH0_OPERATOR_REDIRECT_URI` | The template includes these for reference, but the current Compose setup derives the actual SPA redirect URIs from `ADMIN_WEB_PUBLIC_URL` and `OPERATOR_WEB_PUBLIC_URL`. Keep them aligned if retaining them; do not rely on them to override the app URLs. |
 
 The admin and operator applications use separate client IDs. A configured
 Auth0 domain and client ID let the UI initiate sign-in; the API additionally
 validates the configured issuer and audience on protected requests.
+Organization onboarding creates a tenant database from `tenant_template`,
+pre-creates the administrator in Auth0's passwordless Email connection using
+the Management API, then sends a seven-day, single-use invitation link via
+Resend. Passwordless connection signup remains disabled; the Auth0 OTP login
+proves mailbox access, and accepting the app invitation is still required for
+membership. The API verifies the access token with Auth0, requires a verified
+email matching the invite, and atomically creates
+the tenant admin membership. If a step fails after the platform record is
+created, the console reports the error and offers **Retry setup** where safe.
 
 ### External provider placeholders
 
-The current local MVP does not use Resend, Firebase, or Filebase for its
-implemented flows. Leave their safe placeholder values unchanged for this
-Compose test; no account or key is required to start the stack or test
-Auth0-backed resident/admin/operator pages. Do not enter production
-credentials. These variables are reserved for provider integrations and are
-not a substitute for Auth0's own passwordless-email delivery configuration.
+Resend is required for administrator invitation emails. Firebase and Filebase
+are not used by the current implemented flows. Do not enter production
+credentials. Resend's API key and verified sender are separate from Auth0's
+own passwordless-email delivery configuration.
 
-| Variables | When a future test explicitly exercises that integration |
+| Variables | Local onboarding configuration |
 | --- | --- |
 | `RESEND_API_KEY`, `RESEND_FROM` | Use a development Resend API key and a sender address/domain verified with Resend. Do not use an unrestricted production sender. |
 | `FILEBASE_ENDPOINT`, `FILEBASE_BUCKET`, `FILEBASE_REGION`, `FILEBASE_ACCESS_KEY`, `FILEBASE_SECRET_KEY` | Use a development bucket and scoped development credentials from Filebase. Keep access keys server-side. |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Use a non-production Firebase service account with only required permissions. Keep the private key on one quoted, multiline value in `.env`; do not commit or expose it to browser code. |
 
-The Compose file currently forwards only a subset of those integration
-variables to containers, and the MVP has no active Resend, Firebase, or
-Filebase workflows. Supplying their values alone does not enable or verify an
-integration.
+Compose forwards Resend credentials to the API for administrator invitations.
+Firebase and Filebase remain inactive; supplying their values does not enable
+or verify those integrations.
 
 ### Other settings
 

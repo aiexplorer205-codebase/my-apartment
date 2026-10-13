@@ -29,6 +29,7 @@ export function AuthProvider({ children, domain, clientId, audience, redirectUri
       authorizationParams={{
         audience,
         redirect_uri: redirectUri,
+        scope: 'openid profile email',
       }}
       cacheLocation="memory"
       useRefreshTokens

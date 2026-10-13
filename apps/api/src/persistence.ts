@@ -58,6 +58,37 @@ export const getTenantPool = (databaseName: string): Pool => {
   return pool
 }
 
+export const provisionTenantDatabase = async (databaseName: string): Promise<void> => {
+  if (!/^[a-z][a-z0-9_]{0,62}$/.test(databaseName)) {
+    throw new Error('Tenant database name is invalid')
+  }
+  const connectionString = process.env.POSTGRES_PLATFORM_URL
+  if (!connectionString) {
+    throw new Error('POSTGRES_PLATFORM_URL is required')
+  }
+
+  const connection = new URL(connectionString)
+  connection.pathname = '/postgres'
+  const pool = new Pool({
+    connectionString: connection.toString(),
+    max: 1,
+    application_name: 'nivasa-api-provisioning',
+    connectionTimeoutMillis: 5000,
+  })
+  pool.on('error', reportPoolError('provisioning'))
+  try {
+    const exists = await pool.query<{ exists: boolean }>(
+      'SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1) AS exists',
+      [databaseName],
+    )
+    if (exists.rows[0]?.exists) return
+
+    await pool.query(`CREATE DATABASE "${databaseName}" TEMPLATE tenant_template`)
+  } finally {
+    await pool.end()
+  }
+}
+
 export const checkDatabaseReadiness = async (): Promise<boolean> => {
   try {
     await getPlatformPool().query('SELECT 1')

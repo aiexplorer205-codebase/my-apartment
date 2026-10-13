@@ -56,13 +56,17 @@ demo identities.
 
 - **Identity owner:** configure separate non-production Auth0 SPA applications,
   email OTP, callback/logout/web-origin allowlists, and API audience; populate
-  local `.env`. Set `OPERATOR_ID` to the approved operator subject. Production
-  secret-manager configuration and rotation remain unverified.
+  local `.env`. Set `OPERATOR_IDS` to the exact approved operator subjects.
+  Enable Auth0 Email OTP on the admin SPA and configure a verified Resend
+  sender for one-time admin invitations. Production secret-manager
+  configuration and rotation remain unverified.
 - **Product/finance owner:** approve a payment provider, merchant and
   settlement model, accounting ownership, credentials, webhooks, refunds, and
   reconciliation before implementing or enabling checkout.
-- **Platform owner:** operator onboarding/provisioning, lifecycle changes,
-  campaigns, audit operations, and queue processors remain unimplemented.
+- **Platform owner:** organization onboarding and initial tenant provisioning
+  are implemented but require Auth0 Email OTP and Resend configuration.
+  Lifecycle changes, campaigns, audit operations, and queue processors remain
+  unimplemented.
   The worker currently exposes truthful health/Redis status only.
 - **Product/security owner:** resident invitations, resident/unit management,
   invoice preview/publication, offline collection, exports, and reports remain
