@@ -58,6 +58,28 @@ export const getTenantPool = (databaseName: string): Pool => {
   return pool
 }
 
+export const dropTenantDatabase = async (databaseName: string): Promise<void> => {
+  if (!/^[a-z][a-z0-9_]{0,62}$/.test(databaseName)) throw new Error('Tenant database name is invalid')
+  const tenantConnectionString = process.env.POSTGRES_TENANT_URL
+  const platformConnectionString = process.env.POSTGRES_PLATFORM_URL
+  if (!tenantConnectionString || !platformConnectionString) throw new Error('POSTGRES_TENANT_URL and POSTGRES_PLATFORM_URL are required')
+  const tenantPoolKey = `${tenantConnectionString}\u0000${databaseName}`
+  const tenantPool = tenantPools.get(tenantPoolKey)
+  if (tenantPool) {
+    await tenantPool.end()
+    tenantPools.delete(tenantPoolKey)
+  }
+  const connection = new URL(platformConnectionString)
+  connection.pathname = '/postgres'
+  const pool = new Pool({ connectionString: connection.toString(), max: 1, application_name: 'nivasa-api-deletion', connectionTimeoutMillis: 5000 })
+  try {
+    await pool.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()', [databaseName])
+    await pool.query(`DROP DATABASE IF EXISTS "${databaseName}"`)
+  } finally {
+    await pool.end()
+  }
+}
+
 export const provisionTenantDatabase = async (databaseName: string): Promise<void> => {
   if (!/^[a-z][a-z0-9_]{0,62}$/.test(databaseName)) {
     throw new Error('Tenant database name is invalid')

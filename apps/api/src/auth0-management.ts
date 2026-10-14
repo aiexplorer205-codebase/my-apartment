@@ -1,4 +1,5 @@
 type Auth0User = {
+  user_id?: string
   email?: string
   identities?: Array<{ connection?: string }>
 }
@@ -52,21 +53,22 @@ const findProvisionedUser = async (
   config: ReturnType<typeof managementConfiguration>,
   accessToken: string,
   email: string,
-): Promise<boolean> => {
+): Promise<Auth0User | null> => {
   const response = await globalThis.fetch(
     `https://${config.domain}/api/v2/users-by-email?email=${encodeURIComponent(email)}`,
     { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000) },
   )
   if (!response.ok) throw new Error(`Auth0 user lookup failed (${response.status})`)
   const users = await response.json() as Auth0User[]
-  return users.some((user) => user.email?.toLowerCase() === email.toLowerCase()
-    && user.identities?.some((identity) => identity.connection === config.connection))
+  return users.find((user) => user.email?.toLowerCase() === email.toLowerCase()
+    && user.identities?.some((identity) => identity.connection === config.connection)) ?? null
 }
 
-export const provisionPasswordlessUser = async (email: string): Promise<void> => {
+export const provisionPasswordlessUser = async (email: string): Promise<{ userId: string | null; createdByApp: boolean }> => {
   const config = managementConfiguration()
   const accessToken = await getManagementToken(config)
-  if (await findProvisionedUser(config, accessToken, email)) return
+  const existing = await findProvisionedUser(config, accessToken, email)
+  if (existing) return { userId: existing.user_id ?? null, createdByApp: false }
   const response = await globalThis.fetch(`https://${config.domain}/api/v2/users`, {
     method: 'POST',
     headers: {
@@ -84,11 +86,45 @@ export const provisionPasswordlessUser = async (email: string): Promise<void> =>
     }),
     signal: AbortSignal.timeout(10_000),
   })
-  if (response.ok) return
-  if (response.status === 409 && await findProvisionedUser(config, accessToken, email)) return
+  if (response.ok) {
+    const user = await response.json() as Auth0User
+    return { userId: user.user_id ?? null, createdByApp: true }
+  }
+  if (response.status === 409) {
+    const raced = await findProvisionedUser(config, accessToken, email)
+    if (raced) return { userId: raced.user_id ?? null, createdByApp: false }
+  }
   if (response.status === 409) {
     throw new Error('An Auth0 user already exists for this email, but not in the configured passwordless connection')
   }
   throw new Error(`Auth0 passwordless user provisioning failed (${response.status})`)
+}
+
+export const deleteOrganizationPasswordlessUser = async (email: string, knownUserId: string | null): Promise<boolean> => {
+  const config = managementConfiguration()
+  const accessToken = await getManagementToken(config)
+  const user = knownUserId
+    ? await (async () => {
+      const response = await globalThis.fetch(`https://${config.domain}/api/v2/users/${encodeURIComponent(knownUserId)}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000),
+      })
+      if (response.status === 404) return null
+      if (!response.ok) throw new Error(`Auth0 user lookup failed (${response.status})`)
+      return await response.json() as Auth0User
+    })()
+    : await findProvisionedUser(config, accessToken, email)
+  if (!user) return false
+  if (user.email?.toLowerCase() !== email.toLowerCase()
+    || user.identities?.length !== 1
+    || user.identities[0]?.connection !== config.connection) {
+    throw new Error('The Auth0 identity is shared or does not match the organization administrator; it was not deleted')
+  }
+  if (!user.user_id) throw new Error('Auth0 did not return the administrator user ID')
+  const response = await globalThis.fetch(`https://${config.domain}/api/v2/users/${encodeURIComponent(user.user_id)}`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000),
+  })
+  if (response.status === 404) return false
+  if (!response.ok) throw new Error(`Auth0 user deletion failed (${response.status})`)
+  return true
 }
 

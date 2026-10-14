@@ -1,10 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useAuth0 } from '@auth0/auth0-react'
+import { useAuth0 } from './auth-provider'
+import { EmbeddedLogin } from '../lib/auth-ui'
 
 export default function LoginPage() {
-  const { isAuthenticated, isLoading, loginWithRedirect, user } = useAuth0()
+  const { isAuthenticated, isLoading, user } = useAuth0()
 
   return (
     <main className="auth-shell">
@@ -23,7 +24,7 @@ export default function LoginPage() {
           <div className="auth-heading">
             <div className="mini-mark">N</div>
             <h2>Welcome to Nivasa</h2>
-            <p>Email OTP is handled by your configured Auth0 Universal Login.</p>
+            <p>Sign in securely with a one-time code sent to your email.</p>
           </div>
           {isLoading ? <p role="status">Checking your Auth0 session…</p> : isAuthenticated ? (
             <>
@@ -34,11 +35,7 @@ export default function LoginPage() {
               </div>
             </>
           ) : (
-            <button className="primary wide" type="button" onClick={() => void loginWithRedirect({
-              authorizationParams: { connection: 'email', scope: 'openid profile email' },
-            })}>
-              Continue with Email OTP
-            </button>
+            <EmbeddedLogin />
           )}
           <p className="security-row">No demo users, role switcher, local OTP verifier, or payment success simulation.</p>
         </section>

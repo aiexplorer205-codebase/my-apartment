@@ -32,6 +32,13 @@ Prototype data is illustrative only. Replace it with database-backed,
 tenant-scoped API behavior and complete loading, empty, validation, success,
 failure, and retry states.
 
+For apartment creation, preserve the prototype's three-stage flow: apartment
+name/city/address/billing start month; building name/floors/units per floor/
+unit prefix and generated numbering preview/optional per-square-foot rate; and
+completion. Persist the generated vacant units atomically with their apartment
+and building. Validate generation bounds on the server, and never start billing
+or send resident notifications as a side effect of setup.
+
 ## Architecture that must not drift
 
 - TypeScript pnpm monorepo; Flutter resident client; Next.js admin and separate

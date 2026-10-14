@@ -53,6 +53,7 @@ export type OperatorOverview = {
     adminEmail: string | null
     estimatedUnits: number | null
     invitedAt: string | null
+    inviteAcceptedAt: string | null
     provisioningStatus: string | null
     provisioningError: string | null
     createdAt: string

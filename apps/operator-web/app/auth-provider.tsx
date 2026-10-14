@@ -26,7 +26,7 @@ export function OperatorAuthProvider({ children, domain, clientId, audience, red
       domain={domain}
       clientId={clientId}
       authorizationParams={{ audience, redirect_uri: redirectUri }}
-      cacheLocation="memory"
+      cacheLocation="localstorage"
       useRefreshTokens
     >
       {children}

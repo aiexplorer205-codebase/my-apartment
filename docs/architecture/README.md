@@ -54,6 +54,11 @@ The implementation prompts are in
 [`../implementation-prompts/`](../implementation-prompts/README.md). Read the
 master prompt and execute its phases in order.
 
+Apartment setup follows the prototype's three-stage details, unit generation,
+and completion flow. Its server contract and safety bounds are documented in
+[Product and system architecture](./product-and-system.md) and the master
+implementation prompt.
+
 ## Source interpretation
 
 [`figma-prototype/src/App.tsx`](../../figma-prototype/src/App.tsx) is an

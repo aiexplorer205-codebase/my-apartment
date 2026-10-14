@@ -1,12 +1,46 @@
 'use client'
 
 import { useAuth0 } from '@auth0/auth0-react'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import { OperatorAuthBoundary } from '../lib/operator-auth-ui'
 import { useOperatorOverview } from '../lib/operator-api'
 
+function AuditPanel() {
+  const { getAccessTokenSilently } = useAuth0()
+  const [entries, setEntries] = useState<Array<{ id: string; action: string; target: string; reason: string; actor: string; createdAt: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [revision, setRevision] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const token = await getAccessTokenSilently()
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4101').replace(/\/$/, '')
+        const response = await globalThis.fetch(`${baseUrl}/v1/platform/audit`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
+        const payload = await response.json() as { entries?: typeof entries; message?: string }
+        if (!response.ok) throw new Error(payload.message ?? `Request failed (${response.status})`)
+        if (!cancelled) setEntries(payload.entries ?? [])
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load the audit log')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [getAccessTokenSilently, revision])
+
+  return <section className="card panel-card"><div className="card-header"><div><h2>Platform audit log</h2><span>Most recent operator and invitation events</span></div><button type="button" className="secondary-button" onClick={() => setRevision(revision + 1)}>Refresh</button></div>{loading ? <p role="status">Loading audit events…</p> : error ? <p role="alert">{error}</p> : entries.length === 0 ? <p>No audit events have been recorded.</p> : <ul className="stack-list">{entries.map((entry) => <li key={entry.id}><div className="organization-details"><strong>{entry.action}</strong><small>Target: {entry.target} · Actor: {entry.actor}</small><small>{entry.reason} · {new Date(entry.createdAt).toLocaleString()}</small></div></li>)}</ul>}</section>
+}
+
 function Overview() {
+  type View = 'overview' | 'organizations' | 'provisioning' | 'monetization' | 'campaigns' | 'transactions' | 'support' | 'audit' | 'settings'
+  const [activeView, setActiveView] = useState<View>('overview')
   const { data, loading, error, reload } = useOperatorOverview()
   const { getAccessTokenSilently } = useAuth0()
   const [onboardingOpen, setOnboardingOpen] = useState(false)
@@ -14,6 +48,8 @@ function Overview() {
   const [retrying, setRetrying] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [createdOrganization, setCreatedOrganization] = useState<string | null>(null)
+  const [organizationSearch, setOrganizationSearch] = useState('')
+  const [organizationStatus, setOrganizationStatus] = useState('all')
   const openOnboarding = () => {
     setCreatedOrganization(null)
     setFormError(null)
@@ -71,6 +107,35 @@ function Overview() {
     }
   }
 
+  const changeOrganization = async (organization: { id: string; name: string }, action: 'deactivate' | 'reactivate' | 'delete') => {
+    if (action === 'deactivate' && !globalThis.confirm(`Deactivate ${organization.name}? Tenant access will stop, but its data will remain.`)) return
+    if (action === 'reactivate' && !globalThis.confirm(`Reactivate ${organization.name} and restore tenant access?`)) return
+    if (action === 'delete') {
+      const confirmation = globalThis.prompt(`Permanently delete ${organization.name}, its tenant database, and its dedicated Auth0 admin account? A shared Auth0 account will be retained. Type the organization name to continue.`)
+      if (confirmation !== organization.name) return
+    }
+    setRetrying(organization.id)
+    setFormError(null)
+    try {
+      const token = await getAccessTokenSilently()
+      const baseUrl = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4101').replace(/\/$/, '')
+      const response = await globalThis.fetch(`${baseUrl}/v1/platform/organizations/${encodeURIComponent(organization.id)}/lifecycle`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+      })
+      const payload = await response.json() as { status?: string; auth0AdminRemoved?: boolean; message?: string }
+      if (!response.ok) throw new Error(payload.message ?? `Request failed (${response.status})`)
+      if (action === 'delete' && !payload.auth0AdminRemoved) {
+        setFormError(`${organization.name} and its tenant database were deleted. Its Auth0 user was retained because the email is shared with another tenant or no dedicated passwordless account was found.`)
+      }
+      reload()
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : `Could not ${action} organization`)
+      reload()
+    } finally {
+      setRetrying(null)
+    }
+  }
+
   const metrics = data ? [
     { label: 'Organizations', value: String(data.organizationCount), detail: 'Registered tenants' },
     { label: 'Active', value: String(data.activeOrganizationCount), detail: 'Active organizations' },
@@ -78,29 +143,39 @@ function Overview() {
     { label: 'Provisioning failures', value: String(data.provisioningFailures), detail: 'Require review' },
   ] : []
 
+  const navigation: Array<{ id: View; label: string }> = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'organizations', label: 'Organizations' },
+    { id: 'provisioning', label: 'Provisioning' },
+    { id: 'monetization', label: 'Monetization' },
+    { id: 'campaigns', label: 'Ad campaigns' },
+    { id: 'transactions', label: 'Transactions' },
+    { id: 'support', label: 'Support' },
+    { id: 'audit', label: 'Audit logs' },
+    { id: 'settings', label: 'Settings' },
+  ]
+
   return (
     <main className="operator-shell">
       <aside className="operator-sidebar">
-        <div className="brand-row"><span className="brand-mark">N</span><span>Nivasa</span></div>
+        <div className="brand-row"><span className="brand-mark">N</span><span><strong>Nivasa</strong><small>PLATFORM OPERATIONS</small></span></div>
+        <div className="operator-tenant"><span className="tenant-shield">N</span><span>Global workspace</span></div>
         <nav className="nav-list" aria-label="Platform operations navigation">
-          <button type="button" className="nav-item active">Overview</button>
-          <button type="button" className="nav-item" onClick={openOnboarding}>Organizations · onboard</button>
-          <button type="button" className="nav-item" disabled title="Provisioning actions are not implemented">Provisioning · unavailable</button>
-          <button type="button" className="nav-item" disabled title="Campaign controls are not implemented">Campaigns · unavailable</button>
-          <button type="button" className="nav-item" disabled title="Audit search is not implemented">Audit · unavailable</button>
+          {navigation.map((item) => <button key={item.id} type="button" className={`nav-item${activeView === item.id ? ' active' : ''}`} onClick={() => setActiveView(item.id)}>{item.label}</button>)}
         </nav>
+        <div className="sidebar-account"><span className="account-avatar">OP</span><span><strong>Platform operator</strong><small>Approved account</small></span></div>
       </aside>
 
       <section className="content-panel">
         <header className="topbar">
-          <div><div className="eyebrow">PRIVATE OPERATOR CONSOLE</div><h1>Platform overview</h1></div>
+          <div><div className="eyebrow">PRIVATE OPERATOR CONSOLE</div><h1>{navigation.find((item) => item.id === activeView)?.label}</h1></div>
           <div className="topbar-actions">
-            <button type="button" className="secondary-button" onClick={reload}>Refresh live data</button>
-            <button type="button" className="primary-button" onClick={openOnboarding}>Onboard organization</button>
+            {activeView !== 'campaigns' && <button type="button" className="secondary-button" onClick={reload}>Refresh live data</button>}
+            {activeView === 'organizations' && <button type="button" className="primary-button" onClick={openOnboarding}>Onboard organization</button>}
           </div>
         </header>
 
-        {formError && <section className="card form-error" role="alert"><strong>Onboarding needs attention</strong><p>{formError}</p></section>}
+        {formError && <section className="card form-error" role="alert"><strong>Operator action needs attention</strong><p>{formError}</p></section>}
         {loading && <p role="status">Loading aggregate platform data…</p>}
         {error && (
           <section className="card availability-card" role="alert">
@@ -111,7 +186,7 @@ function Overview() {
         )}
         {!loading && !error && !data && <p role="status">No platform data is available.</p>}
 
-        {data && (
+        {data && activeView === 'overview' && (
           <>
             <div className="kpi-grid">
               {metrics.map((metric) => (
@@ -133,7 +208,7 @@ function Overview() {
                         <div className="organization-details">
                           <strong>{organization.name}</strong>
                           <small>{organization.city ?? 'City not set'} · {organization.estimatedUnits ?? '—'} estimated units · {organization.plan_name}</small>
-                          <small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small>
+                          <small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.inviteAcceptedAt ? 'Invitation accepted' : organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small>
                           {organization.provisioningError && <small className="inline-error">{organization.provisioningError}</small>}
                         </div>
                         <div className="organization-actions">
@@ -157,10 +232,36 @@ function Overview() {
             </div>
             <section className="card availability-card">
               <h2>Other operator actions are gated</h2>
-              <p>Organization workspace provisioning and Auth0 administrator invitations are enabled. Lifecycle changes, campaign publication, and audit exports are not yet wired as executable actions. No database locator or resident details are exposed by this overview.</p>
+              <p>Organization workspace provisioning, deactivation, and deletion are enabled. Campaign publication is not configured. No database locator or resident details are exposed by this overview.</p>
             </section>
           </>
         )}
+        {data && activeView === 'organizations' && (
+          <>
+            <div className="kpi-grid three slim">
+              <article className="card kpi-card"><span>Total organizations</span><strong>{data.organizationCount}</strong><small>{data.activeOrganizationCount} active</small></article>
+              <article className="card kpi-card"><span>In onboarding</span><strong>{data.onboardingCount}</strong><small>Awaiting activation</small></article>
+              <article className="card kpi-card"><span>Setup exceptions</span><strong>{data.provisioningFailures}</strong><small>Require operator review</small></article>
+            </div>
+            <section className="card panel-card">
+              <div className="organization-tools"><label className="organization-search"><span aria-hidden="true">⌕</span><input aria-label="Search organizations" placeholder="Search organizations…" value={organizationSearch} onChange={(event) => setOrganizationSearch(event.target.value)} /></label><select aria-label="Filter organizations by status" value={organizationStatus} onChange={(event) => setOrganizationStatus(event.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="onboarding">Onboarding</option><option value="inactive">Inactive</option><option value="deleting">Deleting</option></select></div>
+              <div className="card-header"><div><h2>Organizations</h2><span>{data.organizationCount} registered tenant workspaces</span></div></div>
+              {data.organizations.length === 0 ? <p>No organizations have been provisioned.</p> : <ul className="stack-list">{data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).map((organization) => <li key={organization.id}><div className="organization-details"><strong>{organization.name}</strong><small>{organization.city ?? 'City not set'} · {organization.estimatedUnits ?? '—'} units · {organization.plan_name}</small><small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.inviteAcceptedAt ? 'Invitation accepted' : organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small></div><div className="organization-actions"><span className="status-pill">{organization.status}</span>{organization.status === 'inactive' ? <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'reactivate')}>Reactivate</button> : organization.status === 'active' && <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'deactivate')}>Deactivate</button>}<button type="button" className="secondary-button danger-button" disabled={retrying === organization.id || organization.status === 'deleting'} onClick={() => void changeOrganization(organization, 'delete')}>{retrying === organization.id ? 'Working…' : 'Delete permanently'}</button></div></li>)}</ul>}
+              {data.organizations.length > 0 && data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).length === 0 && <p>No organizations match these filters.</p>}
+            </section>
+          </>
+        )}
+        {data && activeView === 'provisioning' && (
+          <section className="card panel-card"><div className="card-header"><div><h2>Tenant provisioning</h2><span>{data.provisioningFailures} failed setup attempts</span></div></div>
+            {data.organizations.filter((organization) => organization.provisioningStatus === 'failed').length === 0 ? <p>No provisioning failures need attention.</p> : <ul className="stack-list">{data.organizations.filter((organization) => organization.provisioningStatus === 'failed').map((organization) => <li key={organization.id}><div className="organization-details"><strong>{organization.name}</strong><small>{organization.provisioningError ?? 'Provisioning failed without a recorded reason'}</small></div><div className="organization-actions"><span className="status-pill">Failed</span>{!organization.invitedAt && <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void retryOnboarding(organization.id)}>{retrying === organization.id ? 'Retrying…' : 'Retry setup'}</button>}</div></li>)}</ul>}
+          </section>
+        )}
+        {activeView === 'campaigns' && <section className="section-stack"><div className="prototype-policy"><strong>Resident trust policy</strong><span>Sponsored content must be clearly labelled and cannot replace essential community notices.</span></div><section className="card availability-card"><h2>Campaign management is not configured</h2><p>Campaign drafts, review, targeting, and publishing need a platform campaign service. No sample campaigns or delivery metrics are shown here.</p></section></section>}
+        {activeView === 'monetization' && <section className="card availability-card"><h2>Platform monetization is unavailable</h2><p>{data?.revenueUnavailableReason ?? 'Revenue data is not available.'} Tenant collections remain separate from platform revenue.</p></section>}
+        {activeView === 'transactions' && <section className="card availability-card"><h2>Platform transaction reporting is unavailable</h2><p>Tenant payment records are scoped to each organization and are not aggregated into this operator console.</p></section>}
+        {activeView === 'support' && <section className="card availability-card"><h2>Support queue is not configured</h2><p>No support ticket service is connected to this platform yet.</p></section>}
+        {activeView === 'audit' && <AuditPanel />}
+        {activeView === 'settings' && <section className="card availability-card"><h2>Platform settings</h2><p>Operator access and service configuration are managed through server-side deployment settings.</p></section>}
       </section>
       {onboardingOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
@@ -184,7 +285,7 @@ function Overview() {
                 <p className="modal-description">Create an isolated tenant workspace and invite its first administrator.</p>
                 <form onSubmit={(event) => void submitOnboarding(event)}>
                   <div className="form-grid">
-                    <label className="form-field"><span>Organization name</span><input name="name" required minLength={2} maxLength={120} autoFocus /></label>
+                    <label className="form-field"><span>Organization name</span><input name="name" required minLength={2} maxLength={120} autoFocus /><small>Each organization must have a unique name.</small></label>
                     <label className="form-field"><span>City</span><input name="city" required minLength={2} maxLength={100} /></label>
                     <label className="form-field"><span>Admin email</span><input name="adminEmail" type="email" required maxLength={254} /></label>
                     <label className="form-field"><span>Estimated units</span><input name="estimatedUnits" type="number" min={1} max={200000} step={1} required /></label>

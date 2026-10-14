@@ -34,11 +34,17 @@ to deliver operator-created administrator invitation links.
 1. In a **non-production** Auth0 tenant, create two Single Page Applications:
    one for the resident/admin web app and one for the operator web app.
 2. Enable the Auth0 **Email (passwordless)** connection on the resident/admin
-   SPA and configure email OTP delivery. Admin sign-in explicitly selects this
-   connection, so administrators enter an email and its one-time code; they do
+   SPA and configure email OTP delivery. Admin sign-in uses an embedded email
+   and one-time-code form; administrators enter the code in the Nivasa app. They do
    not use a username or password. Do not use Auth0 Organization invitations
    for this flow because Auth0 does not support passwordless connections for
-   Organization invitations.
+   Organization invitations. In the SPA's Auth0 application settings, set
+   **Organization Usage** to **No Organization**. Nivasa creates tenant
+   organizations and administrator memberships in its own database. The
+   operator SPA must also allow sign-in without an Auth0 Organization. For the
+   resident/admin SPA, enable the **Passwordless OTP** grant under
+   **Advanced Settings → Grant Types**, and add `http://localhost:3100` under
+   **Allowed Origins (CORS)**. Add the deployed admin origin to CORS as well.
 3. Create or configure a custom Auth0 API whose identifier is
    `https://api.nivasa.local`. Use that exact identifier for the API audience.
 4. For each SPA, allow its local origin as a Callback URL, Logout URL, and Web
@@ -50,7 +56,10 @@ to deliver operator-created administrator invitation links.
    set it in `OPERATOR_IDS`. It is a subject identifier (for example,
    `auth0|...`), not an email or a token.
 6. Create a non-production Auth0 Machine-to-Machine application and authorize
-   it for the Auth0 Management API with only `create:users` and `read:users`.
+   it for the Auth0 Management API with `create:users`, `read:users`, and
+   `delete:users`. Deletion removes only a dedicated passwordless account for
+   the organization administrator; it retains identities shared by another
+   platform tenant or linked to another Auth0 connection.
    Set its client ID and secret in `AUTH0_MGMT_CLIENT_ID` and
    `AUTH0_MGMT_CLIENT_SECRET`. Keep the passwordless Email connection's signup
    toggle disabled; the API creates each invited email identity through the
@@ -109,7 +118,7 @@ connections.
 | `AUTH0_ADMIN_CLIENT_ID` | Client ID of the resident/admin SPA. |
 | `AUTH0_OPERATOR_CLIENT_ID` | Client ID of the operator SPA. |
 | `AUTH0_CLIENT_ID` | Optional compatibility fallback for the admin SPA; prefer setting `AUTH0_ADMIN_CLIENT_ID`. |
-| `AUTH0_MGMT_CLIENT_ID`, `AUTH0_MGMT_CLIENT_SECRET` | Credentials for a dedicated Auth0 Machine-to-Machine application authorized for the Management API with `create:users` and `read:users` only. Enable the Email passwordless connection for this M2M client. Keep the secret server-side. |
+| `AUTH0_MGMT_CLIENT_ID`, `AUTH0_MGMT_CLIENT_SECRET` | Credentials for a dedicated Auth0 Machine-to-Machine application authorized for the Management API with `create:users`, `read:users`, and `delete:users`. Enable the Email passwordless connection for this M2M client. Keep the secret server-side. The API only deletes a dedicated admin identity that is not shared with another platform tenant or Auth0 connection. |
 | `AUTH0_PASSWORDLESS_CONNECTION` | Exact name of the Auth0 Email passwordless connection used by the admin SPA; normally `email`. |
 | `AUTH0_OTP_ENABLED` | Legacy setting; browser login selects Auth0's `email` passwordless connection directly. Configure and enable that connection on the admin SPA in Auth0. |
 | `RESEND_API_KEY`, `RESEND_FROM` | Configure a development Resend key and verified sender to deliver organization administrator invitation links. |
@@ -117,17 +126,44 @@ connections.
 | `OPERATOR_ID` | Legacy single-operator fallback used only when `OPERATOR_IDS` is empty. Prefer `OPERATOR_IDS`, including for one operator. |
 | `AUTH0_REDIRECT_URI`, `AUTH0_OPERATOR_REDIRECT_URI` | The template includes these for reference, but the current Compose setup derives the actual SPA redirect URIs from `ADMIN_WEB_PUBLIC_URL` and `OPERATOR_WEB_PUBLIC_URL`. Keep them aligned if retaining them; do not rely on them to override the app URLs. |
 
+To reject unapproved identities during the Auth0 login transaction, add a
+**Post Login** Action and bind it to the Login flow. Add Action secrets
+`OPERATOR_CLIENT_ID` (the operator SPA client ID) and `OPERATOR_IDS` (the same
+comma-separated Auth0 `sub` values configured for the API). Use this Action:
+
+```js
+exports.onExecutePostLogin = async (event, api) => {
+  if (event.client.client_id !== event.secrets.OPERATOR_CLIENT_ID) return
+
+  const approvedIds = (event.secrets.OPERATOR_IDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+
+  if (!approvedIds.includes(event.user.user_id)) {
+    api.access.deny('This account is not approved for platform operator access.')
+  }
+}
+```
+
+The operator app also checks the API allowlist before rendering its console,
+and every operator API route continues to enforce the same allowlist. The
+Auth0 Action prevents an unapproved identity from completing the operator
+login transaction; the app check provides a clear denied screen if the Action
+is not installed or misconfigured.
+
 The admin and operator applications use separate client IDs. A configured
 Auth0 domain and client ID let the UI initiate sign-in; the API additionally
 validates the configured issuer and audience on protected requests.
 Organization onboarding creates a tenant database from `tenant_template`,
 pre-creates the administrator in Auth0's passwordless Email connection using
 the Management API, then sends a seven-day, single-use invitation link via
-Resend. Passwordless connection signup remains disabled; the Auth0 OTP login
-proves mailbox access, and accepting the app invitation is still required for
-membership. The API verifies the access token with Auth0, requires a verified
-email matching the invite, and atomically creates
-the tenant admin membership. If a step fails after the platform record is
+Resend. Resident invitations use the same Auth0 user provisioning and email
+delivery integrations. Passwordless connection signup remains disabled; the
+Auth0 OTP login proves mailbox access, and accepting the app invitation is
+still required for membership. The API verifies the access token with Auth0,
+requires a verified email matching the invite, and atomically creates the
+tenant admin membership. If a step fails after the platform record is
 created, the console reports the error and offers **Retry setup** where safe.
 
 ### External provider placeholders

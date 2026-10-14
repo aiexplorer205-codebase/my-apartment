@@ -60,8 +60,29 @@ docker compose exec -T postgres psql -U postgres -d platform_db \
   -f /migrations/platform_db/004_email_otp_admin_invites.sql
 docker compose exec -T postgres psql -U postgres -d tenant_template \
   -v ON_ERROR_STOP=1 -f /migrations/tenant_db/001_init_tenant.sql \
-  -f /migrations/tenant_db/002_mvp_product.sql
+  -f /migrations/tenant_db/002_mvp_product.sql \
+  -f /migrations/tenant_db/003_apartments.sql \
+  -f /migrations/tenant_db/004_resident_invitations.sql
 ```
+
+The template migration only affects tenant databases created afterward. To
+upgrade an existing tenant, first identify its database name in
+`platform_db`, then apply the apartment and resident-invitation migrations to
+that database:
+
+```sh
+docker compose exec -T postgres psql -U postgres -d platform_db \
+  -c 'SELECT tenant_id, org_name, database_name FROM tenant_records ORDER BY org_name'
+docker compose exec -T postgres psql -U postgres -d YOUR_TENANT_DATABASE \
+  -v ON_ERROR_STOP=1 -f /migrations/tenant_db/003_apartments.sql \
+  -f /migrations/tenant_db/004_resident_invitations.sql
+```
+
+Replace `YOUR_TENANT_DATABASE` with the `database_name` for the organization
+you selected in the admin app. The migration is idempotent and preserves
+existing tenant data. Rebuild and restart the API after changing API code with
+`docker compose up --build -d api`; rebuilding only the web image does not
+update the API running on port 4101.
 
 ### Auth0 local setup
 

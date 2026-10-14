@@ -12,7 +12,7 @@ The approved decision backlog is tracked in [ADR-0001: Production readiness deci
 | Production availability/SLA | OCI cost-constrained profile; no HA or SLA promise | Customer-facing availability commitments |
 | RPO, RTO, backup retention, and legal hold | Must be set by data owner; no numeric targets assumed | Production operations and customer contracts |
 | Tenant domain / host routing policy | Resolve tenant from verified host or membership-backed selection; custom-domain policy TBD | Custom domains or tenant vanity URLs |
-| User membership invitation policy | Admin invitations are in prototype; identity verification and invitation expiry need a product/security decision | Production invitations |
+| User membership invitation policy | Resident invitations use a single-use seven-day email link and verified Email OTP; SMS/WhatsApp invitations are disabled | Changes to verification, expiry, or delivery channels |
 | Currency and locale rollout | India/INR default; model locale/currency per tenant | Any launch outside the India/INR baseline |
 | Support access to tenant data | Default deny; any elevation must be approved, scoped, time-limited, and audited | Tenant-scoped operator support tools |
 | Data retention/deletion and export | Implement tenant-scoped export and audited deletion workflow; retention duration TBD | Customer contracts and production deletion |

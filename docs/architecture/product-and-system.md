@@ -46,10 +46,23 @@ for user experience only.
 - Overview: billed, collected, outstanding, and overdue totals; collection
   trends; unit payment status; recent transactions; export and navigation to
   relevant work queues.
-- Buildings and units: create/manage property hierarchy, occupancy and unit
-  metadata, rates, CSV import, validation errors, and resident association.
-- Residents: invite, search, filter by building/occupancy, inspect unit
-  assignment and payment status, and manage access.
+- Buildings and units: apartment setup is a three-stage flow: collect the
+  apartment name, city, address, and billing start month; configure the first
+  building's name, floor count, units per floor, unit prefix/number format, and
+  optional standard maintenance rate per square foot; then create and confirm
+  the apartment, building, and vacant units. Unit labels use
+  `PREFIX-FLOORUNIT` (for example `A-0101`), and the API caps generation at
+  20,000 units per request. Creation is atomic. It does not start billing or
+  notify residents. Continue to support subsequent building/unit management,
+  occupancy and unit metadata, rates, CSV import, validation errors, and
+  resident association.
+- Residents: invite by email to a selected building/unit with owner/tenant
+  occupancy and optional phone details. Invitation links are single-use,
+  expire after seven days, and require Email OTP verification of the invited
+  address before creating a resident account and tenant membership. Email is
+  the only enabled invitation channel; SMS/WhatsApp delivery remains disabled.
+  Search/filter by building/occupancy, inspect unit assignment and payment
+  status, and manage access.
 - Billing: configure charge rules and due dates; preview a billing run; surface
   exceptions; publish invoices only after an explicit authorized confirmation;
   enqueue resident notifications.

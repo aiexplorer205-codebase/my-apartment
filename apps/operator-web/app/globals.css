@@ -505,3 +505,59 @@ h1 {
     flex-direction: column;
   }
 }
+
+/* Operator workspace styled to match the Figma operations prototype. */
+:root { --bg: #f7f8fa; --panel: #fff; --panel-alt: #f7f7ff; --border: #e5e7ec; --text: #20212a; --muted: #6b6f7c; --primary: #4f46e5; --primary-soft: #eef0ff; --success: #16845b; --warning: #b66a10; }
+body { background: #f7f8fa; color: #20212a; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.session-bar { min-height: 56px; justify-content: space-between; padding: 0 22px; background: #171822; color: #d8dae2; border: 0; }
+.session-brand, .session-account { display: flex; align-items: center; gap: 10px; }
+.session-brand { color: #fff; font-size: 14px; }
+.session-brand .brand-mark { border-radius: 8px; background: #4f46e5; }
+.session-brand small { margin-left: 5px; color: #aeb1bf; font-size: 9px; letter-spacing: .08em; }
+.session-account > span { color: #c6c8d1; font-size: 11px; }
+.session-bar .secondary-button { padding: 7px 10px; color: #e3e4e9; background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.14); font-size: 11px; }
+.operator-shell { grid-template-columns: 220px minmax(0,1fr); min-height: calc(100vh - 56px); background: #f7f8fa; }
+.operator-sidebar { position: sticky; top: 0; height: calc(100vh - 56px); min-height: 580px; display: flex; flex-direction: column; padding: 20px 12px 14px; color: #20212a; background: #fff; border-right: 1px solid #e5e7ec; }
+.operator-sidebar .brand-row { gap: 10px; margin: 0 8px 17px; font-size: 15px; }
+.operator-sidebar .brand-row > span:last-child { display: grid; gap: 2px; }.operator-sidebar .brand-row small { color: #9699a5; font-size: 8px; letter-spacing: .08em; }
+.operator-sidebar .brand-mark { width: 28px; height: 28px; border-radius: 8px; background: #4f46e5; }
+.operator-tenant { margin: 0 0 14px; padding: 9px; border: 1px solid #dadcf4; border-radius: 9px; background: #f6f6fe; color: #4d4a9b; font-size: 10px; font-weight: 600; }
+.tenant-shield { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; background: #e9e9fb; color: #4f46e5; font-weight: 700; }
+.operator-sidebar .nav-list { flex: 1; gap: 3px; }
+.operator-sidebar .nav-item { min-height: 36px; padding: 0 10px; border-radius: 7px; color: #676a76; font-size: 12px; font-weight: 500; opacity: 1; }
+.operator-sidebar .nav-item.active { background: #f0effc; color: #403c9e; font-weight: 650; }
+.operator-sidebar .sidebar-account { display: flex; align-items: center; gap: 9px; margin-top: auto; padding: 12px 7px 2px; border-top: 1px solid #e5e7ec; }
+.operator-sidebar .sidebar-account > span:nth-child(2) { display: grid; gap: 3px; }.operator-sidebar .sidebar-account strong { font-size: 10px; }.operator-sidebar .sidebar-account small { color: #9699a5; font-size: 9px; }
+.account-avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #e7e9f8; color: #4c4ba3; font-size: 10px; font-weight: 700; }
+.operator-shell > .content-panel { min-width: 0; padding: 24px 28px 48px; }
+.operator-shell .topbar { position: sticky; top: 0; z-index: 10; min-height: 58px; margin: -24px -28px 22px; padding: 12px 28px; border-bottom: 1px solid #e5e7ec; background: rgba(255,255,255,.96); }
+.operator-shell .topbar h1 { margin: 3px 0 0; font-size: 21px; letter-spacing: -.035em; }
+.operator-shell .eyebrow { color: #9699a5; font-size: 9px; letter-spacing: .12em; }
+.operator-shell .card { border-radius: 12px; box-shadow: 0 1px 2px rgba(18,24,40,.03); }
+.operator-shell .kpi-grid { gap: 12px; margin-bottom: 14px; }.operator-shell .kpi-card { min-height: 116px; padding: 15px; border-radius: 12px; }
+.operator-shell .kpi-card span { color: #6b6f7c; font-size: 11px; }.operator-shell .kpi-card strong { font-size: 22px; letter-spacing: -.03em; }.operator-shell .kpi-card small { color: #9699a5; font-size: 10px; }
+.operator-shell .panel-grid { gap: 14px; }.operator-shell .panel-card { padding: 16px; }.operator-shell .card-header h2 { margin: 0; font-size: 14px; }.operator-shell .card-header span { font-size: 10px; }
+.operator-shell .nav-item:focus-visible, .operator-shell button:focus-visible, .admin-shell button:focus-visible { outline: 3px solid rgba(79,70,229,.25); outline-offset: 2px; }
+.operator-shell .secondary-button, .operator-shell .primary-button { border-radius: 8px; padding: 9px 12px; font-size: 11px; }.operator-shell .primary-button { background: #4f46e5; }.operator-shell .secondary-button { border-color: #dfe1e7; }
+.operator-shell .danger-button { color: #b42318; border-color: #f0c3c1; background: #fff8f7; }
+.operator-shell .status-pill { padding: 5px 8px; background: #eef0ff; color: #4f46e5; border-radius: 99px; font-size: 10px; }
+.operator-shell .stack-list { gap: 0; }.operator-shell .stack-list li { align-items: center; padding: 13px 0; border-bottom-color: #eceef1; }
+.operator-shell .organization-details strong { font-size: 12px; }.operator-shell .organization-details small { color: #777b87; font-size: 10px; }
+.organization-tools { display: flex; gap: 8px; margin: 0 0 14px; }.organization-tools select { min-width: 135px; padding: 0 11px; border: 1px solid #e5e7ec; border-radius: 8px; background: white; color: #555864; font-size: 11px; }
+.organization-search { display: flex; align-items: center; flex: 1; gap: 8px; min-height: 38px; padding: 0 11px; border: 1px solid #e5e7ec; border-radius: 8px; color: #9699a5; }.organization-search input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 11px; }
+.section-stack { display: grid; gap: 14px; }.prototype-policy { display: grid; gap: 5px; padding: 13px 15px; border: 1px solid #ddddf3; border-radius: 10px; background: #f7f7ff; color: #4f46e5; }.prototype-policy strong { font-size: 12px; }.prototype-policy span { color: #6b6f7c; font-size: 11px; }
+@media (max-width: 900px) {
+  .operator-shell { grid-template-columns: 1fr; }
+  .operator-sidebar { position: relative; top: auto; height: auto; min-height: 0; padding: 14px; }
+  .operator-sidebar .brand-row { margin-bottom: 11px; }
+  .operator-tenant, .operator-sidebar .sidebar-account { display: none; }
+  .operator-sidebar .nav-list { flex-direction: row; overflow-x: auto; }
+  .operator-sidebar .nav-item { flex: 0 0 auto; }
+  .operator-shell > .content-panel { padding: 18px; }
+  .operator-shell .topbar { margin: -18px -18px 18px; padding: 12px 18px; }
+}
+@media (max-width: 600px) {
+  .organization-tools { align-items: stretch; flex-direction: column; }
+  .organization-tools select { min-height: 38px; }
+  .operator-shell .stack-list li { align-items: flex-start; }
+}

@@ -533,6 +533,8 @@ function ResidentApp() {
           {screen === "Home" && (
             <ResidentHome
               onPay={() => navigate("Payments")}
+              onHistory={() => navigate("History")}
+              onNotices={() => navigate("Notices")}
               adVariant={adVariant}
             />
           )}
@@ -587,6 +589,9 @@ function MobileHeader({
 }
 
 function SponsoredCard({ variant }: { variant: string }) {
+  const [visible, setVisible] = useState(true)
+  const [opened, setOpened] = useState(false)
+  if (!visible) return null
   if (variant === "B")
     return (
       <div className="sponsor-card recommendation">
@@ -598,10 +603,12 @@ function SponsoredCard({ variant }: { variant: string }) {
           <b>AC service from UrbanCare</b>
           <small>Verified technicians · From ₹499</small>
         </div>
-        <button className="close-ad">
+        <button className="close-ad" onClick={() => setVisible(false)}>
           <Icon name="close" size={14} />
         </button>
-        <Button variant="secondary">View offer</Button>
+        <Button variant="secondary" onClick={() => setOpened(true)}>
+          {opened ? "Offer saved" : "View offer"}
+        </Button>
       </div>
     )
   return (
@@ -621,9 +628,13 @@ function SponsoredCard({ variant }: { variant: string }) {
 
 function ResidentHome({
   onPay,
+  onHistory,
+  onNotices,
   adVariant,
 }: {
   onPay: () => void
+  onHistory: () => void
+  onNotices: () => void
   adVariant: string
 }) {
   return (
@@ -651,7 +662,7 @@ function ResidentHome({
       <section className="mobile-section">
         <div className="section-heading">
           <span>Recent payments</span>
-          <button>View all</button>
+          <button onClick={onHistory}>View all</button>
         </div>
         <div className="list-card">
           <div className="payment-list-row">
@@ -685,7 +696,7 @@ function ResidentHome({
       <section className="mobile-section">
         <div className="section-heading">
           <span>Community announcements</span>
-          <button>See all</button>
+          <button onClick={onNotices}>See all</button>
         </div>
         <div className="announcement">
           <span className="announcement-date">12 JUN</span>
@@ -719,6 +730,8 @@ function ResidentPayment({
   setStep: (s: "review" | "method" | "processing" | "success") => void
   goHistory: () => void
 }) {
+  const [method, setMethod] = useState<"UPI" | "Card" | "Net banking">("UPI")
+  const [downloaded, setDownloaded] = useState(false)
   if (step === "success")
     return (
       <div className="success-screen">
@@ -749,8 +762,8 @@ function ResidentPayment({
             <b>Maple Heights · B-1204</b>
           </div>
         </div>
-        <Button wide icon="download">
-          Download receipt
+        <Button wide icon={downloaded ? "check" : "download"} onClick={() => setDownloaded(true)}>
+          {downloaded ? "Receipt downloaded" : "Download receipt"}
         </Button>
         <Button wide variant="ghost" onClick={goHistory}>
           View payment history
@@ -834,32 +847,41 @@ function ResidentPayment({
           </div>
           <div className="method-section">
             <span className="field-label">RECOMMENDED</span>
-            <button className="payment-method selected">
+            <button
+              className={`payment-method ${method === "UPI" ? "selected" : ""}`}
+              onClick={() => setMethod("UPI")}
+            >
               <span className="upi-logo">UPI</span>
               <span>
                 <b>UPI</b>
                 <small>Google Pay, PhonePe, BHIM or any UPI app</small>
               </span>
-              <span className="radio checked" />
+              <span className={`radio ${method === "UPI" ? "checked" : ""}`} />
             </button>
           </div>
           <div className="method-section">
             <span className="field-label">OTHER METHODS</span>
-            <button className="payment-method">
+            <button
+              className={`payment-method ${method === "Card" ? "selected" : ""}`}
+              onClick={() => setMethod("Card")}
+            >
               <Icon name="card" />
               <span>
                 <b>Credit or debit card</b>
                 <small>Visa, Mastercard, RuPay</small>
               </span>
-              <span className="radio" />
+              <span className={`radio ${method === "Card" ? "checked" : ""}`} />
             </button>
-            <button className="payment-method">
+            <button
+              className={`payment-method ${method === "Net banking" ? "selected" : ""}`}
+              onClick={() => setMethod("Net banking")}
+            >
               <Icon name="building" />
               <span>
                 <b>Net banking</b>
                 <small>All major Indian banks</small>
               </span>
-              <span className="radio" />
+              <span className={`radio ${method === "Net banking" ? "checked" : ""}`} />
             </button>
           </div>
           <div className="safe-payment">
@@ -887,6 +909,7 @@ function ResidentPayment({
 
 function ResidentHistory() {
   const [filter, setFilter] = useState("All")
+  const [downloaded, setDownloaded] = useState<string | null>(null)
   return (
     <div className="mobile-page">
       <MobileHeader greeting="Payment history" sub="Invoices and receipts" />
@@ -916,8 +939,14 @@ function ResidentHistory() {
             </div>
             <div className="row-end">
               <b>{money(4250)}</b>
-              <button className="download-button">
-                <Icon name="download" size={15} />
+              <button
+                className="download-button"
+                onClick={() => setDownloaded(month)}
+              >
+                <Icon
+                  name={downloaded === month ? "check" : "download"}
+                  size={15}
+                />
               </button>
             </div>
           </div>
@@ -932,15 +961,20 @@ function ResidentHistory() {
 }
 
 function ResidentNotices() {
+  const [read, setRead] = useState(false)
   return (
     <div className="mobile-page">
       <MobileHeader greeting="Notifications" sub="Maple Heights" />
       <div className="notification-filter">
-        <Badge tone="info">3 new</Badge>
-        <button>Mark all as read</button>
+        <Badge tone={read ? "neutral" : "info"}>
+          {read ? "All read" : "3 new"}
+        </Badge>
+        <button onClick={() => setRead(true)}>
+          {read ? "Marked as read" : "Mark all as read"}
+        </button>
       </div>
       <div className="notice-list">
-        <div className="notice unread">
+        <div className={`notice ${read ? "" : "unread"}`}>
           <div className="notice-icon success">
             <Icon name="check" />
           </div>
@@ -950,7 +984,7 @@ function ResidentNotices() {
             <span>2 hours ago</span>
           </div>
         </div>
-        <div className="notice unread">
+        <div className={`notice ${read ? "" : "unread"}`}>
           <div className="notice-icon warning">
             <Icon name="bell" />
           </div>
@@ -976,6 +1010,7 @@ function ResidentNotices() {
 }
 
 function ResidentProfile() {
+  const [selected, setSelected] = useState<string | null>(null)
   return (
     <div className="mobile-page">
       <MobileHeader greeting="Profile" sub="Account and preferences" />
@@ -986,7 +1021,7 @@ function ResidentProfile() {
           <span>Primary resident · B-1204</span>
           <small>ananya.mehta@example.com</small>
         </div>
-        <button>
+        <button onClick={() => setSelected("Personal details")}>
           <Icon name="chevron" />
         </button>
       </div>
@@ -997,7 +1032,7 @@ function ResidentProfile() {
           ["bell", "Notification preferences"],
           ["card", "Saved payment methods"],
         ].map(([icon, label]) => (
-          <button key={label}>
+          <button key={label} onClick={() => setSelected(label)}>
             <Icon name={icon} />
             <b>{label}</b>
             <Icon name="chevron" size={16} />
@@ -1011,7 +1046,7 @@ function ResidentProfile() {
           ["shield", "Privacy and data"],
           ["megaphone", "Ad preferences"],
         ].map(([icon, label]) => (
-          <button key={label}>
+          <button key={label} onClick={() => setSelected(label)}>
             <Icon name={icon} />
             <b>{label}</b>
             <Icon name="chevron" size={16} />
@@ -1022,6 +1057,26 @@ function ResidentProfile() {
         <Icon name="shield" />
         Your data is visible only to Maple Heights administrators.
       </div>
+      {selected && (
+        <div className="profile-detail-panel">
+          <div>
+            <b>{selected}</b>
+            <button onClick={() => setSelected(null)}>
+              <Icon name="close" size={14} />
+            </button>
+          </div>
+          <p>
+            {selected === "Ad preferences"
+              ? "Sponsored recommendations are frequency capped. Personalized payment targeting is always disabled."
+              : selected === "Notification preferences"
+                ? "Payment receipts, due reminders, and official apartment notices are enabled."
+                : "Your current information is verified and securely managed by Maple Heights."}
+          </p>
+          <Button wide variant="secondary" onClick={() => setSelected(null)}>
+            Done
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1471,6 +1526,7 @@ function TransactionTable({
 function AdminCollections({ setPage }: { setPage: (p: string) => void }) {
   const [resolve, setResolve] = useState(false)
   const [resolved, setResolved] = useState(false)
+  const [offline, setOffline] = useState<"form" | "success" | null>(null)
   return (
     <>
       <PageTitle
@@ -1481,7 +1537,9 @@ function AdminCollections({ setPage }: { setPage: (p: string) => void }) {
             <Button variant="secondary" icon="download">
               Export CSV
             </Button>
-            <Button icon="plus">Record offline payment</Button>
+            <Button icon="plus" onClick={() => setOffline("form")}>
+              Record offline payment
+            </Button>
           </>
         }
       />
@@ -1585,6 +1643,62 @@ function AdminCollections({ setPage }: { setPage: (p: string) => void }) {
                 </Button>
                 <Button onClick={() => setResolved(true)}>
                   Record resolution
+                </Button>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
+      {offline && (
+        <Modal
+          title={
+            offline === "success"
+              ? "Payment recorded"
+              : "Record offline payment"
+          }
+          onClose={() => setOffline(null)}
+        >
+          {offline === "success" ? (
+            <FlowSuccess
+              title="Offline payment added"
+              copy="₹4,250 has been applied to unit C-0305. The resident ledger and audit log are updated."
+              action="View collection"
+              onDone={() => setOffline(null)}
+            />
+          ) : (
+            <>
+              <div className="form-grid">
+                <label className="field">
+                  <span>Resident or unit</span>
+                  <input defaultValue="Sneha Iyer · C-0305" />
+                </label>
+                <label className="field">
+                  <span>Amount</span>
+                  <input defaultValue="₹4,250" />
+                </label>
+                <label className="field">
+                  <span>Payment method</span>
+                  <select defaultValue="bank">
+                    <option value="bank">Bank transfer</option>
+                    <option>Cheque</option>
+                    <option>Cash</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Reference number</span>
+                  <input defaultValue="NEFT2406081934" />
+                </label>
+                <label className="field full">
+                  <span>Internal note</span>
+                  <textarea defaultValue="Confirmed in association bank statement." />
+                </label>
+              </div>
+              <div className="modal-actions">
+                <Button variant="secondary" onClick={() => setOffline(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={() => setOffline("success")}>
+                  Record payment
                 </Button>
               </div>
             </>
@@ -1897,7 +2011,16 @@ function AdminBilling({ setPage }: { setPage: (p: string) => void }) {
 }
 
 function AdminBuildings() {
-  const [modal, setModal] = useState(false)
+  const [flow, setFlow] = useState<
+    "details" | "units" | "success" | "import" | "manage" | null
+  >(null)
+  const [added, setAdded] = useState(false)
+  const buildings = [
+    ["Tower A", "84 units", "81 occupied"],
+    ["Tower B", "87 units", "84 occupied"],
+    ["Tower C", "84 units", "78 occupied"],
+    ...(added ? [["Lakeview Block A", "48 units", "0 occupied"]] : []),
+  ]
   return (
     <>
       <PageTitle
@@ -1905,21 +2028,21 @@ function AdminBuildings() {
         subtitle="Manage property structure, occupancy, and rates."
         actions={
           <>
-            <Button variant="secondary" icon="download">
+            <Button
+              variant="secondary"
+              icon="download"
+              onClick={() => setFlow("import")}
+            >
               Import CSV
             </Button>
-            <Button icon="plus" onClick={() => setModal(true)}>
+            <Button icon="plus" onClick={() => setFlow("details")}>
               Add apartment
             </Button>
           </>
         }
       />
       <div className="building-cards">
-        {[
-          ["Tower A", "84 units", "81 occupied"],
-          ["Tower B", "87 units", "84 occupied"],
-          ["Tower C", "84 units", "78 occupied"],
-        ].map((x, i) => (
+        {buildings.map((x, i) => (
           <div className="building-card card" key={x[0]}>
             <div className="building-visual">
               <Icon name="building" size={32} />
@@ -1931,11 +2054,11 @@ function AdminBuildings() {
                 {x[1]} · {x[2]}
               </span>
               <div className="occupancy-bar">
-                <i style={{ width: `${96 - i * 2}%` }} />
+                <i style={{ width: added && i === 3 ? "0%" : `${96 - i * 2}%` }} />
               </div>
-              <small>{96 - i * 2}% occupied</small>
+              <small>{added && i === 3 ? 0 : 96 - i * 2}% occupied</small>
             </div>
-            <Button variant="ghost">
+            <Button variant="ghost" onClick={() => setFlow("manage")}>
               Manage <Icon name="chevron" size={14} />
             </Button>
           </div>
@@ -1947,40 +2070,114 @@ function AdminBuildings() {
         </div>
         <b>Add another building</b>
         <p>Create floors and units, then invite residents to get started.</p>
-        <Button variant="secondary" onClick={() => setModal(true)}>
+        <Button variant="secondary" onClick={() => setFlow("details")}>
           Add building
         </Button>
       </div>
-      {modal && (
-        <Modal title="Create apartment" onClose={() => setModal(false)}>
-          <div className="form-grid">
-            <label className="field">
-              <span>Apartment name</span>
-              <input defaultValue="Lakeview Residency" />
-            </label>
-            <label className="field">
-              <span>City</span>
-              <input defaultValue="Pune" />
-            </label>
-            <label className="field">
-              <span>Number of buildings</span>
-              <input defaultValue="2" />
-            </label>
-            <label className="field">
-              <span>Billing start month</span>
-              <select>
-                <option>July 2025</option>
-              </select>
-            </label>
-          </div>
-          <div className="modal-actions">
-            <Button variant="secondary" onClick={() => setModal(false)}>
-              Cancel
-            </Button>
-            <Button onClick={() => setModal(false)}>
-              Create and add units
-            </Button>
-          </div>
+      {flow && (
+        <Modal
+          title={
+            flow === "details"
+              ? "Create apartment"
+              : flow === "units"
+                ? "Set up buildings and units"
+                : flow === "import"
+                  ? "Import units from CSV"
+                  : flow === "manage"
+                    ? "Manage Tower A"
+                    : "Apartment created"
+          }
+          onClose={() => setFlow(null)}
+        >
+          {flow === "details" && (
+            <>
+              <div className="flow-steps">
+                <b>1</b><span /><i>2</i><span /><i>3</i>
+              </div>
+              <div className="form-grid">
+                <label className="field">
+                  <span>Apartment name</span>
+                  <input defaultValue="Lakeview Residency" />
+                </label>
+                <label className="field">
+                  <span>City</span>
+                  <input defaultValue="Pune" />
+                </label>
+                <label className="field">
+                  <span>Address</span>
+                  <input defaultValue="Baner Road, Pune 411045" />
+                </label>
+                <label className="field">
+                  <span>Billing start month</span>
+                  <select><option>July 2025</option></select>
+                </label>
+              </div>
+              <div className="modal-actions">
+                <Button variant="secondary" onClick={() => setFlow(null)}>Cancel</Button>
+                <Button onClick={() => setFlow("units")}>Continue to units</Button>
+              </div>
+            </>
+          )}
+          {flow === "units" && (
+            <>
+              <div className="flow-steps">
+                <b>1</b><span className="done" /><b>2</b><span /><i>3</i>
+              </div>
+              <div className="unit-builder">
+                <div className="unit-builder-head">
+                  <div><b>Block A</b><span>48 units will be created</span></div>
+                  <Badge tone="info">Auto-generate</Badge>
+                </div>
+                <div className="form-grid">
+                  <label className="field"><span>Floors</span><input defaultValue="12" /></label>
+                  <label className="field"><span>Units per floor</span><input defaultValue="4" /></label>
+                  <label className="field"><span>Unit prefix</span><input defaultValue="A" /></label>
+                  <label className="field"><span>Number format</span><select><option>A-0101, A-0102…</option></select></label>
+                </div>
+              </div>
+              <label className="check-line">
+                <input type="checkbox" defaultChecked /> Apply standard maintenance rate of ₹3.00 per sq. ft.
+              </label>
+              <div className="modal-actions">
+                <Button variant="secondary" onClick={() => setFlow("details")}>Back</Button>
+                <Button onClick={() => { setAdded(true); setFlow("success") }}>Create 48 units</Button>
+              </div>
+            </>
+          )}
+          {flow === "success" && (
+            <FlowSuccess
+              title="Lakeview Residency is ready"
+              copy="Block A and 48 units were created. You can now assign residents or add another building."
+              action="View apartment"
+              onDone={() => setFlow(null)}
+            />
+          )}
+          {flow === "import" && (
+            <>
+              <div className="upload-zone">
+                <Icon name="download" size={24} />
+                <b>Drop a CSV file here</b>
+                <span>or choose a file · Maximum 5 MB</span>
+                <Button variant="secondary">Choose file</Button>
+              </div>
+              <div className="info-callout"><Icon name="file" /><span><b>Need the format?</b><small>Download the unit import template with sample rows.</small></span></div>
+              <div className="modal-actions"><Button variant="secondary" onClick={() => setFlow(null)}>Cancel</Button><Button onClick={() => setFlow("success")}>Import sample file</Button></div>
+            </>
+          )}
+          {flow === "manage" && (
+            <>
+              <div className="preview-stats">
+                <div><span>Units</span><b>84</b></div>
+                <div><span>Occupied</span><b>81</b></div>
+                <div><span>Vacant</span><b>3</b></div>
+              </div>
+              <div className="form-grid">
+                <label className="field"><span>Building name</span><input defaultValue="Tower A" /></label>
+                <label className="field"><span>Maintenance rate</span><input defaultValue="₹3.00 / sq. ft." /></label>
+              </div>
+              <div className="modal-actions"><Button variant="secondary" onClick={() => setFlow(null)}>Close</Button><Button onClick={() => setFlow(null)}>Save changes</Button></div>
+            </>
+          )}
         </Modal>
       )}
     </>
@@ -1988,12 +2185,42 @@ function AdminBuildings() {
 }
 
 function AdminResidents() {
+  const [invite, setInvite] = useState<"form" | "success" | "profile" | null>(
+    null,
+  )
+  const [invited, setInvited] = useState(false)
+  const residents = [
+    ...transactions.map((x, i) => ({
+      name: x[0],
+      unit: x[1],
+      role: i === 0 ? "Owner" : "Tenant",
+      phone: `+91 98${`76543${210 + i}`}`,
+      joined: `${12 + i} Jan 2024`,
+      overdue: i === 4,
+    })),
+    ...(invited
+      ? [
+          {
+            name: "Priya Sharma",
+            unit: "A-0101",
+            role: "Owner",
+            phone: "+91 98765 43210",
+            joined: "Invite pending",
+            overdue: false,
+          },
+        ]
+      : []),
+  ]
   return (
     <>
       <PageTitle
         title="Residents"
         subtitle="Manage access and resident payment history."
-        actions={<Button icon="plus">Invite residents</Button>}
+        actions={
+          <Button icon="plus" onClick={() => setInvite("form")}>
+            Invite residents
+          </Button>
+        }
       />
       <div className="card table-card">
         <div className="table-tools">
@@ -2013,37 +2240,121 @@ function AdminResidents() {
             <span>Payment status</span>
             <span />
           </div>
-          {transactions.map((x, i) => (
-            <div className="table-row" key={x[0]}>
+          {residents.map((resident) => (
+            <div className="table-row" key={resident.name}>
               <span className="resident-cell">
-                <Avatar name={x[0]} small />
+                <Avatar name={resident.name} small />
                 <span>
-                  <b>{x[0]}</b>
-                  <small>{i === 0 ? "Owner" : "Tenant"}</small>
+                  <b>{resident.name}</b>
+                  <small>{resident.role}</small>
                 </span>
               </span>
               <span>
-                <b>{x[1]}</b>
+                <b>{resident.unit}</b>
               </span>
-              <span>+91 98{`76543${210 + i}`}</span>
-              <span>{12 + i} Jan 2024</span>
+              <span>{resident.phone}</span>
+              <span>{resident.joined}</span>
               <span>
-                <Badge tone={i === 4 ? "danger" : "success"}>
-                  {i === 4 ? "Overdue" : "Up to date"}
+                <Badge tone={resident.overdue ? "danger" : invited && resident.name === "Priya Sharma" ? "warning" : "success"}>
+                  {resident.overdue
+                    ? "Overdue"
+                    : invited && resident.name === "Priya Sharma"
+                      ? "Invited"
+                      : "Up to date"}
                 </Badge>
               </span>
               <span>
-                <Icon name="dots" />
+                <button
+                  className="row-menu"
+                  onClick={() => setInvite("profile")}
+                >
+                  <Icon name="dots" />
+                </button>
               </span>
             </div>
           ))}
         </div>
       </div>
+      {invite && (
+        <Modal
+          title={
+            invite === "form"
+              ? "Invite resident"
+              : invite === "profile"
+                ? "Resident details"
+                : "Invitation sent"
+          }
+          onClose={() => setInvite(null)}
+        >
+          {invite === "form" && (
+            <>
+              <div className="form-grid">
+                <label className="field">
+                  <span>Full name</span>
+                  <input defaultValue="Priya Sharma" />
+                </label>
+                <label className="field">
+                  <span>Mobile number</span>
+                  <input defaultValue="+91 98765 43210" />
+                </label>
+                <label className="field">
+                  <span>Building and unit</span>
+                  <select defaultValue="a101">
+                    <option value="a101">Tower A · A-0101</option>
+                    <option>Tower B · B-0203</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Occupancy type</span>
+                  <select><option>Owner</option><option>Tenant</option></select>
+                </label>
+                <label className="field full">
+                  <span>Email address</span>
+                  <input defaultValue="priya.sharma@example.com" />
+                </label>
+              </div>
+              <div className="check-options resident-channels">
+                <label><input type="checkbox" defaultChecked /> WhatsApp</label>
+                <label><input type="checkbox" defaultChecked /> SMS</label>
+                <label><input type="checkbox" defaultChecked /> Email</label>
+              </div>
+              <div className="modal-actions">
+                <Button variant="secondary" onClick={() => setInvite(null)}>Cancel</Button>
+                <Button onClick={() => { setInvited(true); setInvite("success") }}>Send invitation</Button>
+              </div>
+            </>
+          )}
+          {invite === "success" && (
+            <FlowSuccess
+              title="Priya has been invited"
+              copy="An activation link was sent by WhatsApp, SMS, and email. Access is limited to unit A-0101."
+              action="Done"
+              onDone={() => setInvite(null)}
+            />
+          )}
+          {invite === "profile" && (
+            <>
+              <div className="resident-detail">
+                <Avatar name="Ananya Mehta" />
+                <div><b>Ananya Mehta</b><span>Owner · B-1204 · Active</span></div>
+                <Badge tone="success">Up to date</Badge>
+              </div>
+              <div className="preview-stats">
+                <div><span>Outstanding</span><b>₹0</b></div>
+                <div><span>Payments</span><b>18</b></div>
+                <div><span>Access</span><b>Active</b></div>
+              </div>
+              <div className="modal-actions"><Button variant="secondary" onClick={() => setInvite(null)}>Close</Button><Button>Send message</Button></div>
+            </>
+          )}
+        </Modal>
+      )}
     </>
   )
 }
 
 function AdminSimple({ page }: { page: string }) {
+  const [selected, setSelected] = useState<string | null>(null)
   return (
     <>
       <PageTitle
@@ -2088,7 +2399,11 @@ function AdminSimple({ page }: { page: string }) {
               ],
             ]
         ).map((x) => (
-          <div className="setting-card card" key={x[1]}>
+          <button
+            className="setting-card card"
+            key={x[1]}
+            onClick={() => setSelected(x[1])}
+          >
             <span>
               <Icon name={x[0]} />
             </span>
@@ -2097,9 +2412,33 @@ function AdminSimple({ page }: { page: string }) {
               <p>{x[2]}</p>
             </div>
             <Icon name="chevron" />
-          </div>
+          </button>
         ))}
       </div>
+      {selected && (
+        <Modal title={selected} onClose={() => setSelected(null)}>
+          {page === "Reports" ? (
+            <>
+              <div className="preview-stats">
+                <div><span>Period</span><b>June 2025</b></div>
+                <div><span>Records</span><b>255</b></div>
+                <div><span>Format</span><b>PDF + CSV</b></div>
+              </div>
+              <label className="field"><span>Date range</span><select><option>1 Jun – 30 Jun 2025</option></select></label>
+              <div className="modal-actions"><Button variant="secondary" onClick={() => setSelected(null)}>Cancel</Button><Button icon="download" onClick={() => setSelected(null)}>Generate report</Button></div>
+            </>
+          ) : (
+            <>
+              <div className="form-grid">
+                <label className="field"><span>Configuration</span><input defaultValue={selected} /></label>
+                <label className="field"><span>Status</span><select><option>Active</option><option>Disabled</option></select></label>
+                <label className="field full"><span>Administrative note</span><textarea defaultValue="Managed by Maple Heights administrators." /></label>
+              </div>
+              <div className="modal-actions"><Button variant="secondary" onClick={() => setSelected(null)}>Cancel</Button><Button onClick={() => setSelected(null)}>Save changes</Button></div>
+            </>
+          )}
+        </Modal>
+      )}
     </>
   )
 }
@@ -2453,13 +2792,21 @@ function OperatorOrganizations() {
 function OperatorCampaigns() {
   const [modal, setModal] = useState(false)
   const [published, setPublished] = useState(false)
+  const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null)
   return (
     <>
       <PageTitle
         title="Ad campaigns"
         subtitle="Trust-first sponsored placements for resident surfaces."
         actions={
-          <Button icon="plus" onClick={() => setModal(true)}>
+          <Button
+            icon="plus"
+            onClick={() => {
+              setSelectedCampaign(null)
+              setPublished(false)
+              setModal(true)
+            }}
+          >
             Create campaign
           </Button>
         }
@@ -2552,7 +2899,14 @@ function OperatorCampaigns() {
                 <b>{x[4]}</b>
               </div>
             </div>
-            <Button variant="secondary" wide>
+            <Button
+              variant="secondary"
+              wide
+              onClick={() => {
+                setSelectedCampaign(x[0])
+                setModal(true)
+              }}
+            >
               {x[5] === "Draft" ? "Continue setup" : "View analytics"}
             </Button>
           </div>
@@ -2560,10 +2914,31 @@ function OperatorCampaigns() {
       </div>
       {modal && (
         <Modal
-          title={published ? "Campaign published" : "Create ad campaign"}
+          title={
+            selectedCampaign
+              ? "Campaign performance"
+              : published
+                ? "Campaign published"
+                : "Create ad campaign"
+          }
           onClose={() => setModal(false)}
         >
-          {published ? (
+          {selectedCampaign ? (
+            <>
+              <div className="campaign-detail-head">
+                <span className="campaign-brand">{selectedCampaign[0]}</span>
+                <div><b>{selectedCampaign}</b><span>Resident home placement</span></div>
+                <Badge tone="success">Active</Badge>
+              </div>
+              <div className="preview-stats">
+                <div><span>Impressions</span><b>148.4K</b></div>
+                <div><span>Clicks</span><b>3,562</b></div>
+                <div><span>CTR</span><b>2.4%</b></div>
+              </div>
+              <div className="tenant-safe"><Icon name="shield" /><span>Frequency caps and resident trust policy checks are active.</span></div>
+              <div className="modal-actions"><Button variant="secondary" onClick={() => setModal(false)}>Close</Button><Button onClick={() => setModal(false)}>Edit campaign</Button></div>
+            </>
+          ) : published ? (
             <div className="modal-success">
               <div className="success-mark small">
                 <Icon name="check" />
@@ -2618,6 +2993,7 @@ function OperatorCampaigns() {
 }
 
 function OperatorMonetization() {
+  const [plan, setPlan] = useState<string | null>(null)
   return (
     <>
       <PageTitle
@@ -2654,17 +3030,32 @@ function OperatorMonetization() {
               <span>/ month</span>
             </div>
             <p>{x[2]} · Core billing, collections, resident app, reports.</p>
-            <Button variant={i === 1 ? "primary" : "secondary"} wide>
+            <Button
+              variant={i === 1 ? "primary" : "secondary"}
+              wide
+              onClick={() => setPlan(x[0])}
+            >
               Manage plan
             </Button>
           </div>
         ))}
       </div>
+      {plan && (
+        <Modal title={`Manage ${plan} plan`} onClose={() => setPlan(null)}>
+          <div className="form-grid">
+            <label className="field"><span>Monthly price</span><input defaultValue={plan === "Starter" ? "₹1,499" : plan === "Growth" ? "₹3,999" : "Custom"} /></label>
+            <label className="field"><span>Unit allowance</span><input defaultValue={plan === "Starter" ? "200" : plan === "Growth" ? "750" : "Unlimited"} /></label>
+            <label className="field full"><span>Included capabilities</span><textarea defaultValue="Billing, collections, resident app, reports, and support." /></label>
+          </div>
+          <div className="modal-actions"><Button variant="secondary" onClick={() => setPlan(null)}>Cancel</Button><Button onClick={() => setPlan(null)}>Save plan</Button></div>
+        </Modal>
+      )}
     </>
   )
 }
 
 function OperatorOperations({ page }: { page: string }) {
+  const [workspace, setWorkspace] = useState(false)
   const map: Record<string, [string, string, string][]> = {
     Transactions: [
       ["Payments processed", "₹8.42 Cr", "Maintenance collections"],
@@ -2729,9 +3120,45 @@ function OperatorOperations({ page }: { page: string }) {
           Use filters and scoped access controls to inspect operational data
           without exposing cross-tenant resident information.
         </p>
-        <Button variant="secondary">Open filters</Button>
+        <Button variant="secondary" onClick={() => setWorkspace(true)}>
+          Open workspace
+        </Button>
       </div>
+      {workspace && (
+        <Modal title={`${page} workspace`} onClose={() => setWorkspace(false)}>
+          <div className="form-grid">
+            <label className="field"><span>Organization scope</span><select><option>All organizations</option><option>Greenview Residency</option></select></label>
+            <label className="field"><span>Time range</span><select><option>Last 30 days</option><option>Today</option></select></label>
+            <label className="field full"><span>Search</span><input placeholder={`Search ${page.toLowerCase()}…`} /></label>
+          </div>
+          <div className="tenant-safe"><Icon name="shield" /><span>Results remain tenant-scoped and all access is written to the audit log.</span></div>
+          <div className="modal-actions"><Button variant="secondary" onClick={() => setWorkspace(false)}>Cancel</Button><Button onClick={() => setWorkspace(false)}>Apply filters</Button></div>
+        </Modal>
+      )}
     </>
+  )
+}
+
+function FlowSuccess({
+  title,
+  copy,
+  action,
+  onDone,
+}: {
+  title: string
+  copy: string
+  action: string
+  onDone: () => void
+}) {
+  return (
+    <div className="modal-success">
+      <div className="success-mark small">
+        <Icon name="check" />
+      </div>
+      <b>{title}</b>
+      <p>{copy}</p>
+      <Button wide onClick={onDone}>{action}</Button>
+    </div>
   )
 }
 

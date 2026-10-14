@@ -20,7 +20,7 @@ This ADR tracks the open decisions listed in the architecture baseline and recor
 | Production availability and SLA | What availability/SLA commitment is approved? | OCI cost-constrained profile with no HA/SLA guarantee | No formal SLA for the next release; treat the deployment as a pilot/release candidate until a formal service target is approved |
 | Recovery targets | What are approved RPO/RTO, retention, and legal-hold targets? | Must be set by the data owner | No formal RPO/RTO or backup commitment is approved for the next release; recovery targets remain pilot-only until the data owner sets them |
 | Tenant domain and host routing | Which domain and host routing policy is approved for tenant URLs and custom domains? | Host or membership-backed tenant resolution; custom-domain policy TBD | No custom domains are approved for the next release; use standard platform hostnames only |
-| Membership invitation policy | What invitation workflow and expiry policy is approved? | Admin invitations exist in prototype; security/product policy TBD | Admin-only invitations with expiry and identity verification are approved for the next release |
+| Membership invitation policy | What invitation workflow and expiry policy is approved? | Admin/resident invitations require identity verification and expiry | Single-use invitations expire after 7 days and require verified Email OTP for the invited address; email delivery only. SMS/WhatsApp invitation delivery remains disabled. |
 | Currency and locale rollout | What currencies/locales are approved for launch and future rollouts? | India/INR default; model locale/currency per tenant | INR and India locale are approved for launch; other currencies/locales remain deferred |
 | Support access to tenant data | What support access model is approved? | Default deny with scoped, audited elevation requirements | Deferred to a later release; no support-access tooling is approved for the MVP launch |
 | Data retention, deletion, and export | What retention and deletion policy is approved? | Need tenant-scoped export and audited deletion workflow with retention duration TBD | Deferred to a later release; data retention/deletion policy is tracked as a post-MVP TODO |
@@ -38,7 +38,7 @@ The answers below are required before any production release recommendation or d
 5. What availability/SLA commitment is approved for customer-facing services?
 6. What are the required RPO, RTO, backup retention, and legal-hold values?
 7. What host/domain routing policy is approved for tenant URLs and custom domains?
-8. What invitation, verification, and expiry policy is approved for user membership onboarding?
+8. Are any changes required to the approved seven-day invitation expiry, verified Email OTP acceptance, or email-only delivery policy?
 9. What are the approved default currency and locale settings for launch and future expansion?
 10. What tenant-data support access policy is approved, including audit and time limits?
 11. What retention, export, and deletion policy is approved for each tenant and region?

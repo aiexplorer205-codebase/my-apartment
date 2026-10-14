@@ -47,10 +47,13 @@ responsive behavior while making each available action real and authorized.
 - Manage organization/property/building/floor/unit hierarchy, unit metadata,
   occupancy and rates, resident relationships, and validated CSV import with
   row-level errors and safe retry.
-- Search/filter residents and inspect unit/access/payment state. Implement
-  invitation, expiry/re-send/revocation and acceptance flows according to the
-  approved invitation policy; if that decision remains open, keep invitation
-  activation gated and communicate why.
+- Search/filter residents and inspect unit/access/payment state. Invite a
+  resident to a selected unit by email with owner/tenant occupancy. Use a
+  single-use seven-day link and require verified Email OTP for the invited
+  address before creating the resident record and membership. Persist pending,
+  accepted, expired, and revoked states; handle duplicate residents, duplicate
+  pending invitations, email delivery failures, and acceptance retries. SMS and
+  WhatsApp invitation delivery remain disabled.
 - Configure typed billing rules, due dates, rounding, grace periods, and
   permitted late fees. Preview invoice runs and exceptions; require explicit
   authorization and confirmation before publishing. Use idempotent worker
