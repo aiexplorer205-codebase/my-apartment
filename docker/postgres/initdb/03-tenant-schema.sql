@@ -3,3 +3,7 @@
 \i /migrations/tenant_db/002_mvp_product.sql
 \i /migrations/tenant_db/003_apartments.sql
 \i /migrations/tenant_db/004_resident_invitations.sql
+\i /migrations/tenant_db/005_billing_runs.sql
+\i /migrations/tenant_db/006_billing_templates.sql
+\i /migrations/tenant_db/007_manual_payment_confirmation.sql
+\i /migrations/tenant_db/008_invoice_rounding.sql

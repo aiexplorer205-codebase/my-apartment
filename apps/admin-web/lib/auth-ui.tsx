@@ -5,11 +5,13 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState, type FormEvent } from 'react'
 import type { ReactNode } from 'react'
 import { useApiQuery } from './use-api'
+import { formValidationMessage } from './form-validation'
 
 type TenantMembership = { tenantId: string; name: string; role: 'resident' | 'admin' }
 
 export function AuthBoundary({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated, logout, user } = useAuth0()
+  const pathname = usePathname()
 
   if (isLoading) {
     return <main className="auth-shell" aria-live="polite">Checking your Auth0 session…</main>
@@ -28,10 +30,12 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
     )
   }
 
+  if (pathname.startsWith('/admin') || pathname.startsWith('/resident')) return <>{children}</>
+
   return (
     <>
       <div className="session-bar">
-        <div className="session-brand"><span className="brand-mark">N</span><strong>Nivasa</strong><small>SECURE WORKSPACE</small></div>
+        <div className="session-brand"><span className="brand-mark">N</span><strong>Nivasa</strong></div>
         <TenantWorkspacePicker />
         <div className="session-account"><span>{user?.email ?? 'Authenticated account'}</span>
         <button className="secondary" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>Sign out</button>
@@ -42,7 +46,7 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
   )
 }
 
-function TenantWorkspacePicker() {
+export function TenantWorkspacePicker() {
   const { activeTenantId, setActiveTenantId } = useAuth0()
   const pathname = usePathname()
   const { data, loading, error, reload } = useApiQuery<TenantMembership[]>('/v1/tenant/memberships', { tenantScoped: false })
@@ -61,12 +65,12 @@ function TenantWorkspacePicker() {
   if (loading) return <span className="tenant-picker-status" role="status">Loading workspaces…</span>
   if (error) return <button className="tenant-picker-retry" type="button" onClick={reload}>Could not load workspaces · Retry</button>
   if (!memberships?.length) return <span className="tenant-picker-status">No active workspaces for this app</span>
-  if (memberships.length === 1) return <span className="tenant-picker-single">Workspace: <strong>{memberships[0]?.name}</strong></span>
+  if (memberships.length === 1) return null
 
   return (
     <label className="tenant-picker-label">
-      <span>Workspace</span>
-      <select aria-label="Select apartment workspace" value={activeTenantId ?? ''} onChange={(event) => setActiveTenantId(event.target.value || null)}>
+      <span className="visually-hidden">Switch organization</span>
+      <select aria-label="Switch organization" value={activeTenantId ?? ''} onChange={(event) => setActiveTenantId(event.target.value || null)}>
         <option value="">Select an organization…</option>
         {memberships.map((membership) => <option key={membership.tenantId} value={membership.tenantId}>{membership.name} · {membership.role}</option>)}
       </select>
@@ -116,7 +120,7 @@ export function EmbeddedLogin() {
   }
 
   return (
-    <form className="auth-form" onSubmit={codeSent ? verifyCode : sendCode}>
+    <form className="auth-form" onSubmit={codeSent ? verifyCode : sendCode} onInvalidCapture={(event) => formValidationMessage(event, setError)} onChangeCapture={() => setError(null)}>
       <label htmlFor="signin-email">Email address</label>
       <input id="signin-email" type="email" autoComplete="email" required value={email} disabled={codeSent || busy} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" />
       {codeSent && <label htmlFor="signin-code">One-time code</label>}
@@ -136,6 +140,9 @@ export function LoadState({ loading, error, onRetry }: { loading: boolean; error
         <strong>Could not load live data</strong>
         <p>{error}</p>
         {error.includes('Select an active tenant membership') && <p>Select your organization from the Workspace menu above to continue.</p>}
+        {error === 'This account does not have an active resident profile in the selected organization' && (
+          <p>Resident access is available after accepting a resident invitation with this verified email address. Administrator access alone does not create a resident profile.</p>
+        )}
         {error === 'No active tenant membership is available for this account' && (
           <p>Signing in here does not accept an administrator invitation. Open the invitation email and use its full acceptance link, then sign in with the same verified email address. If you already accepted it, check that Auth0 returned to the same admin app and refresh.</p>
         )}

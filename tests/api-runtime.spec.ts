@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  authorizedTenantRoles,
   createOpenApiBootstrap,
   parseOrganizationOnboardingInput,
   resolveOperatorIds,
@@ -18,6 +19,14 @@ afterEach(async () => {
 })
 
 describe('MVP API runtime', () => {
+  it('grants portal roles only from an accepted admin invitation or an active resident profile', () => {
+    expect(authorizedTenantRoles('admin', true, false)).toEqual(['admin'])
+    expect(authorizedTenantRoles('admin', false, false)).toEqual([])
+    expect(authorizedTenantRoles('admin', false, true)).toEqual(['resident'])
+    expect(authorizedTenantRoles('admin', true, true)).toEqual(['resident', 'admin'])
+    expect(authorizedTenantRoles('resident', false, true)).toEqual(['resident'])
+  })
+
   it('resolves multiple approved operator subjects and supports the legacy single ID', () => {
     expect(resolveOperatorIds(' auth0|operator-1, auth0|operator-2 ')).toEqual([
       'auth0|operator-1',
@@ -63,7 +72,9 @@ describe('MVP API runtime', () => {
   it('documents authenticated database-backed routes', () => {
     const specification = createOpenApiBootstrap()
     expect(specification.paths).toHaveProperty('/v1/tenant/home')
+    expect(specification.paths).toHaveProperty('/v1/tenant/payments/manual')
     expect(specification.paths).toHaveProperty('/v1/admin/overview')
+    expect(specification.paths).toHaveProperty('/v1/admin/collections/{paymentId}/confirm')
     expect(specification.paths).toHaveProperty('/v1/platform/overview')
     expect(specification.paths).toHaveProperty('/v1/platform/organizations')
     expect(specification.paths).toHaveProperty('/v1/public/admin-invitations/accept')

@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 const operatorAccessUrl = `${(process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4101').replace(/\/$/, '')}/v1/platform/access`
 
 export function OperatorAuthBoundary({ children }: { children: ReactNode }) {
-  const { getAccessTokenSilently, isLoading, isAuthenticated, loginWithRedirect, logout, user } = useAuth0()
+  const { getAccessTokenSilently, isLoading, isAuthenticated, loginWithRedirect, logout } = useAuth0()
   const [access, setAccess] = useState<'checking' | 'granted' | 'denied' | 'error'>('checking')
   const [accessError, setAccessError] = useState<string | null>(null)
 
@@ -93,12 +93,6 @@ export function OperatorAuthBoundary({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <div className="session-bar">
-        <div className="session-brand"><span className="brand-mark">N</span><strong>Nivasa</strong><small>PLATFORM OPERATIONS</small></div>
-        <div className="session-account"><span>{user?.email ?? 'Authenticated operator'}</span>
-          <button className="secondary-button" type="button" onClick={() => void signOut()}>Sign out</button>
-        </div>
-      </div>
       {children}
     </>
   )

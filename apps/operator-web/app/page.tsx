@@ -1,10 +1,27 @@
 'use client'
 
 import { useAuth0 } from '@auth0/auth0-react'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
 import { OperatorAuthBoundary } from '../lib/operator-auth-ui'
 import { useOperatorOverview } from '../lib/operator-api'
+import { formValidationMessage } from '../lib/form-validation'
+
+type OperatorNavIconName = 'grid' | 'building' | 'settings' | 'chart' | 'megaphone' | 'wallet' | 'support' | 'audit'
+
+function OperatorNavIcon({ name }: { name: OperatorNavIconName }) {
+  const paths: Record<OperatorNavIconName, ReactNode> = {
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+    building: <><path d="M4 21V5l8-3 8 3v16" /><path d="M8 8h1m6 0h1M8 12h1m6 0h1M10 21v-4h4v4" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1 1.4 1.4-2.8 2.8-1.5-1.5a7 7 0 0 1-2.1.9V21h-4v-2.3a7 7 0 0 1-2.1-.9l-1.5 1.5-2.8-2.8L5.6 15a7 7 0 0 1-.9-2.1H2.5v-4h2.2a7 7 0 0 1 .9-2.1L4.2 5.3l2.8-2.8 1.5 1.5a7 7 0 0 1 2.1-.9V1h4v2.1a7 7 0 0 1 2.1.9l1.5-1.5L21 5.3 19.5 6.8a7 7 0 0 1 .9 2.1h2.1v4h-2.1a7 7 0 0 1-1 2.1Z" /></>,
+    chart: <><path d="M4 19V9m6 10V5m6 14v-7m6 7H2" /></>,
+    megaphone: <><path d="m3 11 18-5v12L3 13z" /><path d="m7 14 2 7h4l-2-6m8-8v12" /></>,
+    wallet: <><path d="M4 6h15a2 2 0 0 1 2 2v11H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h13" /><path d="M16 12h5v4h-5a2 2 0 0 1 0-4Z" /></>,
+    support: <><path d="M4 13v-2a8 8 0 0 1 16 0v2" /><path d="M4 13H3a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h2v-6zm16 0h1a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2v-6zm-8 8h2" /></>,
+    audit: <><path d="M8 4h12v17H5V4h3m0-2h6v4H8z" /><path d="M9 11h7m-7 4h7m-7 4h4" /></>,
+  }
+  return <svg className="operator-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
+}
 
 function AuditPanel() {
   const { getAccessTokenSilently } = useAuth0()
@@ -42,17 +59,19 @@ function Overview() {
   type View = 'overview' | 'organizations' | 'provisioning' | 'monetization' | 'campaigns' | 'transactions' | 'support' | 'audit' | 'settings'
   const [activeView, setActiveView] = useState<View>('overview')
   const { data, loading, error, reload } = useOperatorOverview()
-  const { getAccessTokenSilently } = useAuth0()
+  const { getAccessTokenSilently, logout } = useAuth0()
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [formValidationError, setFormValidationError] = useState<string | null>(null)
   const [createdOrganization, setCreatedOrganization] = useState<string | null>(null)
   const [organizationSearch, setOrganizationSearch] = useState('')
   const [organizationStatus, setOrganizationStatus] = useState('all')
   const openOnboarding = () => {
     setCreatedOrganization(null)
     setFormError(null)
+    setFormValidationError(null)
     setOnboardingOpen(true)
   }
 
@@ -143,16 +162,16 @@ function Overview() {
     { label: 'Provisioning failures', value: String(data.provisioningFailures), detail: 'Require review' },
   ] : []
 
-  const navigation: Array<{ id: View; label: string }> = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'organizations', label: 'Organizations' },
-    { id: 'provisioning', label: 'Provisioning' },
-    { id: 'monetization', label: 'Monetization' },
-    { id: 'campaigns', label: 'Ad campaigns' },
-    { id: 'transactions', label: 'Transactions' },
-    { id: 'support', label: 'Support' },
-    { id: 'audit', label: 'Audit logs' },
-    { id: 'settings', label: 'Settings' },
+  const navigation: Array<{ id: View; label: string; icon: OperatorNavIconName }> = [
+    { id: 'overview', label: 'Overview', icon: 'grid' },
+    { id: 'organizations', label: 'Organizations', icon: 'building' },
+    { id: 'provisioning', label: 'Provisioning', icon: 'settings' },
+    { id: 'monetization', label: 'Monetization', icon: 'chart' },
+    { id: 'campaigns', label: 'Ad campaigns', icon: 'megaphone' },
+    { id: 'transactions', label: 'Transactions', icon: 'wallet' },
+    { id: 'support', label: 'Support', icon: 'support' },
+    { id: 'audit', label: 'Audit logs', icon: 'audit' },
+    { id: 'settings', label: 'Settings', icon: 'settings' },
   ]
 
   return (
@@ -161,9 +180,9 @@ function Overview() {
         <div className="brand-row"><span className="brand-mark">N</span><span><strong>Nivasa</strong><small>PLATFORM OPERATIONS</small></span></div>
         <div className="operator-tenant"><span className="tenant-shield">N</span><span>Global workspace</span></div>
         <nav className="nav-list" aria-label="Platform operations navigation">
-          {navigation.map((item) => <button key={item.id} type="button" className={`nav-item${activeView === item.id ? ' active' : ''}`} onClick={() => setActiveView(item.id)}>{item.label}</button>)}
+          {navigation.map((item) => <button key={item.id} type="button" className={`nav-item${activeView === item.id ? ' active' : ''}`} aria-label={item.label} title={item.label} aria-current={activeView === item.id ? 'page' : undefined} onClick={() => setActiveView(item.id)}><OperatorNavIcon name={item.icon} /><span className="nav-label">{item.label}</span></button>)}
         </nav>
-        <div className="sidebar-account"><span className="account-avatar">OP</span><span><strong>Platform operator</strong><small>Approved account</small></span></div>
+        <div className="sidebar-account"><span className="account-avatar">OP</span><span><strong>Platform operator</strong><small>Approved account</small></span><button type="button" className="secondary-button operator-signout" onClick={() => void logout({ logoutParams: { returnTo: globalThis.location.origin } })}>Sign out</button></div>
       </aside>
 
       <section className="content-panel">
@@ -283,7 +302,7 @@ function Overview() {
                 <div className="eyebrow">PLATFORM OPERATIONS</div>
                 <h2 id="onboarding-title">Onboard organization</h2>
                 <p className="modal-description">Create an isolated tenant workspace and invite its first administrator.</p>
-                <form onSubmit={(event) => void submitOnboarding(event)}>
+                <form onSubmit={(event) => void submitOnboarding(event)} onInvalidCapture={(event) => formValidationMessage(event, setFormValidationError)} onChangeCapture={() => setFormValidationError(null)}>
                   <div className="form-grid">
                     <label className="form-field"><span>Organization name</span><input name="name" required minLength={2} maxLength={120} autoFocus /><small>Each organization must have a unique name.</small></label>
                     <label className="form-field"><span>City</span><input name="city" required minLength={2} maxLength={100} /></label>
@@ -299,6 +318,7 @@ function Overview() {
                   </div>
                   <div className="tenant-safe-note">A dedicated PostgreSQL tenant workspace will be created. The administrator will receive a one-time email link and sign in using Auth0 Email OTP.</div>
                   {formError && <p className="modal-error" role="alert">{formError}</p>}
+                  {formValidationError && <p className="field-validation-error" role="alert">{formValidationError}</p>}
                   <div className="modal-actions">
                     <button type="button" className="secondary-button" disabled={saving} onClick={() => setOnboardingOpen(false)}>Cancel</button>
                     <button type="submit" className="primary-button" disabled={saving}>{saving ? 'Creating workspace…' : 'Create and send invite'}</button>

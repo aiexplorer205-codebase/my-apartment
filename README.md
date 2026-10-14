@@ -27,8 +27,10 @@ step-by-step smoke test, see
 Prerequisites: Node.js 22 or later, pnpm 9.15.0 (Corepack is recommended),
 Docker Compose, and a non-production Auth0 tenant. Auth0 handles sign-in;
 operator onboarding email delivery additionally requires a configured Resend
-account. Online payments, invoice publication, and queue jobs are not
-simulated; see the gated capabilities below.
+account. Tenant admins can configure billing rules, preview invoice runs, and
+publish invoices. Residents can report an offline payment amount for
+administrator confirmation; online payments, automatic late-fee charging, and
+resident billing notifications remain disabled.
 
 ```sh
 corepack enable
@@ -57,16 +59,23 @@ docker compose exec -T postgres psql -U postgres -d platform_db \
   -v ON_ERROR_STOP=1 -f /migrations/platform_db/001_init_platform.sql \
   -f /migrations/platform_db/002_mvp_access.sql \
   -f /migrations/platform_db/003_operator_onboarding.sql \
-  -f /migrations/platform_db/004_email_otp_admin_invites.sql
+  -f /migrations/platform_db/004_email_otp_admin_invites.sql \
+  -f /migrations/platform_db/005_operator_deletion.sql \
+  -f /migrations/platform_db/006_unique_organization_names.sql
 docker compose exec -T postgres psql -U postgres -d tenant_template \
   -v ON_ERROR_STOP=1 -f /migrations/tenant_db/001_init_tenant.sql \
   -f /migrations/tenant_db/002_mvp_product.sql \
   -f /migrations/tenant_db/003_apartments.sql \
-  -f /migrations/tenant_db/004_resident_invitations.sql
+  -f /migrations/tenant_db/004_resident_invitations.sql \
+  -f /migrations/tenant_db/005_billing_runs.sql \
+  -f /migrations/tenant_db/006_billing_templates.sql \
+  -f /migrations/tenant_db/007_manual_payment_confirmation.sql \
+  -f /migrations/tenant_db/008_invoice_rounding.sql
 ```
 
 The template migration only affects tenant databases created afterward. To
-upgrade an existing tenant, first identify its database name in
+upgrade an existing tenant with the apartment, resident-invitation, and billing
+features, first identify its database name in
 `platform_db`, then apply the apartment and resident-invitation migrations to
 that database:
 
@@ -75,14 +84,18 @@ docker compose exec -T postgres psql -U postgres -d platform_db \
   -c 'SELECT tenant_id, org_name, database_name FROM tenant_records ORDER BY org_name'
 docker compose exec -T postgres psql -U postgres -d YOUR_TENANT_DATABASE \
   -v ON_ERROR_STOP=1 -f /migrations/tenant_db/003_apartments.sql \
-  -f /migrations/tenant_db/004_resident_invitations.sql
+  -f /migrations/tenant_db/004_resident_invitations.sql \
+  -f /migrations/tenant_db/005_billing_runs.sql \
+  -f /migrations/tenant_db/006_billing_templates.sql \
+  -f /migrations/tenant_db/007_manual_payment_confirmation.sql \
+  -f /migrations/tenant_db/008_invoice_rounding.sql
 ```
 
 Replace `YOUR_TENANT_DATABASE` with the `database_name` for the organization
-you selected in the admin app. The migration is idempotent and preserves
-existing tenant data. Rebuild and restart the API after changing API code with
-`docker compose up --build -d api`; rebuilding only the web image does not
-update the API running on port 4101.
+you selected in the admin app. The migrations are idempotent and preserve
+existing tenant data. Rebuild and restart both apps after changing billing or
+payment workflows with `docker compose up --build -d api admin-web`; rebuilding
+only the web image does not update the API running on port 4101.
 
 ### Auth0 local setup
 
