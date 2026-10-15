@@ -18,7 +18,7 @@
     "@nivasa/config": "workspace:*",
     "@nivasa/contracts": "workspace:*",
     "@nivasa/shared": "workspace:*",
-    "jose": "^5.9.6",
+    "jose": "^6.2.12",
     "pg": "^8.13.1"
   },
   "devDependencies": {
