@@ -1,8 +1,6 @@
 FROM node:22-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH="${PNPM_HOME}:$PATH"
-ARG NEXT_PUBLIC_API_URL=http://localhost:4101
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN corepack enable
 WORKDIR /workspace
 

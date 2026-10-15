@@ -485,6 +485,10 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/tenant/home': {
       get: { tags: ['tenant'], summary: 'Resident home summary', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped resident home' }, '401': { description: 'Authentication required' }, '403': { description: 'An active resident profile is required' } } },
     },
+    '/v1/tenant/profile': {
+      get: { tags: ['tenant'], summary: 'View the authenticated resident profile', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped resident details' }, '403': { description: 'An active resident profile is required' }, '404': { description: 'Resident profile not found' } } },
+      patch: { tags: ['tenant'], summary: 'Update the authenticated resident name and phone number', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', additionalProperties: false, properties: { fullName: { type: 'string', minLength: 2, maxLength: 120 }, phone: { type: ['string', 'null'], maxLength: 24 } }, minProperties: 1 } } } }, responses: { '200': { description: 'Updated resident details' }, '400': { description: 'Invalid resident profile details' }, '403': { description: 'An active resident profile is required' }, '404': { description: 'Resident profile not found' } } },
+    },
     '/v1/tenant/payments/manual': {
       post: { tags: ['tenant'], summary: 'Submit a resident-reported offline payment for administrator confirmation', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Offline payment recorded as pending confirmation' }, '400': { description: 'Invalid invoice or payment amount' }, '403': { description: 'An active resident profile is required' }, '409': { description: 'Invoice no longer accepts payments or amount exceeds available balance' } } },
     },
@@ -639,12 +643,13 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
 
   const invoiceResult = await pool.query<{
     id: string
+    invoice_number: string
     billing_period: string
     due_date: string
     total_minor: string
     previous_dues_minor: string
   }>(
-    `SELECT i.id, to_char(i.billing_period, 'YYYY-MM') AS billing_period, i.due_date::text,
+    `SELECT i.id, i.invoice_number, to_char(i.billing_period, 'YYYY-MM') AS billing_period, i.due_date::text,
             i.total_minor::text,
             COALESCE(carried.previous_dues_minor, 0)::text AS previous_dues_minor
      FROM invoices i
@@ -743,7 +748,8 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
 
   const [payments, notices] = await Promise.all([
     pool.query(
-      `SELECT p.id, i.invoice_number, p.amount_minor, p.currency, p.method, p.status,
+      `SELECT p.id, i.invoice_number, to_char(i.billing_period, 'YYYY-MM') AS billing_period,
+              p.amount_minor, p.currency, p.method, p.status,
               p.created_at, p.reference
        FROM payments p
        JOIN invoices i ON i.id = p.invoice_id
@@ -770,6 +776,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     billingPeriod: invoice?.billing_period ?? null,
     dueDate: invoice?.due_date ?? null,
     currentInvoiceId: invoice?.id ?? null,
+    currentInvoiceNumber: invoice?.invoice_number ?? null,
     currentDueMinor,
     pendingPaymentMinor: pendingAmountMinor,
     manualPaymentAvailableMinor: Math.max(currentDueMinor - pendingAmountMinor, 0),
@@ -782,6 +789,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     recentPayments: payments.rows.map((payment) => ({
       id: payment.id,
       invoiceId: payment.invoice_number,
+      billingPeriod: payment.billing_period,
       amountMinor: minorUnits(payment.amount_minor),
       currency: payment.currency,
       method: payment.method,
@@ -812,6 +820,79 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       timezone: resident.timezone,
     },
   }
+}
+
+const getResidentProfile = async (access: TenantAccess, subject: string) => {
+  requireRole(access, 'resident')
+  const result = await withTenantPool(access).query<{
+    full_name: string
+    email: string
+    phone: string | null
+    unit_number: string
+    building_name: string
+    organization_name: string
+    timezone: string
+  }>(
+    `SELECT r.full_name, r.email::text, r.phone, u.number AS unit_number,
+            u.building_name, o.name AS organization_name, o.timezone
+     FROM residents r
+     JOIN units u ON u.id = r.unit_id AND u.tenant_id = $2
+     JOIN organizations o ON o.tenant_id = $2
+     WHERE r.auth_subject = $1 AND r.status = 'active'
+     LIMIT 1`,
+    [subject, access.tenantId],
+  )
+  const profile = result.rows[0]
+  if (!profile) throw new ApiFault(404, 'not_found', 'No active resident profile is associated with this account')
+  return {
+    fullName: profile.full_name,
+    email: profile.email,
+    phone: profile.phone,
+    unit: `${profile.building_name} · ${profile.unit_number}`,
+    organizationName: profile.organization_name,
+    timezone: profile.timezone,
+  }
+}
+
+const updateResidentProfile = async (access: TenantAccess, subject: string, rawInput: unknown) => {
+  requireRole(access, 'resident')
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+    throw new ApiFault(400, 'invalid_request', 'Resident profile details are required')
+  }
+  const input = rawInput as Record<string, unknown>
+  const allowedFields = new Set(['fullName', 'phone'])
+  if (Object.keys(input).some((field) => !allowedFields.has(field)) || Object.keys(input).length === 0) {
+    throw new ApiFault(400, 'invalid_request', 'Only full name and phone number can be updated')
+  }
+  const fullName = input.fullName === undefined ? undefined : typeof input.fullName === 'string' ? input.fullName.trim() : ''
+  const phone = input.phone === undefined
+    ? undefined
+    : input.phone === null
+      ? null
+      : typeof input.phone === 'string'
+        ? input.phone.trim() || null
+        : undefined
+  if (input.fullName !== undefined && (!fullName || fullName.length < 2 || fullName.length > 120)) {
+    throw new ApiFault(400, 'invalid_request', 'Full name must be between 2 and 120 characters')
+  }
+  if (input.phone !== undefined && phone === undefined) {
+    throw new ApiFault(400, 'invalid_request', 'Phone must be a valid mobile number or null')
+  }
+  if (typeof phone === 'string' && (phone.length > 24 || !/^\+?[0-9 ()-]{7,24}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) {
+    throw new ApiFault(400, 'invalid_request', 'Enter a valid mobile number or leave it blank')
+  }
+  const result = await withTenantPool(access).query(
+    `UPDATE residents r
+     SET full_name = COALESCE($2, r.full_name),
+         phone = CASE WHEN $3::boolean THEN $4::text ELSE r.phone END,
+         updated_at = NOW()
+     FROM units u
+     WHERE r.unit_id = u.id AND u.tenant_id = $5
+       AND r.auth_subject = $1 AND r.status = 'active'`,
+    [subject, fullName ?? null, input.phone !== undefined, phone ?? null, access.tenantId],
+  )
+  if (result.rowCount !== 1) throw new ApiFault(404, 'not_found', 'No active resident profile is associated with this account')
+  return getResidentProfile(access, subject)
 }
 
 const submitResidentManualPayment = async (access: TenantAccess, subject: string, rawInput: unknown) => {
@@ -1274,7 +1355,7 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     throw new ApiFault(503, 'dependency_unavailable', 'The invitation was saved, but the resident’s Email OTP identity could not be prepared. Check Auth0 user-provisioning settings and retry.')
   }
 
-  const baseUrl = (process.env.ADMIN_WEB_PUBLIC_URL ?? 'http://localhost:3100').replace(/\/$/, '')
+  const baseUrl = (process.env.RESIDENT_WEB_PUBLIC_URL ?? 'http://localhost:3098').replace(/\/$/, '')
   try {
     await sendResidentInvitationEmail({
       email: input.email,
@@ -2830,6 +2911,15 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/home') {
         const access = await resolveTenantAccess(request, 'resident')
         respond(response, 200, await getResidentHome(access, access.subject), requestId)
+        return
+      }
+      if (requestUrl.pathname === '/v1/tenant/profile' && (request.method === 'GET' || request.method === 'PATCH')) {
+        const access = await resolveTenantAccess(request, 'resident')
+        if (request.method === 'GET') {
+          respond(response, 200, await getResidentProfile(access, access.subject), requestId)
+          return
+        }
+        respond(response, 200, await updateResidentProfile(access, access.subject, await readJsonBody(request)), requestId)
         return
       }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/tenant/payments/manual') {

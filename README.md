@@ -20,9 +20,10 @@ deployment controls, and several product workflows remain incomplete.
 
 ## Local MVP with Docker Compose
 
-For the full variable-by-variable `.env` guide, manual Auth0 setup, and
-step-by-step smoke test, see
-[Local Docker Compose setup and testing](docs/local-compose-testing.md).
+For Auth0 application registration, callback URLs, secret generation, canonical
+app URLs, and production infrastructure setup, see
+[Human setup required](docs/human-setups.md). The existing schema and seed
+instructions below cover creating local test tenant data.
 
 Prerequisites: Node.js 22 or later, pnpm 9.15.0 (Corepack is recommended),
 Docker Compose, and a non-production Auth0 tenant. Auth0 handles sign-in;
@@ -42,7 +43,7 @@ docker compose config --quiet
 docker compose up --build -d --wait
 
 docker compose ps
-docker compose logs -f api worker admin-web operator-web
+docker compose logs -f api worker login-web resident-web admin-web operator-web
 
 docker compose down
 ```
@@ -99,22 +100,12 @@ only the web image does not update the API running on port 4101.
 
 ### Auth0 local setup
 
-Configure two non-production Auth0 Single Page Applications: one for the
-resident/admin web app and one for the private operator web app. Enable
-passwordless email OTP in Auth0 and configure each app's callback, logout, and
-web-origin allowlists for `http://localhost:3100` or `http://localhost:3101`.
-Configure the same API audience as a custom API in Auth0. In `.env`, set
-`AUTH0_DOMAIN`, `AUTH0_ISSUER`, `AUTH0_AUDIENCE`,
-`AUTH0_ADMIN_CLIENT_ID`, `AUTH0_OPERATOR_CLIENT_ID`,
-`AUTH0_MGMT_CLIENT_ID`, and `AUTH0_MGMT_CLIENT_SECRET`. Authorize the dedicated
-Management API M2M app for `create:users` and `read:users`; set
-`AUTH0_PASSWORDLESS_CONNECTION` to the exact Email connection name (normally
-`email`). Keep signup disabled on that connection. Set `OPERATOR_IDS` to
-a comma-separated list of exact approved operator `sub` claims, for example
-`auth0|...`; these are not passwords or tokens. The legacy `OPERATOR_ID`
-setting remains supported for one operator when `OPERATOR_IDS` is empty. The
-operator API fails closed if no approved identity is configured or the signed-in
-subject does not match an approved identity.
+The Login, Resident, Admin, and Operator applications each use a separate
+server-side Auth0 session. Follow [Human setup required](docs/human-setups.md)
+for exact per-app callback URLs and environment variables. Configure the API
+audience and Management API credentials as described there. Set `OPERATOR_IDS`
+to the exact approved operator `sub` claims; the API fails closed if the signed
+in subject is not authorized.
 
 ### Local tenant test data
 
@@ -203,6 +194,8 @@ console.
 
 Local service URLs:
 
+- Shared Login: http://localhost:3099
+- Resident web: http://localhost:3098
 - API: http://localhost:4101/v1/health
 - Admin web: http://localhost:3100
 - Operator web: http://localhost:3101 (development-only local access)

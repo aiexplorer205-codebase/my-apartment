@@ -1,0 +1,181 @@
+'use client'
+
+import Link from 'next/link'
+import { Suspense, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useAuth0 } from '../../auth-provider'
+import { adminInvitationReturnToKey, isAdminInvitationReturnTo } from '../../../lib/admin-invitation-routing'
+
+const apiUrl = '/api/backend/v1/public/admin-invitations/accept'
+const lookupUrl = '/api/backend/v1/public/admin-invitations/lookup'
+
+export default function AcceptAdminInvitationPage() {
+  return (
+    <Suspense fallback={<InvitationLoading />}>
+      <AcceptAdminInvitationContent />
+    </Suspense>
+  )
+}
+
+function InvitationLoading() {
+  return (
+    <main className="auth-shell">
+      <section className="auth-card invitation-card">
+        <div className="brand-row"><span className="brand-mark">N</span><span>Nivasa</span></div>
+        <p role="status">Loading invitation details…</p>
+      </section>
+    </main>
+  )
+}
+
+function AcceptAdminInvitationContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const { isAuthenticated, isLoading, loginWithRedirect, user } = useAuth0()
+  const token = searchParams.get('token')
+  const otpRequested = searchParams.get('otp') === '1'
+  const attempted = useRef(false)
+  const [invitedEmail, setInvitedEmail] = useState<string | null>(null)
+  const [loadingInvitation, setLoadingInvitation] = useState(Boolean(token))
+  const [accepting, setAccepting] = useState(false)
+  const [accepted, setAccepted] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const signedInEmail = user?.email ?? null
+
+  useEffect(() => {
+    if (!token) {
+      const storedReturnTo = globalThis.sessionStorage.getItem(adminInvitationReturnToKey)
+      if (isAdminInvitationReturnTo(storedReturnTo)) {
+        globalThis.sessionStorage.removeItem(adminInvitationReturnToKey)
+        router.replace(storedReturnTo as Parameters<typeof router.replace>[0])
+      }
+      setLoadingInvitation(false)
+      return
+    }
+    let cancelled = false
+    const lookup = async () => {
+      setLoadingInvitation(true)
+      setError(null)
+      setInvitedEmail(null)
+      try {
+        const response = await globalThis.fetch(lookupUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+          cache: 'no-store',
+        })
+        const payload = await response.json() as { email?: string; message?: string }
+        if (!response.ok || typeof payload.email !== 'string') {
+          throw new Error(payload.message ?? `Invitation lookup failed (${response.status})`)
+        }
+        if (!cancelled) setInvitedEmail(payload.email)
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load this invitation')
+      } finally {
+        if (!cancelled) setLoadingInvitation(false)
+      }
+    }
+    void lookup()
+    return () => { cancelled = true }
+  }, [router, token])
+
+  useEffect(() => {
+    if (!isAuthenticated || !token || !invitedEmail || !otpRequested || attempted.current) return
+    if (signedInEmail && signedInEmail.toLowerCase() !== invitedEmail.toLowerCase()) {
+      setError(`This invitation is for ${invitedEmail}. Sign in with that email address to accept it.`)
+      return
+    }
+    attempted.current = true
+    let cancelled = false
+    const accept = async () => {
+      setAccepting(true)
+      setError(null)
+      try {
+        const response = await globalThis.fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        })
+        const payload = await response.json() as { message?: string }
+        if (!response.ok) throw new Error(payload.message ?? `Invitation acceptance failed (${response.status})`)
+        if (!cancelled) setAccepted(true)
+      } catch (cause) {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : 'Could not accept the administrator invitation')
+          attempted.current = false
+        }
+      } finally {
+        if (!cancelled) setAccepting(false)
+      }
+    }
+    void accept()
+    return () => { cancelled = true }
+  }, [invitedEmail, isAuthenticated, otpRequested, signedInEmail, token])
+
+  const signIn = () => {
+    if (!token || !invitedEmail) return
+    const returnTo = `/invite?token=${encodeURIComponent(token)}&otp=1`
+    globalThis.sessionStorage.setItem(adminInvitationReturnToKey, returnTo)
+    void loginWithRedirect({
+      authorizationParams: { connection: 'email', prompt: 'login', login_hint: invitedEmail },
+      appState: { returnTo },
+    })
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card invitation-card">
+        <div className="brand-row"><span className="brand-mark">N</span><span>Nivasa</span></div>
+        {isLoading || loadingInvitation || accepting ? (
+          <p role="status">{accepting ? 'Verifying your email and accepting the invitation…' : loadingInvitation ? 'Loading invitation details…' : 'Checking your Auth0 session…'}</p>
+        ) : accepted ? (
+          <>
+            <div className="eyebrow">INVITATION ACCEPTED</div>
+            <h1>Administrator access is ready</h1>
+            <p>Your verified email is now linked to this organization. Continue to the administrator portal.</p>
+            <Link className="primary wide" href="/dashboard">Open admin portal</Link>
+          </>
+        ) : !token ? (
+          <>
+            <div className="eyebrow">INVALID INVITATION</div>
+            <h1>Invitation link is missing</h1>
+            <p>Use the full link sent to your administrator email address.</p>
+            <Link className="secondary" href="/dashboard">Return to sign in</Link>
+          </>
+        ) : error && !invitedEmail ? (
+          <>
+            <div className="eyebrow">INVITATION UNAVAILABLE</div>
+            <h1>This invitation can’t be used</h1>
+            <p role="alert">{error}</p>
+            <p>Ask the platform operator to send a new invitation if this one has expired or was already accepted.</p>
+          </>
+        ) : isAuthenticated && !otpRequested ? (
+          <>
+            <div className="eyebrow">ADMINISTRATOR INVITATION</div>
+            <h1>Continue with Email OTP</h1>
+            <p>Only the invited email address can accept this invitation. No username or password is needed.</p>
+            <label className="invite-email-field"><span>Invited email</span><input type="email" value={invitedEmail ?? ''} readOnly aria-readonly="true" /></label>
+            <button className="primary" type="button" disabled={!invitedEmail} onClick={signIn}>Continue with Email OTP</button>
+          </>
+        ) : isAuthenticated ? (
+          <>
+            <div className="eyebrow">VERIFYING ADMIN INVITATION</div>
+            <h1>Signed in as {user?.email ?? 'an account'}</h1>
+            <p>{error ?? `This invitation is for ${invitedEmail}. The invitation can only be accepted by that verified email address.`}</p>
+            <label className="invite-email-field"><span>Invited email</span><input type="email" value={invitedEmail ?? ''} readOnly aria-readonly="true" /></label>
+            {error && <button className="primary" type="button" onClick={signIn}>Sign in as the invited email using OTP</button>}
+          </>
+        ) : (
+          <>
+            <div className="eyebrow">ADMINISTRATOR INVITATION</div>
+            <h1>Accept your invitation</h1>
+            <p>Continue with Email OTP. This invitation can only be accepted by the invited email address.</p>
+            <label className="invite-email-field"><span>Invited email</span><input type="email" value={invitedEmail ?? ''} readOnly aria-readonly="true" /></label>
+            {error && <p role="alert">{error}</p>}
+            <button className="primary" type="button" disabled={!invitedEmail} onClick={signIn}>Continue with Email OTP</button>
+          </>
+        )}
+      </section>
+    </main>
+  )
+}

@@ -25,7 +25,7 @@ domain and user-facing feature scope.
   provider approval.
 - Object storage: Filebase S3-compatible adapter, with distinct environment
   resources and credentials.
-- Login: Auth0 OIDC with email OTP as the primary sign-in experience. SMS and
+- Login: Auth0 embedded email OTP as the primary sign-in experience. SMS and
   WhatsApp are optional login/verification channels only, not resident
   reminders or announcements. Prefer Twilio messaging behind a validated,
   Auth0-compatible adapter for these channels; require human approval before
