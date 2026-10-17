@@ -1,0 +1,11 @@
+{
+  "required": "This field is required",
+  "invalidEmail": "Please enter a valid email address",
+  "invalidPhone": "Please enter a valid phone number",
+  "invalidAmount": "Please enter a valid payment amount",
+  "minLength": "Must be at least {{count}} character",
+  "minLength_other": "Must be at least {{count}} characters",
+  "maxLength": "Must be at most {{count}} character",
+  "maxLength_other": "Must be at most {{count}} characters"
+}
+

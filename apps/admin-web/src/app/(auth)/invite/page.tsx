@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { useAuth0 } from '../../auth-provider'
-import { adminInvitationReturnToKey, isAdminInvitationReturnTo } from '../../../lib/admin-invitation-routing'
+import { EmbeddedLogin } from '../../../lib/auth-ui'
+import { getAppConfig } from '@nivasa/app-platform'
 
 const apiUrl = '/api/backend/v1/public/admin-invitations/accept'
 const lookupUrl = '/api/backend/v1/public/admin-invitations/lookup'
@@ -21,7 +22,7 @@ function InvitationLoading() {
   return (
     <main className="auth-shell">
       <section className="auth-card invitation-card">
-        <div className="brand-row"><span className="brand-mark">N</span><span>Nivasa</span></div>
+        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></div>
         <p role="status">Loading invitation details…</p>
       </section>
     </main>
@@ -29,11 +30,9 @@ function InvitationLoading() {
 }
 
 function AcceptAdminInvitationContent() {
-  const router = useRouter()
   const searchParams = useSearchParams()
-  const { isAuthenticated, isLoading, loginWithRedirect, user } = useAuth0()
+  const { isAuthenticated, isLoading, user, logout } = useAuth0()
   const token = searchParams.get('token')
-  const otpRequested = searchParams.get('otp') === '1'
   const attempted = useRef(false)
   const [invitedEmail, setInvitedEmail] = useState<string | null>(null)
   const [loadingInvitation, setLoadingInvitation] = useState(Boolean(token))
@@ -44,11 +43,6 @@ function AcceptAdminInvitationContent() {
 
   useEffect(() => {
     if (!token) {
-      const storedReturnTo = globalThis.sessionStorage.getItem(adminInvitationReturnToKey)
-      if (isAdminInvitationReturnTo(storedReturnTo)) {
-        globalThis.sessionStorage.removeItem(adminInvitationReturnToKey)
-        router.replace(storedReturnTo as Parameters<typeof router.replace>[0])
-      }
       setLoadingInvitation(false)
       return
     }
@@ -77,10 +71,10 @@ function AcceptAdminInvitationContent() {
     }
     void lookup()
     return () => { cancelled = true }
-  }, [router, token])
+  }, [token])
 
   useEffect(() => {
-    if (!isAuthenticated || !token || !invitedEmail || !otpRequested || attempted.current) return
+    if (!isAuthenticated || !token || !invitedEmail || attempted.current) return
     if (signedInEmail && signedInEmail.toLowerCase() !== invitedEmail.toLowerCase()) {
       setError(`This invitation is for ${invitedEmail}. Sign in with that email address to accept it.`)
       return
@@ -110,22 +104,12 @@ function AcceptAdminInvitationContent() {
     }
     void accept()
     return () => { cancelled = true }
-  }, [invitedEmail, isAuthenticated, otpRequested, signedInEmail, token])
-
-  const signIn = () => {
-    if (!token || !invitedEmail) return
-    const returnTo = `/invite?token=${encodeURIComponent(token)}&otp=1`
-    globalThis.sessionStorage.setItem(adminInvitationReturnToKey, returnTo)
-    void loginWithRedirect({
-      authorizationParams: { connection: 'email', prompt: 'login', login_hint: invitedEmail },
-      appState: { returnTo },
-    })
-  }
+  }, [invitedEmail, isAuthenticated, signedInEmail, token])
 
   return (
     <main className="auth-shell">
       <section className="auth-card invitation-card">
-        <div className="brand-row"><span className="brand-mark">N</span><span>Nivasa</span></div>
+        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></div>
         {isLoading || loadingInvitation || accepting ? (
           <p role="status">{accepting ? 'Verifying your email and accepting the invitation…' : loadingInvitation ? 'Loading invitation details…' : 'Checking your Auth0 session…'}</p>
         ) : accepted ? (
@@ -149,30 +133,21 @@ function AcceptAdminInvitationContent() {
             <p role="alert">{error}</p>
             <p>Ask the platform operator to send a new invitation if this one has expired or was already accepted.</p>
           </>
-        ) : isAuthenticated && !otpRequested ? (
-          <>
-            <div className="eyebrow">ADMINISTRATOR INVITATION</div>
-            <h1>Continue with Email OTP</h1>
-            <p>Only the invited email address can accept this invitation. No username or password is needed.</p>
-            <label className="invite-email-field"><span>Invited email</span><input type="email" value={invitedEmail ?? ''} readOnly aria-readonly="true" /></label>
-            <button className="primary" type="button" disabled={!invitedEmail} onClick={signIn}>Continue with Email OTP</button>
-          </>
         ) : isAuthenticated ? (
           <>
             <div className="eyebrow">VERIFYING ADMIN INVITATION</div>
             <h1>Signed in as {user?.email ?? 'an account'}</h1>
             <p>{error ?? `This invitation is for ${invitedEmail}. The invitation can only be accepted by that verified email address.`}</p>
             <label className="invite-email-field"><span>Invited email</span><input type="email" value={invitedEmail ?? ''} readOnly aria-readonly="true" /></label>
-            {error && <button className="primary" type="button" onClick={signIn}>Sign in as the invited email using OTP</button>}
+            <button className="secondary" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.href } })}>Sign out</button>
           </>
         ) : (
           <>
             <div className="eyebrow">ADMINISTRATOR INVITATION</div>
             <h1>Accept your invitation</h1>
             <p>Continue with Email OTP. This invitation can only be accepted by the invited email address.</p>
-            <label className="invite-email-field"><span>Invited email</span><input type="email" value={invitedEmail ?? ''} readOnly aria-readonly="true" /></label>
             {error && <p role="alert">{error}</p>}
-            <button className="primary" type="button" disabled={!invitedEmail} onClick={signIn}>Continue with Email OTP</button>
+            <EmbeddedLogin experienceName="Tenant Admin" initialEmail={invitedEmail ?? ''} lockEmail />
           </>
         )}
       </section>

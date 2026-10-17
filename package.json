@@ -4,11 +4,15 @@
   "version": "0.1.0",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
+    "config:validate": "node packages/app-platform/scripts/validate-config.ts",
+    "i18n:validate": "node packages/app-platform/scripts/validate-translations.ts",
+    "branding:validate": "node packages/app-platform/scripts/validate-assets.ts",
+    "platform:validate": "node packages/app-platform/scripts/validate-all.ts",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "test": "node scripts/run-vitest.mjs",
     "build": "turbo run build",
-    "ci": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build",
+    "ci": "pnpm run platform:validate && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build",
     "dev": "turbo run dev"
   },
   "devDependencies": {

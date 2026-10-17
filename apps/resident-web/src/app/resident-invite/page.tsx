@@ -5,6 +5,8 @@ import { Suspense, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth0 } from '../auth-provider'
+import { EmbeddedLogin } from '../../lib/auth-ui'
+import { getAppConfig } from '@nivasa/app-platform'
 
 const invitationApi = '/api/backend/v1/public/resident-invitations'
 type Invitation = { email: string; fullName: string; organizationName: string; unit: string }
@@ -16,7 +18,7 @@ export default function AcceptResidentInvitationPage() {
 function InvitationContent() {
   const params = useSearchParams()
   const token = params.get('token')
-  const { isAuthenticated, isLoading, user, loginWithRedirect } = useAuth0()
+  const { isAuthenticated, user, logout } = useAuth0()
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [lookupError, setLookupError] = useState<string | null>(null)
   const [accepted, setAccepted] = useState(false)
@@ -34,11 +36,6 @@ function InvitationContent() {
       .catch((cause) => { if (!cancelled) setLookupError(cause instanceof Error ? cause.message : 'Could not load the invitation') })
     return () => { cancelled = true }
   }, [token])
-
-  const continueToAuth = () => {
-    if (!invitation || !token) return
-    void loginWithRedirect({ authorizationParams: { connection: 'email', login_hint: invitation.email }, appState: { returnTo: `/resident-invite?token=${encodeURIComponent(token)}` } })
-  }
 
   const accept = async () => {
     if (!token) return
@@ -60,9 +57,9 @@ function InvitationContent() {
   if (accepted) return <InvitationShell><div className="eyebrow">INVITATION ACCEPTED</div><h1>Welcome, {invitation?.fullName}</h1><p>Your verified email is now linked to {invitation?.unit} at {invitation?.organizationName}.</p><Link className="primary wide" href="/">Continue</Link></InvitationShell>
   if (!invitation) return <InvitationShell><p role="status">Loading invitation details…</p></InvitationShell>
   const emailMatches = user?.email?.toLowerCase() === invitation.email.toLowerCase()
-  return <InvitationShell><div className="eyebrow">RESIDENT INVITATION</div><h1>Join {invitation.organizationName}</h1><p>You’ve been invited to {invitation.unit}. Sign in with the invited email to activate Resident access.</p><label className="invite-email-field"><span>Invited email</span><input type="email" value={invitation.email} readOnly aria-readonly="true" /></label>{!isAuthenticated ? <button className="primary wide" type="button" disabled={isLoading} onClick={continueToAuth}>Continue to secure sign in</button> : emailMatches ? <button className="primary wide" type="button" disabled={busy} onClick={() => void accept()}>{busy ? 'Accepting invitation…' : 'Accept invitation'}</button> : <p role="alert">Signed in as {user?.email ?? 'another account'}. Sign out and continue with {invitation.email}.</p>}{error && <p className="error-text" role="alert">{error}</p>}<p className="invitation-policy-note">The invitation expires after 7 days and can only be accepted by the invited email address.</p></InvitationShell>
+  return <InvitationShell><div className="eyebrow">RESIDENT INVITATION</div><h1>Join {invitation.organizationName}</h1><p>You’ve been invited to {invitation.unit}. Verify the invited email to activate Resident access.</p>{!isAuthenticated ? <EmbeddedLogin experienceName="Resident" initialEmail={invitation.email} lockEmail /> : emailMatches ? <button className="primary wide" type="button" disabled={busy} onClick={() => void accept()}>{busy ? 'Accepting invitation…' : 'Accept invitation'}</button> : <><p role="alert">Signed in as {user?.email ?? 'another account'}. Sign in with {invitation.email} to accept.</p><button className="secondary wide" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.href } })}>Sign out</button></>}{error && <p className="error-text" role="alert">{error}</p>}<p className="invitation-policy-note">The invitation expires after 7 days and can only be accepted by the invited email address.</p></InvitationShell>
 }
 
 function InvitationShell({ children }: { children: ReactNode }) {
-  return <main className="auth-shell"><section className="auth-card invitation-card"><div className="brand-row"><span className="brand-mark">N</span><span>Nivasa</span></div>{children}</section></main>
+  return <main className="auth-shell"><section className="auth-card invitation-card"><div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></div>{children}</section></main>
 }

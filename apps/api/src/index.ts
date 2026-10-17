@@ -11,7 +11,7 @@ import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calcul
 import { allocateManualPayment, parseManualPaymentAmount } from './manual-payments.js'
 import { createAdminInvitationToken, hashAdminInvitationToken, sendAdminInvitationEmail } from './admin-invitations.js'
 import { createResidentInvitationToken, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
-import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser } from './auth0-management.js'
+import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
 import { checkDatabaseReadiness, dropTenantDatabase, getPlatformPool, getTenantPool, provisionTenantDatabase } from './persistence.js'
 
 type ApiFaultCode = 'unauthorized' | 'forbidden' | 'not_found' | 'configuration_error' | 'dependency_unavailable' | 'tenant_selection_required' | 'data_integrity_error' | 'invalid_request'
@@ -568,6 +568,9 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     },
     '/v1/public/admin-invitations/lookup': {
       post: { tags: ['platform'], summary: 'Resolve the invited email from a valid administrator invitation token', responses: { '200': { description: 'Invited email address' }, '400': { description: 'Invitation token is invalid, expired, or already accepted' } } },
+    },
+    '/v1/public/passwordless/start': {
+      post: { tags: ['auth'], summary: 'Send an Email OTP only to an existing passwordless account', responses: { '200': { description: 'If the account exists, a sign-in code was sent' }, '400': { description: 'Invalid email or application' }, '503': { description: 'Identity service unavailable' } } },
     },
     '/v1/public/resident-invitations/lookup': {
       post: { tags: ['tenant'], summary: 'Resolve a resident invitation before Email OTP sign-in', responses: { '200': { description: 'Invited email, organization, and unit' }, '400': { description: 'Invitation is invalid, expired, or already accepted' } } },
@@ -1175,6 +1178,7 @@ const getAdminResidents = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   const result = await withTenantPool(access).query<{
     id: string
+    unit_id: string
     full_name: string
     email: string
     phone: string | null
@@ -1185,7 +1189,7 @@ const getAdminResidents = async (access: TenantAccess) => {
     billing_period: string | null
     payment_status: string
   }>(
-    `SELECT r.id, r.full_name, r.email::text, r.phone, r.occupancy_type, r.status,
+    `SELECT r.id, r.unit_id, r.full_name, r.email::text, r.phone, r.occupancy_type, r.status,
             u.number AS unit, u.building_name AS building,
             latest.billing_period,
             CASE
@@ -1215,6 +1219,7 @@ const getAdminResidents = async (access: TenantAccess) => {
   )
   return result.rows.map((resident) => ({
     id: resident.id,
+    unitId: resident.unit_id,
     name: resident.full_name,
     email: resident.email,
     phone: resident.phone,
@@ -1307,6 +1312,11 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
       [access.tenantId, input.unitId],
     )
     if (!unit.rows[0]) throw new ApiFault(400, 'invalid_request', 'The selected unit is no longer available. Refresh the unit list and try again.')
+    const activeResident = await client.query(
+      "SELECT id FROM residents WHERE unit_id = $1 AND status = 'active' LIMIT 1",
+      [input.unitId],
+    )
+    if (activeResident.rowCount) throw new ApiFault(409, 'invalid_request', 'This unit already has an active resident. Refresh the unit list and choose another unit.')
     unitLabel = `${unit.rows[0].building_name} · ${unit.rows[0].number}`
     const pending = await client.query<{ id: string; invited_by: string }>(
       `SELECT id, invited_by FROM resident_invitations
@@ -1790,6 +1800,7 @@ const getBillingResidents = async (db: BillingDatabase, tenantId: string, period
 type BillingUnitInput = {
   unit_id: string
   unit: string
+  building: string
   resident_count: string
   area_sqft: number | null
   opening_meter_reading: string | null
@@ -1797,18 +1808,20 @@ type BillingUnitInput = {
   previous_meter_reading: string | null
   extra_charge_minor: string
   extra_charge_description: string
+  excluded_from_billing: boolean
 }
 
 const getPeriodBillingUnitInputs = async (db: BillingDatabase, tenantId: string, period: string): Promise<BillingUnitInput[]> => {
   const result = await db.query<BillingUnitInput>(
-    `SELECT u.id AS unit_id, u.number AS unit,
+    `SELECT u.id AS unit_id, u.number AS unit, u.building_name AS building,
             COUNT(r.id) FILTER (WHERE r.status = 'active')::text AS resident_count,
             u.area_sqft,
             current_input.opening_meter_reading::text,
             current_input.closing_meter_reading::text,
             previous_input.closing_meter_reading::text AS previous_meter_reading,
             COALESCE(current_input.extra_charge_minor, 0)::text AS extra_charge_minor,
-            COALESCE(current_input.extra_charge_description, '') AS extra_charge_description
+            COALESCE(current_input.extra_charge_description, '') AS extra_charge_description,
+            COALESCE(current_input.excluded_from_billing, FALSE) AS excluded_from_billing
      FROM units u
      LEFT JOIN residents r ON r.unit_id = u.id
      LEFT JOIN billing_unit_inputs current_input
@@ -1824,10 +1837,11 @@ const getPeriodBillingUnitInputs = async (db: BillingDatabase, tenantId: string,
        LIMIT 1
      ) previous_input ON TRUE
      WHERE u.tenant_id = $1
-     GROUP BY u.id, u.number, u.area_sqft, current_input.opening_meter_reading,
+     GROUP BY u.id, u.number, u.building_name, u.area_sqft, current_input.opening_meter_reading,
               current_input.closing_meter_reading, previous_input.closing_meter_reading,
-              current_input.extra_charge_minor, current_input.extra_charge_description
-     ORDER BY u.number`,
+              current_input.extra_charge_minor, current_input.extra_charge_description,
+              current_input.excluded_from_billing
+     ORDER BY u.building_name, u.number`,
     [tenantId, `${period}-01`],
   )
   return result.rows
@@ -1861,15 +1875,16 @@ const getAdminBillingUnits = async (access: TenantAccess) => {
   }))
 }
 
-const getBillingExceptions = async (db: BillingDatabase, tenantId: string): Promise<string[]> => {
+const getBillingExceptions = async (db: BillingDatabase, tenantId: string, excludedUnitIds: string[]): Promise<string[]> => {
   const result = await db.query<{ unit: string; active_count: string }>(
     `SELECT u.number AS unit, COUNT(r.id) FILTER (WHERE r.status = 'active')::text AS active_count
      FROM units u LEFT JOIN residents r ON r.unit_id = u.id
      WHERE u.tenant_id = $1
      GROUP BY u.id, u.number
      HAVING COUNT(r.id) FILTER (WHERE r.status = 'active') <> 1
+       AND NOT (u.id = ANY($2::uuid[]))
      ORDER BY u.number`,
-    [tenantId],
+    [tenantId, excludedUnitIds],
   )
   return result.rows.map((row) => Number(row.active_count) === 0
     ? `Unit ${row.unit} has no active resident and will be excluded`
@@ -1879,18 +1894,21 @@ const getBillingExceptions = async (db: BillingDatabase, tenantId: string): Prom
 const billingDueDate = (period: string, dueDay: number): string => `${period}-${String(dueDay).padStart(2, '0')}`
 
 const createBillingSnapshot = async (db: BillingDatabase, access: TenantAccess, period: string) => {
-  const [rules, residents, unitExceptions, unitInputs] = await Promise.all([
+  const [rules, residents, unitInputs] = await Promise.all([
     readBillingRules(db),
     getBillingResidents(db, access.tenantId, period),
-    getBillingExceptions(db, access.tenantId),
     getPeriodBillingUnitInputs(db, access.tenantId, period),
   ])
   const inputByUnit = new Map(unitInputs.map((input) => [input.unit_id, input]))
+  const excludedUnitIds = unitInputs.filter((input) => input.excluded_from_billing).map((input) => input.unit_id)
+  const unitExceptions = await getBillingExceptions(db, access.tenantId, excludedUnitIds)
   const alreadyInvoiced = residents.filter((resident) => resident.already_invoiced)
-  const eligible = residents.filter((resident) => !resident.already_invoiced)
+  const excludedResidents = residents.filter((resident) => inputByUnit.get(resident.unit_id)?.excluded_from_billing)
+  const eligible = residents.filter((resident) => !resident.already_invoiced && !inputByUnit.get(resident.unit_id)?.excluded_from_billing)
   const exceptions = [
     ...unitExceptions,
     ...alreadyInvoiced.map((resident) => `Unit ${resident.unit} already has an invoice for ${period}`),
+    ...excludedResidents.map((resident) => `Unit ${resident.unit} is excluded from billing for ${period}`),
   ]
   const blockingExceptions: string[] = alreadyInvoiced.map((resident) => `Unit ${resident.unit} already has an invoice for ${period}`)
   for (const exception of unitExceptions) {
@@ -2009,6 +2027,7 @@ const createBillingSnapshot = async (db: BillingDatabase, access: TenantAccess, 
       previousMeterReading: input.previous_meter_reading,
       extraChargeMinor: input.extra_charge_minor,
       extraChargeDescription: input.extra_charge_description,
+      excludedFromBilling: input.excluded_from_billing,
     })),
     exceptions,
   })).digest('hex')
@@ -2031,7 +2050,7 @@ const createBillingSnapshot = async (db: BillingDatabase, access: TenantAccess, 
 const getAdminBilling = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   const db = withTenantPool(access)
-  const [rules, invoiceResult, runResult, units] = await Promise.all([
+  const [rules, invoiceResult, runResult, units, publishedPeriodsResult] = await Promise.all([
     readBillingRules(db),
     db.query<{
     id: string
@@ -2079,6 +2098,10 @@ const getAdminBilling = async (access: TenantAccess) => {
        LIMIT 12`,
     ),
     getAdminBillingUnits(access),
+    db.query<{ billing_period: string }>(
+      `SELECT to_char(billing_period, 'YYYY-MM') AS billing_period
+       FROM billing_runs ORDER BY billing_period DESC`,
+    ),
   ])
   return {
     rules,
@@ -2104,6 +2127,7 @@ const getAdminBilling = async (access: TenantAccess) => {
       publishedAt: run.published_at,
       currency: 'INR' as const,
     })),
+    publishedPeriods: publishedPeriodsResult.rows.map((run) => run.billing_period),
   }
 }
 
@@ -2209,6 +2233,7 @@ const getAdminBillingInputs = async (access: TenantAccess, periodInput: unknown)
   return inputs.map((input) => ({
     unitId: input.unit_id,
     unit: input.unit,
+    building: input.building,
     residentCount: Number(input.resident_count),
     areaSqft: input.area_sqft,
     openingMeterReading: input.previous_meter_reading === null
@@ -2218,6 +2243,7 @@ const getAdminBillingInputs = async (access: TenantAccess, periodInput: unknown)
     closingMeterReading: input.closing_meter_reading === null ? null : Number(input.closing_meter_reading),
     extraCharge: minorUnits(input.extra_charge_minor) / 100,
     extraChargeDescription: input.extra_charge_description,
+    excludedFromBilling: input.excluded_from_billing,
   }))
 }
 
@@ -2241,12 +2267,14 @@ const saveAdminBillingInputs = async (access: TenantAccess, rawInput: unknown) =
     const extraChargeMinor = Number(BigInt(amountParts[1] ?? '0') * 100n + BigInt((amountParts[2] ?? '').padEnd(2, '0') || '0'))
     const description = typeof row.extraChargeDescription === 'string' ? row.extraChargeDescription.trim() : ''
     if (description.length > 120) throw new ApiFault(400, 'invalid_request', 'Extra charge description must be 120 characters or fewer')
+    if (row.excludedFromBilling !== undefined && typeof row.excludedFromBilling !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Flat billing exclusion must be true or false')
     return {
       unitId: parseUnitId(row.unitId),
       openingMeterReading: parseMeterReading(row.openingMeterReading, 'Opening water meter reading'),
       closingMeterReading: parseMeterReading(row.closingMeterReading, 'Current water meter reading'),
       extraChargeMinor,
       extraChargeDescription: description,
+      excludedFromBilling: row.excludedFromBilling === true,
     }
   })
   if (new Set(inputs.map((input) => input.unitId)).size !== inputs.length) throw new ApiFault(400, 'invalid_request', 'A unit can only be included once')
@@ -2264,18 +2292,19 @@ const saveAdminBillingInputs = async (access: TenantAccess, rawInput: unknown) =
     await client.query(
       `INSERT INTO billing_unit_inputs
          (billing_period, unit_id, opening_meter_reading, closing_meter_reading,
-          extra_charge_minor, extra_charge_description, updated_by)
+          extra_charge_minor, extra_charge_description, excluded_from_billing, updated_by)
        SELECT $1::date, input.unit_id, input.opening_meter_reading, input.closing_meter_reading,
-              input.extra_charge_minor, input.extra_charge_description, $3
+              input.extra_charge_minor, input.extra_charge_description, input.excluded_from_billing, $3
        FROM jsonb_to_recordset($2::jsonb) AS input(
          unit_id uuid, opening_meter_reading numeric, closing_meter_reading numeric,
-         extra_charge_minor bigint, extra_charge_description text
+         extra_charge_minor bigint, extra_charge_description text, excluded_from_billing boolean
        )
        ON CONFLICT (billing_period, unit_id) DO UPDATE SET
          opening_meter_reading = EXCLUDED.opening_meter_reading,
          closing_meter_reading = EXCLUDED.closing_meter_reading,
          extra_charge_minor = EXCLUDED.extra_charge_minor,
          extra_charge_description = EXCLUDED.extra_charge_description,
+         excluded_from_billing = EXCLUDED.excluded_from_billing,
          updated_by = EXCLUDED.updated_by,
          updated_at = NOW()`,
       [`${period}-01`, JSON.stringify(inputs.map((input) => ({
@@ -2284,6 +2313,7 @@ const saveAdminBillingInputs = async (access: TenantAccess, rawInput: unknown) =
         closing_meter_reading: input.closingMeterReading,
         extra_charge_minor: input.extraChargeMinor,
         extra_charge_description: input.extraChargeDescription,
+        excluded_from_billing: input.excludedFromBilling,
       }))), access.subject],
     )
     await client.query('COMMIT')
@@ -2892,6 +2922,20 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       if (request.method === 'POST' && requestUrl.pathname === '/v1/public/auth/otp') {
         throw new ApiFault(410, 'configuration_error', 'Authentication is managed by the configured Auth0 Universal Login application')
       }
+      if (request.method === 'POST' && requestUrl.pathname === '/v1/public/passwordless/start') {
+        const bodyValue = await readJsonBody(request)
+        const body = typeof bodyValue === 'object' && bodyValue !== null && !Array.isArray(bodyValue)
+          ? bodyValue as Record<string, unknown>
+          : {}
+        const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
+        const application = body.application
+        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || (application !== 'admin' && application !== 'resident')) {
+          throw new ApiFault(400, 'invalid_request', 'Enter a valid email address and application')
+        }
+        await sendPasswordlessOtpToRegisteredUser(email, application)
+        respond(response, 200, { message: 'If this email is registered, a sign-in code has been sent.' }, requestId)
+        return
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/public/admin-invitations/accept') {
         respond(response, 200, await acceptAdminInvitation(request, requestId), requestId)
         return
@@ -3059,17 +3103,29 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
     } catch (error) {
       const apiFault = error instanceof ApiFault ? error : undefined
       const status = apiFault?.status ?? 503
-      const causeCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'unknown'
+      const errorObject = error && typeof error === 'object' ? error as { code?: unknown; cause?: { code?: unknown } } : undefined
+      const causeCode = String(errorObject?.code ?? errorObject?.cause?.code ?? 'unknown')
       const apartmentSchemaRequest = requestUrl.pathname === '/v1/admin/buildings' || requestUrl.pathname === '/v1/admin/apartments' || requestUrl.pathname.startsWith('/v1/admin/resident-invitations') || requestUrl.pathname.startsWith('/v1/public/resident-invitations')
       const billingSchemaRequest = requestUrl.pathname.startsWith('/v1/admin/billing')
       const tenantSchemaRequest = apartmentSchemaRequest || billingSchemaRequest
       const tenantSchemaUnavailable = !apiFault && tenantSchemaRequest && ['42P01', '42703', '3F000'].includes(causeCode)
       const tenantDatabaseMissing = !apiFault && tenantSchemaRequest && causeCode === '3D000'
       if (!apiFault) {
-        console.error(JSON.stringify({ level: 'error', event: 'request_failed', requestId, code: causeCode }))
+        const reason = error instanceof Error
+          ? error.message.replace(/https?:\/\/\S+/g, '[redacted-url]').replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, '[redacted-email]').slice(0, 300)
+          : 'Unknown error'
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'request_failed',
+          requestId,
+          method: request.method,
+          path: requestUrl.pathname,
+          code: causeCode,
+          reason,
+        }))
       }
       const dependencyMessage = tenantSchemaUnavailable && billingSchemaRequest
-        ? 'The selected tenant database is missing billing schema. Apply migrations/tenant_db/005_billing_runs.sql to that tenant database, then retry.'
+        ? 'The selected tenant database is missing billing schema. Apply the required migrations/tenant_db/005_billing_runs.sql through migrations/tenant_db/009_billing_unit_exclusions.sql, then retry.'
         : tenantSchemaUnavailable && apartmentSchemaRequest
           ? 'The selected tenant database is missing apartment or resident-invitation schema. Apply migrations/tenant_db/003_apartments.sql and migrations/tenant_db/004_resident_invitations.sql to that tenant database, then rebuild and restart the API.'
           : tenantDatabaseMissing

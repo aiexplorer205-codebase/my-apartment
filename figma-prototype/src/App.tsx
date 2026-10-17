@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react"
+import appConfig from "../../packages/app-platform/config/app-config.json"
 
 type Role = "resident" | "admin" | "operator"
 type Tone = "neutral" | "success" | "warning" | "danger" | "info"
@@ -298,8 +299,8 @@ function TopRoleSwitcher({
   return (
     <div className="role-switcher">
       <div className="switch-brand">
-        <span className="brand-mark">N</span>
-        <span>Nivasa</span>
+        <span className="brand-mark">{appConfig.application.monogram}</span>
+        <span>{appConfig.application.productName}</span>
       </div>
       <div className="role-tabs">
         <button
@@ -377,8 +378,8 @@ function SignInScreen({
   return (
     <div className="auth-shell">
       <div className="auth-brand">
-        <span className="brand-mark">N</span>
-        <span>Nivasa</span>
+        <span className="brand-mark">{appConfig.application.monogram}</span>
+        <span>{appConfig.application.productName}</span>
       </div>
       <div className="auth-layout">
         <div className="auth-story">
@@ -406,7 +407,7 @@ function SignInScreen({
         </div>
         <div className="auth-card">
           <div className="auth-heading">
-            <span className="auth-mobile-mark">N</span>
+            <span className="auth-mobile-mark">{appConfig.application.monogram}</span>
             <b>Welcome back</b>
             <p>Choose a demo workspace and sign in to continue.</p>
           </div>
@@ -1115,9 +1116,9 @@ function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <span className="brand-mark">N</span>
+        <span className="brand-mark">{appConfig.application.monogram}</span>
         <div>
-          <b>Nivasa</b>
+          <b>{appConfig.application.productName}</b>
           <span>
             {role === "admin" ? "APARTMENT ADMIN" : "PLATFORM OPERATIONS"}
           </span>

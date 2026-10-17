@@ -1,17 +1,21 @@
 import type { MetadataRoute } from 'next'
+import { getAppConfig, getBrand } from '@nivasa/app-platform'
 
 export default function manifest(): MetadataRoute.Manifest {
+  const config = getAppConfig()
+  const brand = getBrand()
+
   return {
-    name: 'Nivasa Resident',
-    short_name: 'Nivasa',
-    description: 'Resident services and apartment updates',
+    name: `${config.application.productName} | ${config.application.residentName}`,
+    short_name: config.application.productName,
+    description: config.application.description,
     start_url: '/',
     display: 'standalone',
     background_color: '#f6f7f8',
-    theme_color: '#174c43',
+    theme_color: brand.theme.primaryColor,
     icons: [
-      { src: '/icons/nivasa.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
-      { src: '/icons/nivasa.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
+      { src: brand.assets.logo, sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+      { src: brand.assets.logo, sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
     ],
   }
 }

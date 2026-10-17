@@ -13,7 +13,8 @@
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@nivasa/design-tokens": "workspace:*"
+    "@nivasa/design-tokens": "workspace:*",
+    "@nivasa/app-platform": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.11.0",

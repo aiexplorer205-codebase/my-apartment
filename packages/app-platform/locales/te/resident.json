@@ -1,0 +1,75 @@
+{
+  "greeting": {
+    "morning": "శుభోదయం",
+    "afternoon": "శుభ మధ్యాహ్నం",
+    "evening": "శుభ సాయంత్రం",
+    "defaultName": "మిత్రమా"
+  },
+  "workspace": {
+    "currentWorkspace": "ప్రస్తుత వర్క్‌స్పేస్",
+    "yourCommunity": "మీ కమ్యూనిటీ"
+  },
+  "history": {
+    "title": "చెల్లింపుల చరిత్ర",
+    "subtitle": "ఇన్‌వాయిస్‌లు మరియు రసీదులు"
+  },
+  "notices": {
+    "title": "నోటీసులు",
+    "unreadNotice_one": "{{count}} చదవనిది",
+    "unreadNotice_other": "{{count}} చదవనివి"
+  },
+  "profile": {
+    "title": "నివాసి ప్రొఫైల్",
+    "updated": "మీ ప్రొఫైల్ వివరాలు నవీకరించబడ్డాయి.",
+    "updateError": "మీ ప్రొఫైల్‌ను నవీకరించడం సాధ్యం కాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.",
+    "saving": "భద్రపరుస్తోంది..."
+  },
+  "billing": {
+    "dueInDays": "{{days}} రోజుల్లో గడువు ముగుస్తుంది",
+    "overdue": "గడువు దాటిన చెల్లింపు",
+    "payNow": "ఇప్పుడే చెల్లించండి",
+    "noDue": "రాబోయే బకాయిలు లేవు"
+  },
+  "dashboard": {
+    "brand": "నివాసి సేవలు",
+    "account": "నివాసి ఖాతా",
+    "subtitle": {
+      "home": "మీ ఇల్లు, చెల్లింపులు మరియు కమ్యూనిటీ వివరాలు ఒకేచోట.",
+      "payments": "మీ బకాయిని పరిశీలించి ఆఫ్‌లైన్ చెల్లింపును నమోదు చేయండి.",
+      "history": "చెల్లింపులు మరియు నిర్ధారణల పూర్తి వివరాలు.",
+      "notices": "మీ అపార్ట్‌మెంట్ కమ్యూనిటీ నుండి తాజా సమాచారం.",
+      "profile": "మీ నివాసి మరియు యూనిట్ వివరాలు."
+    },
+    "currentBill": "ప్రస్తుత బిల్లు · {{period}}",
+    "currentBalance": "ప్రస్తుత బకాయి",
+    "amountDue": "మీ యూనిట్‌కు ప్రస్తుతం చెల్లించాల్సిన మొత్తం",
+    "allCaughtUp": "మీ చెల్లింపులన్నీ పూర్తయ్యాయి",
+    "noOpenInvoice": "చెల్లించాల్సిన ఇన్‌వాయిస్ లేదు",
+    "recordPayment": "చెల్లింపును నమోదు చేయండి",
+    "outstanding": "మొత్తం బకాయి",
+    "openInvoices_one": "{{count}} చెల్లించాల్సిన ఇన్‌వాయిస్",
+    "openInvoices_other": "{{count}} చెల్లించాల్సిన ఇన్‌వాయిస్‌లు",
+    "awaitingConfirmation": "నిర్ధారణ కోసం వేచి ఉంది",
+    "amountAwaitingAdmin": "నిర్వాహకుడి నిర్ధారణ కోసం {{amount}} వేచి ఉంది",
+    "amountAwaitingConfirmation": "నిర్ధారణ కోసం {{amount}} వేచి ఉంది",
+    "paidInFull": "పూర్తిగా చెల్లించబడింది",
+    "paid": "చెల్లించబడింది",
+    "reportedOfflinePayments": "నివేదించిన ఆఫ్‌లైన్ చెల్లింపులు",
+    "unreadNotices": "చదవని నోటీసులు",
+    "communityUpdates": "కమ్యూనిటీ సమాచారం",
+    "currentBillTitle": "ప్రస్తుత బిల్లు",
+    "maintenance": "నిర్వహణ",
+    "water": "నీరు",
+    "sinkingFund": "సింకింగ్ ఫండ్",
+    "previousDues": "గత బకాయిలు",
+    "fees": "ఫీజులు",
+    "roundOff": "రౌండ్ ఆఫ్",
+    "invoiceTotal": "ఇన్‌వాయిస్ మొత్తం",
+    "paymentUnavailable": "చెల్లింపు ప్రొవైడర్ మరియు సెటిల్‌మెంట్ విధానం ఆమోదం పొందే వరకు ఆన్‌లైన్ చెల్లింపులు నిలిపివేయబడ్డాయి.",
+    "recentTransactions": "ఇటీవలి లావాదేవీలు",
+    "noPaymentRecords": "ఇంకా చెల్లింపు వివరాలు లేవు.",
+    "communityNotices": "కమ్యూనిటీ నోటీసులు",
+    "noPublishedNotices": "ప్రచురించిన నోటీసులు ఏవీ లేవు."
+  }
+}
+

@@ -7,3 +7,4 @@
 \i /migrations/tenant_db/006_billing_templates.sql
 \i /migrations/tenant_db/007_manual_payment_confirmation.sql
 \i /migrations/tenant_db/008_invoice_rounding.sql
+\i /migrations/tenant_db/009_billing_unit_exclusions.sql

@@ -12,12 +12,13 @@ export default defineConfig({
       '@nivasa/domain': path.resolve(root, 'packages/domain/src/index.ts'),
       '@nivasa/application': path.resolve(root, 'packages/application/src/index.ts'),
       '@nivasa/contracts': path.resolve(root, 'packages/contracts/src/index.ts'),
+      '@nivasa/app-platform': path.resolve(root, 'packages/app-platform/src/index.ts'),
       '@nivasa/ports': path.resolve(root, 'infrastructure/ports/src/index.ts'),
       '@nivasa/adapters': path.resolve(root, 'infrastructure/adapters/src/index.ts'),
     },
   },
   test: {
     environment: 'node',
-    include: ['tests/**/*.spec.ts'],
+    include: ['tests/**/*.spec.ts', 'packages/app-platform/tests/**/*.spec.ts'],
   },
 })

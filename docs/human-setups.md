@@ -48,3 +48,13 @@ Keep database, Redis, API, and app ports private. Restrict Operator ingress with
 ## Resident PWA behavior
 
 The Resident app exposes a web manifest and registers a network-only service worker. Decide how users should be told when they are offline; authenticated API responses and tenant data are not cached for offline authorization or access.
+
+
+## For testing build web apps as 
+
+You can build a frontend without rebuilding Compose images. From the repo root, for example:
+
+`pnpm --filter @nivasa/admin-web build`
+
+Replace admin-web with `login-web`, `resident-web`, or `operator-web` for another app. This runs that app’s next build script. The repo-wide pnpm build runs the Turbo build for all packages and apps.
+One distinction: the Compose dev override runs next dev, which compiles as you work. If you’re using that setup, you usually don’t need a separate frontend build. If you want the running container to use a production build, you’ll need to rebuild that app’s Docker image and recreate its container; a local pnpm ... build does not update the image.

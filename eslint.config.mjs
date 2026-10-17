@@ -24,6 +24,8 @@ export default [
         fetch: 'readonly',
         HTMLInputElement: 'readonly',
         HTMLFormElement: 'readonly',
+        HTMLElement: 'readonly',
+        Element: 'readonly',
         NodeJS: 'readonly',
       },
     },

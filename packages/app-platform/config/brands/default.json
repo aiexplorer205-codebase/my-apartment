@@ -1,0 +1,13 @@
+{
+  "brandId": "default",
+  "assets": {
+    "logo": "/brands/default/logo.svg",
+    "logoDark": "/brands/default/logo-dark.svg",
+    "favicon": "/brands/default/favicon.ico"
+  },
+  "theme": {
+    "primaryColor": "#174c43",
+    "fontFamily": "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+  }
+}
+

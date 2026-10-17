@@ -1,0 +1,56 @@
+{
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "refresh": "Refresh",
+    "signOut": "Sign out",
+    "signIn": "Sign in",
+    "search": "Search",
+    "close": "Close",
+    "retry": "Try again",
+    "back": "Back",
+    "submit": "Submit"
+  },
+  "status": {
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "success": "Success",
+    "empty": "No data available",
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "navigation": {
+    "overview": "Overview",
+    "buildings": "Buildings & Units",
+    "residents": "Residents",
+    "billing": "Billing",
+    "collections": "Collections",
+    "overdues": "Overdues",
+    "reports": "Reports",
+    "settings": "Settings",
+    "home": "Home",
+    "history": "History",
+    "notices": "Notices",
+    "directory": "Directory",
+    "profile": "Profile",
+    "support": "Support"
+  },
+  "labels": {
+    "workspace": "Workspace",
+    "currentWorkspace": "Current workspace",
+    "language": "Language",
+    "selectLanguage": "Select language",
+    "needHelp": "Need a hand?",
+    "contactSupport": "Contact your workspace support"
+  },
+  "messages": {
+    "welcome": "Welcome to {{productName}}",
+    "pullToRefresh": "Pull to refresh",
+    "releaseToRefresh": "Release to refresh",
+    "refreshing": "Refreshing…",
+    "copyright": "© {{year}} {{owner}}. {{suffix}}"
+  }
+}
+

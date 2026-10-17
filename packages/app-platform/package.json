@@ -1,0 +1,38 @@
+{
+  "name": "@nivasa/app-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config.ts",
+    "./locales": "./src/locales.ts",
+    "./branding": "./src/branding.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/client": "./src/i18n/client.tsx",
+    "./i18n/server": "./src/i18n/server.ts",
+    "./components": "./src/components/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "validate:config": "node scripts/validate-config.ts",
+    "validate:translations": "node scripts/validate-translations.ts",
+    "validate:assets": "node scripts/validate-assets.ts",
+    "validate": "node scripts/validate-all.ts"
+  },
+  "dependencies": {
+    "i18next": "^24.2.2",
+    "react-i18next": "^15.4.1"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -71,7 +71,8 @@ docker compose exec -T postgres psql -U postgres -d tenant_template \
   -f /migrations/tenant_db/005_billing_runs.sql \
   -f /migrations/tenant_db/006_billing_templates.sql \
   -f /migrations/tenant_db/007_manual_payment_confirmation.sql \
-  -f /migrations/tenant_db/008_invoice_rounding.sql
+  -f /migrations/tenant_db/008_invoice_rounding.sql \
+  -f /migrations/tenant_db/009_billing_unit_exclusions.sql
 ```
 
 The template migration only affects tenant databases created afterward. To
@@ -89,7 +90,8 @@ docker compose exec -T postgres psql -U postgres -d YOUR_TENANT_DATABASE \
   -f /migrations/tenant_db/005_billing_runs.sql \
   -f /migrations/tenant_db/006_billing_templates.sql \
   -f /migrations/tenant_db/007_manual_payment_confirmation.sql \
-  -f /migrations/tenant_db/008_invoice_rounding.sql
+  -f /migrations/tenant_db/008_invoice_rounding.sql \
+  -f /migrations/tenant_db/009_billing_unit_exclusions.sql
 ```
 
 Replace `YOUR_TENANT_DATABASE` with the `database_name` for the organization

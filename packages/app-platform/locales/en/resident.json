@@ -1,0 +1,75 @@
+{
+  "greeting": {
+    "morning": "Good morning",
+    "afternoon": "Good afternoon",
+    "evening": "Good evening",
+    "defaultName": "there"
+  },
+  "workspace": {
+    "currentWorkspace": "Current workspace",
+    "yourCommunity": "Your community"
+  },
+  "history": {
+    "title": "Payment history",
+    "subtitle": "Invoices and receipts"
+  },
+  "notices": {
+    "title": "Notices",
+    "unreadNotice_one": "{{count}} unread",
+    "unreadNotice_other": "{{count}} unread"
+  },
+  "profile": {
+    "title": "Resident profile",
+    "updated": "Your profile details have been updated.",
+    "updateError": "Could not update your profile. Please try again.",
+    "saving": "Saving..."
+  },
+  "billing": {
+    "dueInDays": "Due in {{days}} days",
+    "overdue": "Payment overdue",
+    "payNow": "Pay now",
+    "noDue": "No upcoming dues"
+  },
+  "dashboard": {
+    "brand": "RESIDENT EXPERIENCE",
+    "account": "Resident account",
+    "subtitle": {
+      "home": "Your home, payments, and community at a glance.",
+      "payments": "Review your balance and record an offline payment.",
+      "history": "A clear record of payments and confirmations.",
+      "notices": "Updates from your apartment community.",
+      "profile": "Your resident and unit details."
+    },
+    "currentBill": "CURRENT BILL · {{period}}",
+    "currentBalance": "CURRENT BALANCE",
+    "amountDue": "Amount currently due for your unit",
+    "allCaughtUp": "You are all caught up",
+    "noOpenInvoice": "No open invoice",
+    "recordPayment": "Record a payment",
+    "outstanding": "Outstanding balance",
+    "openInvoices_one": "{{count}} open invoice",
+    "openInvoices_other": "{{count}} open invoices",
+    "awaitingConfirmation": "Awaiting confirmation",
+    "amountAwaitingAdmin": "{{amount}} awaiting administrator confirmation",
+    "amountAwaitingConfirmation": "{{amount}} awaiting confirmation",
+    "paidInFull": "Paid in full",
+    "paid": "Paid",
+    "reportedOfflinePayments": "Reported offline payments",
+    "unreadNotices": "Unread notices",
+    "communityUpdates": "Community updates",
+    "currentBillTitle": "Current bill",
+    "maintenance": "Maintenance",
+    "water": "Water",
+    "sinkingFund": "Sinking fund",
+    "previousDues": "Previous dues",
+    "fees": "Fees",
+    "roundOff": "Round off",
+    "invoiceTotal": "Invoice total",
+    "paymentUnavailable": "Online payments are disabled until a payment provider and settlement model are approved.",
+    "recentTransactions": "Recent transactions",
+    "noPaymentRecords": "No payment records yet.",
+    "communityNotices": "Community notices",
+    "noPublishedNotices": "No published notices."
+  }
+}
+

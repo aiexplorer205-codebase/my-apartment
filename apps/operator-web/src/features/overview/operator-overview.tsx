@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
 import { useOperatorOverview } from '../../lib/operator-api'
 import { formValidationMessage } from '../../lib/form-validation'
+import { getAppConfig } from '@nivasa/app-platform'
 
 type OperatorNavIconName = 'grid' | 'building' | 'settings' | 'chart' | 'megaphone' | 'wallet' | 'support' | 'audit'
 
@@ -165,8 +166,8 @@ function Overview() {
   return (
     <main className="operator-shell">
       <aside className="operator-sidebar">
-        <div className="brand-row"><span className="brand-mark">N</span><span><strong>Nivasa</strong><small>PLATFORM OPERATIONS</small></span></div>
-        <div className="operator-tenant"><span className="tenant-shield">N</span><span>Global workspace</span></div>
+        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span><strong>{getAppConfig().application.productName}</strong><small>PLATFORM OPERATIONS</small></span></div>
+        <div className="operator-tenant"><span className="tenant-shield">{getAppConfig().application.monogram}</span><span>Global workspace</span></div>
         <nav className="nav-list" aria-label="Platform operations navigation">
           {navigation.map((item) => <button key={item.id} type="button" className={`nav-item${activeView === item.id ? ' active' : ''}`} aria-label={item.label} title={item.label} aria-current={activeView === item.id ? 'page' : undefined} onClick={() => setActiveView(item.id)}><OperatorNavIcon name={item.icon} /><span className="nav-label">{item.label}</span></button>)}
         </nav>

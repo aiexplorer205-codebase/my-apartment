@@ -1,0 +1,32 @@
+{
+  "application": {
+    "productName": "My Apartment by Block5",
+    "monogram": "B",
+    "adminName": "Apartment Admin",
+    "residentName": "Resident",
+    "description": "Tenant-aware apartment administration and resident services"
+  },
+  "company": {
+    "name": "Block5 Tech.",
+    "displayName": "Block5",
+    "website": "https://nivasa.local"
+  },
+  "copyright": {
+    "owner": "Block5 Tech",
+    "startYear": 2026,
+    "suffix": "All rights reserved."
+  },
+  "support": {
+    "email": "support@block5.co.in",
+    "phone": "+91 90 0000 0000",
+    "helpUrl": "https://nivasa.local/help"
+  },
+  "branding": {
+    "defaultBrand": "default"
+  },
+  "localization": {
+    "defaultLocale": "en",
+    "supportedLocales": ["en", "te"]
+  }
+}
+

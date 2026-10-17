@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type 
 import type { ReactNode } from 'react'
 import { useApiQuery } from './use-api'
 import type { TenantMembership } from '@nivasa/auth-types'
+import { getAppConfig, getFormattedCopyright } from '@nivasa/app-platform'
 
 
 export function AuthBoundary({ children }: { children: ReactNode }) {
@@ -19,7 +20,7 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
   if (!isAuthenticated) {
     return (
       <main className="auth-shell app-sign-in">
-        <header className="auth-brand"><span className="brand-mark">N</span><span>Nivasa</span></header>
+        <header className="auth-brand"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></header>
         <div className="auth-layout app-sign-in-layout">
           <section className="auth-story">
             <span className="context-kicker">ONE HOME. ONE CLEAR VIEW.</span>
@@ -28,12 +29,12 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
             <div className="auth-trust"><span><AppShieldIcon /></span><div><b>Private by design</b><small>Every organization is isolated with role based access.</small></div></div>
           </section>
           <section className="auth-card app-sign-in-card" aria-labelledby="signin-title">
-            <div className="auth-heading"><span className="auth-mobile-mark">N</span><b id="signin-title">Welcome back</b><p>Sign in to your {experienceName} workspace.</p></div>
+            <div className="auth-heading"><span className="auth-mobile-mark">{getAppConfig().application.monogram}</span><b id="signin-title">Welcome back</b><p>Sign in to your {experienceName} workspace.</p></div>
             <EmbeddedLogin experienceName={experienceName} />
             <p className="auth-security"><AppShieldIcon /> Secure, encrypted access · Email verification</p>
           </section>
         </div>
-        <footer className="auth-footer"><span>© 2026 Nivasa Technologies</span><span>Privacy · Terms · Help</span></footer>
+        <footer className="auth-footer"><span>{getFormattedCopyright()}</span><span>Privacy · Terms · Help</span></footer>
       </main>
     )
   }
@@ -43,7 +44,7 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
   return (
     <>
       <div className="session-bar">
-        <div className="session-brand"><span className="brand-mark">N</span><strong>Nivasa</strong></div>
+        <div className="session-brand"><span className="brand-mark">{getAppConfig().application.monogram}</span><strong>{getAppConfig().application.productName}</strong></div>
         <TenantWorkspacePicker />
         <div className="session-account"><span>{user?.email ?? 'Authenticated account'}</span>
         <button className="secondary" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>Sign out</button>
@@ -104,8 +105,8 @@ function splitOtp(value: string): OtpParts {
   return [digits.slice(0, 1), digits.slice(1, 2), digits.slice(2, 3), digits.slice(3, 4)]
 }
 
-export function EmbeddedLogin({ experienceName }: { experienceName: string }) {
-  const [email, setEmail] = useState('')
+export function EmbeddedLogin({ experienceName, initialEmail = '', lockEmail = false }: { experienceName: string; initialEmail?: string; lockEmail?: boolean }) {
+  const [email, setEmail] = useState(initialEmail)
   const [emailTouched, setEmailTouched] = useState(false)
   const [otpParts, setOtpParts] = useState<OtpParts>(['', '', '', ''])
   const [codeSent, setCodeSent] = useState(false)
@@ -167,18 +168,13 @@ export function EmbeddedLogin({ experienceName }: { experienceName: string }) {
         return
       }
 
-      const configResponse = await fetch('/api/auth/passwordless/config', { cache: 'no-store' })
-      const config = await configResponse.json() as { domain?: string; clientId?: string; error?: string }
-      if (!configResponse.ok || !config.domain || !config.clientId) throw new Error(config.error ?? 'Sign in is not configured.')
-      const response = await fetch(`${config.domain}/passwordless/start`, {
+      const response = await fetch('/api/backend/v1/public/passwordless/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: config.clientId, connection: 'email', email, send: 'code' }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), application: 'admin' }),
       })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error_description?: string; message?: string } | null
-        throw new Error(payload?.error_description ?? payload?.message ?? 'Could not send a verification code. Check the email and try again.')
-      }
+      const payload = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(payload.message ?? 'Could not send a verification code. Try again.')
       setCodeSent(true)
       globalThis.setTimeout(() => otpInputs.current[0]?.focus(), 0)
     } catch (cause) {
@@ -192,18 +188,18 @@ export function EmbeddedLogin({ experienceName }: { experienceName: string }) {
     <form className={`auth-form embedded-login-form${codeSent ? ' otp-active' : ''}`} onSubmit={(event) => void submit(event)}>
       <label>
         <span>Email address</span>
-        <input type="email" autoComplete="email" required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} onBlur={() => setEmailTouched(true)} aria-invalid={emailTouched && !emailIsValid} disabled={busy || codeSent} />
+        <input type="email" autoComplete="email" required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} onBlur={() => setEmailTouched(true)} aria-invalid={emailTouched && !emailIsValid} readOnly={lockEmail} disabled={busy || codeSent} />
       </label>
       {!codeSent && emailTouched && !emailIsValid && <p className="embedded-login-error" role="alert">Enter a valid email address to receive an OTP.</p>}
       {!codeSent && <button className="button primary wide" type="submit" disabled={busy || !emailIsValid}>{busy ? 'Sending OTP…' : 'Send OTP'}</button>}
       {codeSent && <div className="otp-entry">
-        <label className="otp-label" htmlFor="admin-otp-0">Enter the 4-digit OTP sent to {email}</label>
+        <label className="otp-label" htmlFor="admin-otp-0">If this email is registered, we’ve sent an OTP to {email}. Check your inbox.</label>
         <div className="auth-otp-boxes" role="group" aria-label="Four digit email verification code">
           {otpPartLengths.map((length, index) => (
             <input key={index} ref={(element) => { otpInputs.current[index] = element }} id={index === 0 ? 'admin-otp-0' : undefined} type="text" inputMode="numeric" autoComplete={index === 0 ? 'one-time-code' : 'off'} aria-label={`OTP digit ${index + 1}`} maxLength={index === 0 ? 4 : length} value={otpParts[index]} onChange={(event) => updateOtp(index, event.target.value)} onPaste={handleOtpPaste} onKeyDown={(event) => handleOtpKeyDown(index, event)} disabled={busy} />
           ))}
         </div>
-        <button className="otp-change-email" type="button" disabled={busy} onClick={() => { setCodeSent(false); setOtpParts(['', '', '', '']); setError(null) }}>Change email</button>
+        {!lockEmail && <button className="otp-change-email" type="button" disabled={busy} onClick={() => { setCodeSent(false); setOtpParts(['', '', '', '']); setError(null) }}>Change email</button>}
       </div>}
       {error && <p className="embedded-login-error" role="alert">{error}</p>}
       {codeSent && <button className="button primary wide" type="submit" disabled={busy || code.length !== 4}>{busy ? 'Signing in…' : `Login to ${experienceName} app`}</button>}

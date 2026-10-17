@@ -1,0 +1,43 @@
+{
+  "header": {
+    "title": "Apartment Admin",
+    "description": "Tenant-aware apartment administration",
+    "role": "Administrator",
+    "apartmentAdmin": "Apartment admin"
+  },
+  "overview": {
+    "eyebrow": "APARTMENT OPERATIONS",
+    "summary": "A live summary of {{organization}}.",
+    "defaultSummary": "A live summary of your apartment operations.",
+    "refreshData": "Refresh data",
+    "totalBilled": "Total billed",
+    "totalBilledDetail": "Latest invoice balance per resident",
+    "collected": "Collected",
+    "collectedDetail": "Verified payment records",
+    "outstanding": "Outstanding",
+    "outstandingDetail": "Billed less collected",
+    "overdue": "Overdue",
+    "overdueDetail": "Past-due open invoices",
+    "noMetrics": "No organization metrics are available to this account."
+  },
+  "units": {
+    "title": "Buildings & Units",
+    "name": "Unit",
+    "building": "Building",
+    "occupancy": "Occupancy",
+    "paymentStatus": "Payment status"
+  },
+  "transactions": {
+    "recent": "Recent Transactions",
+    "resident": "Resident",
+    "unit": "Unit",
+    "amount": "Amount",
+    "status": "Status",
+    "date": "Date"
+  },
+  "stats": {
+    "residentCount_one": "{{count}} resident",
+    "residentCount_other": "{{count}} residents"
+  }
+}
+

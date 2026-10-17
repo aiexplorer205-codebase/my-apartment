@@ -47,6 +47,9 @@ importers:
       '@nivasa/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@nivasa/app-platform':
+        specifier: workspace:*
+        version: link:../../packages/app-platform
       '@nivasa/auth-types':
         specifier: workspace:*
         version: link:../../packages/auth-types
@@ -56,6 +59,9 @@ importers:
       '@nivasa/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      i18next:
+        specifier: ^24.2.2
+        version: 24.2.3(typescript@5.9.3)
       next:
         specifier: ^15.0.0
         version: 15.5.27(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -65,6 +71,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.3.0(react@19.3.0)
+      react-i18next:
+        specifier: ^15.4.1
+        version: 15.7.4(i18next@24.2.3(typescript@5.9.3))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
     devDependencies:
       '@types/node':
         specifier: ^22.11.0
@@ -109,6 +118,9 @@ importers:
 
   apps/login-web:
     dependencies:
+      '@nivasa/app-platform':
+        specifier: workspace:*
+        version: link:../../packages/app-platform
       '@nivasa/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
@@ -143,6 +155,9 @@ importers:
       '@nivasa/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@nivasa/app-platform':
+        specifier: workspace:*
+        version: link:../../packages/app-platform
       '@nivasa/auth-types':
         specifier: workspace:*
         version: link:../../packages/auth-types
@@ -183,6 +198,9 @@ importers:
       '@nivasa/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@nivasa/app-platform':
+        specifier: workspace:*
+        version: link:../../packages/app-platform
       '@nivasa/auth-types':
         specifier: workspace:*
         version: link:../../packages/auth-types
@@ -192,6 +210,9 @@ importers:
       '@nivasa/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      i18next:
+        specifier: ^24.2.2
+        version: 24.2.3(typescript@5.9.3)
       next:
         specifier: ^15.0.0
         version: 15.5.27(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -201,6 +222,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.3.0(react@19.3.0)
+      react-i18next:
+        specifier: ^15.4.1
+        version: 15.7.4(i18next@24.2.3(typescript@5.9.3))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
     devDependencies:
       '@types/node':
         specifier: ^22.11.0
@@ -265,6 +289,31 @@ importers:
 
   packages/api-client: {}
 
+  packages/app-platform:
+    dependencies:
+      i18next:
+        specifier: ^24.2.2
+        version: 24.2.3(typescript@5.9.3)
+      react:
+        specifier: '>=18'
+        version: 19.3.0
+      react-dom:
+        specifier: '>=18'
+        version: 19.3.0(react@19.3.0)
+      react-i18next:
+        specifier: ^15.4.1
+        version: 15.7.4(i18next@24.2.3(typescript@5.9.3))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.3.0(@types/react@19.3.0)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/application:
     dependencies:
       '@nivasa/config':
@@ -327,6 +376,10 @@ packages:
       next: ^14.2.35 || ~15.0.7 || ~15.1.11 || ~15.2.8 || ~15.3.8 || ~15.4.10 || ~15.5.9 || ^16.0.10
       react: ^18.0.0 || ~19.0.1 ||  ~19.1.2 || ^19.2.1
       react-dom: ^18.0.0 || ~19.0.1 || ~19.1.2 || ^19.2.1
+
+  '@babel/runtime@7.29.10':
+    resolution: {integrity: sha512-NpugTzbKgGrNe45Ui32cN8vCFFMxVtP/9rtfwv0nP5FRDAjvYBxJcLVpYA9mr1jxP6cnIT7x9LUzuDTbWYYNRA==}
+    engines: {node: '>=6.9.0'}
 
   '@edge-runtime/cookies@5.0.2':
     resolution: {integrity: sha512-Sd8LcWpZk/SWEeKGE8LT6gMm5MGfX/wm+GPnh1eBEtCpya3vYqn37wYknwAHw92ONoyyREl1hJwxV/Qx2DWNOg==}
@@ -1242,6 +1295,17 @@ packages:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
     engines: {node: '>=8'}
 
+  html-parse-stringify@3.1.0:
+    resolution: {integrity: sha512-E0oAXcELOtsXe+BmpJ2EZyedbldPpriV5vICzEuo6xjC/D1lDukOI7KrpfQGF2Qc4wWEy0nk3bFORS2K5ZAhFQ==}
+
+  i18next@24.2.3:
+    resolution: {integrity: sha512-lfbf80OzkocvX7nmZtu7nSTNbrTYR52sLWxPtlXX1zAhVw8WEnFk4puUkCR4B1dNQwbSpEHHHemcZu//7EcB7A==}
+    peerDependencies:
+      typescript: ^5
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   ignore@5.3.2:
     resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
     engines: {node: '>= 4'}
@@ -1467,6 +1531,22 @@ packages:
     peerDependencies:
       react: ^19.3.0
 
+  react-i18next@15.7.4:
+    resolution: {integrity: sha512-nyU8iKNrI5uDJch0z9+Y5XEr34b0wkyYj3Rp+tfbahxtlswxSCjcUL9H0nqXo9IR3/t5Y5PKIA3fx3MfUyR9Xw==}
+    peerDependencies:
+      i18next: '>= 23.4.0'
+      react: '>= 16.8.0'
+      react-dom: '*'
+      react-native: '*'
+      typescript: ^5
+    peerDependenciesMeta:
+      react-dom:
+        optional: true
+      react-native:
+        optional: true
+      typescript:
+        optional: true
+
   react@19.3.0:
     resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
     engines: {node: '>=0.10.0'}
@@ -1664,6 +1744,10 @@ packages:
       jsdom:
         optional: true
 
+  void-elements@3.1.0:
+    resolution: {integrity: sha512-Dhxzh5HZuiHQhbvTW9AMetFfBHDMYpo23Uo9btPXgdYP+3T5S+p+jgNy7spra+veYhBP2dCSgxR/i2Y02h5/6w==}
+    engines: {node: '>=0.10.0'}
+
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
     engines: {node: '>= 8'}
@@ -1699,6 +1783,8 @@ snapshots:
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
       swr: 2.5.1(react@19.3.0)
+
+  '@babel/runtime@7.29.10': {}
 
   '@edge-runtime/cookies@5.0.2': {}
 
@@ -2476,6 +2562,16 @@ snapshots:
 
   has-flag@4.0.0: {}
 
+  html-parse-stringify@3.1.0:
+    dependencies:
+      void-elements: 3.1.0
+
+  i18next@24.2.3(typescript@5.9.3):
+    dependencies:
+      '@babel/runtime': 7.29.10
+    optionalDependencies:
+      typescript: 5.9.3
+
   ignore@5.3.2: {}
 
   ignore@7.0.12: {}
@@ -2679,6 +2775,16 @@ snapshots:
     dependencies:
       react: 19.3.0
       scheduler: 0.28.0
+
+  react-i18next@15.7.4(i18next@24.2.3(typescript@5.9.3))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3):
+    dependencies:
+      '@babel/runtime': 7.29.10
+      html-parse-stringify: 3.1.0
+      i18next: 24.2.3(typescript@5.9.3)
+      react: 19.3.0
+    optionalDependencies:
+      react-dom: 19.3.0(react@19.3.0)
+      typescript: 5.9.3
 
   react@19.3.0: {}
 
@@ -2894,6 +3000,8 @@ snapshots:
       - sugarss
       - supports-color
       - terser
+
+  void-elements@3.1.0: {}
 
   which@2.0.2:
     dependencies:

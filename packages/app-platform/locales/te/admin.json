@@ -1,0 +1,43 @@
+{
+  "header": {
+    "title": "అపార్ట్‌మెంట్ అడ్మిన్",
+    "description": "టెనంట్ అపార్ట్‌మెంట్ పరిపాలన",
+    "role": "అడ్మినిస్ట్రేటర్",
+    "apartmentAdmin": "అపార్ట్‌మెంట్ అడ్మిన్"
+  },
+  "overview": {
+    "eyebrow": "అపార్ట్‌మెంట్ కార్యకలాపాలు",
+    "summary": "{{organization}} యొక్క ప్రత్యక్ష సారాంశం.",
+    "defaultSummary": "మీ అపార్ట్‌మెంట్ కార్యకలాపాల ప్రత్యక్ష సారాంశం.",
+    "refreshData": "డేటా రిఫ్రెష్ చేయండి",
+    "totalBilled": "మొత్తం బిల్ చేయబడినది",
+    "totalBilledDetail": "నివాసికి తాజా ఇన్‌వాయిస్ బ్యాలెన్స్",
+    "collected": "వసూలు చేయబడినది",
+    "collectedDetail": "ధృవీకరించబడిన చెల్లింపు రికార్డులు",
+    "outstanding": "బాకీ ఉన్న మొత్తం",
+    "outstandingDetail": "వసూలు చేయని బిల్లు మొత్తం",
+    "overdue": "గడువు దాటిన బాకీలు",
+    "overdueDetail": "గడువు ముగిసిన ఓపెన్ ఇన్‌వాయిస్‌లు",
+    "noMetrics": "ఈ ఖాతా కోసం సంస్థ గణాంకాలు అందుబాటులో లేవు."
+  },
+  "units": {
+    "title": "భవనాలు & యూనిట్లు",
+    "name": "యూనిట్",
+    "building": "భవనం",
+    "occupancy": "నివాస స్థితి",
+    "paymentStatus": "చెల్లింపు స్థితి"
+  },
+  "transactions": {
+    "recent": "ఇటీవలి లావాదేవీలు",
+    "resident": "నివాసి",
+    "unit": "యూనిట్",
+    "amount": "మొత్తం",
+    "status": "స్థితి",
+    "date": "తేదీ"
+  },
+  "stats": {
+    "residentCount_one": "{{count}} నివాసి",
+    "residentCount_other": "{{count}} నివాసితులు"
+  }
+}
+

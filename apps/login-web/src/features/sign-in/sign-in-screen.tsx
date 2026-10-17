@@ -1,3 +1,5 @@
+import { getAppConfig, getFormattedCopyright } from '@nivasa/app-platform'
+
 type SignInScreenProps = {
   residentSignInUrl: string
   adminSignInUrl: string
@@ -30,11 +32,12 @@ function BuildingIcon() {
 }
 
 export default function SignInScreen({ residentSignInUrl, adminSignInUrl }: SignInScreenProps) {
+  const config = getAppConfig()
   return (
     <main className="sign-in-shell">
-      <header className="sign-in-brand" aria-label="Nivasa">
-        <span className="brand-mark">N</span>
-        <span>Nivasa</span>
+      <header className="sign-in-brand" aria-label={config.application.productName}>
+        <span className="brand-mark">{config.application.monogram}</span>
+        <span>{config.application.productName}</span>
       </header>
 
       <div className="sign-in-layout">
@@ -53,9 +56,9 @@ export default function SignInScreen({ residentSignInUrl, adminSignInUrl }: Sign
 
         <section className="sign-in-card" aria-labelledby="sign-in-title">
           <div className="sign-in-heading">
-            <span className="sign-in-mobile-mark">N</span>
+            <span className="sign-in-mobile-mark">{config.application.monogram}</span>
             <h2 id="sign-in-title">Welcome back</h2>
-            <p>Choose the Nivasa app you want to sign in to.</p>
+            <p>Choose the {config.application.productName} app you want to sign in to.</p>
           </div>
 
           <div className="sign-in-options">
@@ -77,7 +80,7 @@ export default function SignInScreen({ residentSignInUrl, adminSignInUrl }: Sign
         </section>
       </div>
 
-      <footer className="sign-in-footer"><span>© 2026 Nivasa Technologies</span><span>Secure access for your community</span></footer>
+      <footer className="sign-in-footer"><span>{getFormattedCopyright()}</span><span>Secure access for your community</span></footer>
     </main>
   )
 }

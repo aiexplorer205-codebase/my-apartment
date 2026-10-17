@@ -1,0 +1,56 @@
+{
+  "actions": {
+    "save": "భద్రపరచు",
+    "cancel": "రద్దు చేయి",
+    "delete": "తొలగించు",
+    "edit": "సవరించు",
+    "refresh": "రిఫ్రెష్ చేయి",
+    "signOut": "లాగ్ అవుట్",
+    "signIn": "సైన్ ఇన్",
+    "search": "వెతకండి",
+    "close": "మూసివేయి",
+    "retry": "మళ్ళీ ప్రయత్నించండి",
+    "back": "వెనుకకు",
+    "submit": "సమర్పించు"
+  },
+  "status": {
+    "loading": "లోడ్ అవుతోంది...",
+    "error": "లోపం సంభవించింది",
+    "success": "విజయవంతమైంది",
+    "empty": "డేటా అందుబాటులో లేదు",
+    "active": "యాక్టివ్",
+    "inactive": "ఇన్‌యాక్టివ్"
+  },
+  "navigation": {
+    "overview": "అవలోకనం",
+    "buildings": "భవనాలు & యూనిట్లు",
+    "residents": "నివాసితులు",
+    "billing": "బిల్లింగ్",
+    "collections": "వసూళ్లు",
+    "overdues": "బకాయిలు",
+    "reports": "నివేదికలు",
+    "settings": "సెట్టింగులు",
+    "home": "హోమ్",
+    "history": "చరిత్ర",
+    "notices": "నోటీసులు",
+    "directory": "డైరెక్టరీ",
+    "profile": "ప్రొఫైల్",
+    "support": "సహాయం"
+  },
+  "labels": {
+    "workspace": "వర్క్‌స్పేస్",
+    "currentWorkspace": "ప్రస్తుత వర్క్‌స్పేస్",
+    "language": "భాష",
+    "selectLanguage": "భాషను ఎంచుకోండి",
+    "needHelp": "సహాయం కావాలా?",
+    "contactSupport": "వర్క్‌స్పేస్ సపోర్ట్‌ను సంప్రదించండి"
+  },
+  "messages": {
+    "welcome": "{{productName}} కి స్వాగతం",
+    "pullToRefresh": "రిఫ్రెష్ చేయడానికి లాగండి",
+    "releaseToRefresh": "రిఫ్రెష్ చేయడానికి విడుదల చేయండి",
+    "refreshing": "రిఫ్రెష్ అవుతోంది…",
+    "copyright": "© {{year}} {{owner}}. {{suffix}}"
+  }
+}
+

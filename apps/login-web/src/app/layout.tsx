@@ -1,8 +1,11 @@
 import './globals.css'
 import type { ReactNode } from 'react'
+import { getAppConfig } from '@nivasa/app-platform'
+
+const config = getAppConfig()
 
 export const dynamic = 'force-dynamic'
-export const metadata = { title: 'Nivasa | Sign in', description: 'Choose a secure Resident or Apartment Admin sign in' }
+export const metadata = { title: `${config.application.productName} | Sign in`, description: 'Choose a secure Resident or Apartment Admin sign in' }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return <html lang="en"><body>{children}</body></html>
