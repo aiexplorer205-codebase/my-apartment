@@ -14,7 +14,7 @@
     "subtitle": "Invoices and receipts"
   },
   "notices": {
-    "title": "Notices",
+    "title": "Announcements",
     "unreadNotice_one": "{{count}} unread",
     "unreadNotice_other": "{{count}} unread"
   },
@@ -37,12 +37,12 @@
       "home": "Your home, payments, and community at a glance.",
       "payments": "Review your balance and record an offline payment.",
       "history": "A clear record of payments and confirmations.",
-      "notices": "Updates from your apartment community.",
-      "profile": "Your resident and unit details."
+      "notices": "Announcements from your apartment community.",
+      "profile": "Your resident and block details."
     },
     "currentBill": "CURRENT BILL · {{period}}",
     "currentBalance": "CURRENT BALANCE",
-    "amountDue": "Amount currently due for your unit",
+    "amountDue": "Amount currently due for your block",
     "allCaughtUp": "You are all caught up",
     "noOpenInvoice": "No open invoice",
     "recordPayment": "Record a payment",
@@ -55,7 +55,7 @@
     "paidInFull": "Paid in full",
     "paid": "Paid",
     "reportedOfflinePayments": "Reported offline payments",
-    "unreadNotices": "Unread notices",
+    "unreadNotices": "Unread announcements",
     "communityUpdates": "Community updates",
     "currentBillTitle": "Current bill",
     "maintenance": "Maintenance",
@@ -68,8 +68,8 @@
     "paymentUnavailable": "Online payments are disabled until a payment provider and settlement model are approved.",
     "recentTransactions": "Recent transactions",
     "noPaymentRecords": "No payment records yet.",
-    "communityNotices": "Community notices",
-    "noPublishedNotices": "No published notices."
+    "communityNotices": "Community announcements",
+    "noPublishedNotices": "No published announcements."
   }
 }
 

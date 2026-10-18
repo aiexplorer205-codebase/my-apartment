@@ -44,11 +44,12 @@ export type OperatorOverview = {
     id: string
     slug: string
     name: string
+    apartmentCode: string
     status: string
     plan_name: string
     city: string | null
     adminEmail: string | null
-    estimatedUnits: number | null
+    allowedBlocks: number | null
     invitedAt: string | null
     inviteAcceptedAt: string | null
     provisioningStatus: string | null

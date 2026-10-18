@@ -5,3 +5,5 @@
 \i /migrations/platform_db/004_email_otp_admin_invites.sql
 \i /migrations/platform_db/005_operator_deletion.sql
 \i /migrations/platform_db/006_unique_organization_names.sql
+\i /migrations/platform_db/007_allowed_blocks.sql
+\i /migrations/platform_db/008_apartment_codes.sql

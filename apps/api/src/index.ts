@@ -14,7 +14,7 @@ import { createResidentInvitationToken, hashResidentInvitationToken, sendResiden
 import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
 import { checkDatabaseReadiness, dropTenantDatabase, getPlatformPool, getTenantPool, provisionTenantDatabase } from './persistence.js'
 
-type ApiFaultCode = 'unauthorized' | 'forbidden' | 'not_found' | 'configuration_error' | 'dependency_unavailable' | 'tenant_selection_required' | 'data_integrity_error' | 'invalid_request'
+type ApiFaultCode = 'unauthorized' | 'forbidden' | 'not_found' | 'configuration_error' | 'dependency_unavailable' | 'tenant_selection_required' | 'data_integrity_error' | 'invalid_request' | 'block_limit_reached'
 
 class ApiFault extends Error {
   constructor(
@@ -122,6 +122,7 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
   const result = await getPlatformPool().query<{
     tenant_id: string
     org_name: string
+    apartment_code: string
     database_name: string | null
     tenant_status: string
     role: string
@@ -165,7 +166,8 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
        SELECT 1
        FROM residents r
        JOIN units u ON u.id = r.unit_id
-       WHERE r.auth_subject = $1 AND r.status = 'active' AND u.tenant_id = $2
+       WHERE r.auth_subject = $1 AND r.status = 'active' AND r.start_date <= CURRENT_DATE
+         AND (r.move_out_date IS NULL OR r.move_out_date >= CURRENT_DATE) AND u.tenant_id = $2
      ) AS has_active_profile`,
     [identity.subject, membership.tenant_id],
   )
@@ -203,11 +205,12 @@ const getTenantMemberships = async (request: IncomingMessage) => {
   const result = await getPlatformPool().query<{
     tenant_id: string
     org_name: string
+    apartment_code: string
     database_name: string | null
     role: 'resident' | 'admin'
     has_accepted_admin_invitation: boolean
   }>(
-    `SELECT tr.tenant_id, tr.org_name, tr.database_name, tm.role,
+    `SELECT tr.tenant_id, tr.org_name, tr.apartment_code, tr.database_name, tm.role,
             EXISTS (
               SELECT 1 FROM platform_audit pa
               WHERE pa.actor_subject = tm.subject
@@ -232,7 +235,8 @@ const getTenantMemberships = async (request: IncomingMessage) => {
          SELECT 1
          FROM residents r
          JOIN units u ON u.id = r.unit_id
-         WHERE r.auth_subject = $1 AND r.status = 'active' AND u.tenant_id = $2
+         WHERE r.auth_subject = $1 AND r.status = 'active' AND r.start_date <= CURRENT_DATE
+           AND (r.move_out_date IS NULL OR r.move_out_date >= CURRENT_DATE) AND u.tenant_id = $2
        ) AS has_active_profile`,
       [identity.subject, membership.tenant_id],
     )
@@ -243,6 +247,7 @@ const getTenantMemberships = async (request: IncomingMessage) => {
     ).map((role) => ({
       tenantId: membership.tenant_id,
       name: membership.org_name,
+      apartmentCode: membership.apartment_code,
       role,
     }))
   }))
@@ -264,7 +269,7 @@ export interface OrganizationOnboardingInput {
   name: string
   city: string
   adminEmail: string
-  estimatedUnits: number
+  allowedBlocks: number
   plan: 'starter' | 'growth' | 'scale'
 }
 
@@ -288,16 +293,16 @@ const assertAdminInvitationConfiguration = (): void => {
 
 export const parseOrganizationOnboardingInput = (value: unknown): OrganizationOnboardingInput => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ApiFault(400, 'invalid_request', 'Organization details must be provided as a JSON object')
+    throw new ApiFault(400, 'invalid_request', 'Apartment details must be provided as a JSON object')
   }
   const input = value as Record<string, unknown>
   const name = typeof input.name === 'string' ? input.name.trim() : ''
   const city = typeof input.city === 'string' ? input.city.trim() : ''
   const adminEmail = typeof input.adminEmail === 'string' ? input.adminEmail.trim().toLowerCase() : ''
   const plan = input.plan
-  const estimatedUnits = input.estimatedUnits
+  const allowedBlocks = input.allowedBlocks
   if (name.length < 2 || name.length > 120) {
-    throw new ApiFault(400, 'invalid_request', 'Organization name must be between 2 and 120 characters')
+    throw new ApiFault(400, 'invalid_request', 'Apartment name must be between 2 and 120 characters')
   }
   if (city.length < 2 || city.length > 100) {
     throw new ApiFault(400, 'invalid_request', 'City must be between 2 and 100 characters')
@@ -305,13 +310,13 @@ export const parseOrganizationOnboardingInput = (value: unknown): OrganizationOn
   if (adminEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
     throw new ApiFault(400, 'invalid_request', 'Enter a valid administrator email address')
   }
-  if (typeof estimatedUnits !== 'number' || !Number.isInteger(estimatedUnits) || estimatedUnits < 1 || estimatedUnits > 200_000) {
-    throw new ApiFault(400, 'invalid_request', 'Estimated units must be a whole number between 1 and 200000')
+  if (typeof allowedBlocks !== 'number' || !Number.isInteger(allowedBlocks) || allowedBlocks < 1 || allowedBlocks > 500) {
+    throw new ApiFault(400, 'invalid_request', 'Number of blocks must be a whole number between 1 and 500')
   }
   if (plan !== 'starter' && plan !== 'growth' && plan !== 'scale') {
-    throw new ApiFault(400, 'invalid_request', 'Choose a supported organization plan')
+    throw new ApiFault(400, 'invalid_request', 'Choose a supported apartment plan')
   }
-  return { name, city, adminEmail, estimatedUnits, plan }
+  return { name, city, adminEmail, allowedBlocks, plan }
 }
 
 const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
@@ -498,18 +503,31 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/tenant/notices/read-all': {
       post: { tags: ['tenant'], summary: 'Mark published notices read', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Updated read state' }, '403': { description: 'An active resident profile is required' } } },
     },
+    '/v1/tenant/notices/{noticeId}/read': {
+      post: { tags: ['tenant'], summary: 'Mark one announcement read', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Updated read state' }, '403': { description: 'An active resident profile is required' }, '404': { description: 'Announcement not found' } } },
+    },
     '/v1/tenant/memberships': {
       get: { tags: ['tenant'], summary: 'List active tenant memberships for the authenticated account', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant memberships the authenticated account may select' }, '401': { description: 'Authentication required' } } },
     },
     '/v1/admin/overview': {
       get: { tags: ['tenant'], summary: 'Apartment administrator overview', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped collection overview' }, '403': { description: 'Administrator permission required' } } },
     },
+    '/v1/admin/announcements': {
+      get: { tags: ['tenant'], summary: 'List apartment announcements', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant announcements' }, '403': { description: 'Administrator permission required' } } },
+      post: { tags: ['tenant'], summary: 'Publish an announcement immediately or on a schedule', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['title', 'body', 'startsAt', 'isImportant'], properties: { title: { type: 'string', minLength: 3, maxLength: 120 }, body: { type: 'string', minLength: 1, maxLength: 5000 }, startsAt: { type: 'string', format: 'date-time' }, endsAt: { type: ['string', 'null'], format: 'date-time' }, isImportant: { type: 'boolean' } } } } } }, responses: { '201': { description: 'Announcement created' }, '400': { description: 'Invalid announcement details' }, '403': { description: 'Administrator permission required' } } },
+    },
     '/v1/admin/residents': {
       get: { tags: ['tenant'], summary: 'List residents and their unit/payment status', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped resident list' }, '403': { description: 'Administrator permission required' } } },
     },
+    '/v1/admin/residents/{residentId}/move-out': {
+      post: { tags: ['tenant'], summary: 'Record a resident move-out, final meter reading, and dues settlement', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Move-out recorded and resident access ends on the recorded date' }, '400': { description: 'Invalid move-out details' }, '403': { description: 'Administrator permission required' }, '404': { description: 'Resident not found' }, '409': { description: 'Move-out or payment state conflicts with current records' } } },
+    },
+    '/v1/admin/residents/{residentId}/settle-dues': {
+      post: { tags: ['tenant'], summary: 'Record receipt of a former resident’s outstanding dues', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Outstanding invoices marked paid with confirmed payment records' }, '403': { description: 'Administrator permission required' }, '404': { description: 'Resident not found' }, '409': { description: 'Pending payments must be resolved first' } } },
+    },
     '/v1/admin/resident-invitations': {
       get: { tags: ['tenant'], summary: 'List recent resident invitations', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped invitations' }, '403': { description: 'Administrator permission required' } } },
-      post: { tags: ['tenant'], summary: 'Invite a resident to a unit by email', description: 'Requires fullName, email, optional phone, unitId, and occupancyType (owner or tenant). Email OTP identity verification is required to accept. The one-time link expires in seven days.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Invitation saved and email sent' }, '400': { description: 'Invalid invitation details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Resident already exists or another administrator owns the pending invitation' }, '503': { description: 'Invitation saved but email delivery failed' } } },
+      post: { tags: ['tenant'], summary: 'Invite a resident to a unit by email', description: 'Requires fullName, email, optional phone, unitId, and occupancyType (owner or tenant). startDate is optional and defaults to the current date. Email OTP identity verification is required to accept. Resident access starts on startDate. The one-time link expires in seven days.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Invitation saved and email sent' }, '400': { description: 'Invalid invitation details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Resident already exists or another administrator owns the pending invitation' }, '503': { description: 'Invitation saved but email delivery failed' } } },
     },
     '/v1/admin/resident-invitations/{invitationId}/revoke': {
       post: { tags: ['tenant'], summary: 'Revoke a pending resident invitation', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Invitation revoked' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Invitation is no longer pending' } } },
@@ -517,11 +535,9 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/admin/units': {
       get: { tags: ['tenant'], summary: 'List tenant buildings and units', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped unit inventory' }, '403': { description: 'Administrator permission required' } } },
     },
-    '/v1/admin/apartments': {
-      post: { tags: ['tenant'], summary: 'Create an apartment, configured building, and generated vacant units', description: 'Requires name, city, address, billingStartMonth (YYYY-MM), buildingName, floors, unitsPerFloor, unitPrefix, and maintenanceRatePerSqft (number or null). Generated unit labels use PREFIX-FLOORUNIT, for example A-0101.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Apartment, building, and units created atomically' }, '400': { description: 'Invalid apartment or unit-generation details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Apartment name already exists' } } },
-    },
     '/v1/admin/buildings': {
-      get: { tags: ['tenant'], summary: 'List apartment buildings', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped building inventory' }, '403': { description: 'Administrator permission required' } } },
+      get: { tags: ['tenant'], summary: 'List apartment blocks and allowance', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Building inventory and allowed block count' }, '403': { description: 'Administrator permission required' } } },
+      post: { tags: ['tenant'], summary: 'Add a block within the allowed block count', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Block and units created atomically' }, '400': { description: 'Invalid block details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Block allowance reached or duplicate block name' } } },
     },
     '/v1/admin/billing': {
       get: { tags: ['tenant'], summary: 'Read billing rules, published invoice runs, and invoices', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped billing data' }, '403': { description: 'Administrator permission required' } } },
@@ -762,16 +778,20 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       [resident.id],
     ),
     pool.query(
-      `SELECT n.id, n.title, n.body, n.published_at,
+      `SELECT n.id, n.title, n.body, n.published_at, n.is_important, n.starts_at, n.ends_at,
               (nr.resident_id IS NOT NULL) AS is_read
        FROM notices n
        LEFT JOIN notice_reads nr ON nr.notice_id = n.id AND nr.resident_id = $1
        WHERE n.tenant_id = $2 AND n.status = 'published'
+         AND n.starts_at <= NOW() AND (n.ends_at IS NULL OR n.ends_at > NOW())
        ORDER BY n.published_at DESC
        LIMIT 50`,
       [resident.id, access.tenantId],
     ),
   ])
+  const apartmentCodeResult = await getPlatformPool().query<{ apartment_code: string }>(
+    'SELECT apartment_code FROM tenant_records WHERE tenant_id = $1', [access.tenantId],
+  )
 
   return {
     tenantId: access.tenantId,
@@ -806,6 +826,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       body: notice.body,
       publishedAt: notice.published_at,
       isRead: notice.is_read,
+      isImportant: notice.is_important,
     })),
     supportedPaymentMethods: [],
     paymentUnavailableReason: 'Online payments are disabled until a payment provider and settlement model are approved.',
@@ -817,6 +838,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     },
     brand: {
       name: resident.organization_name,
+      apartmentCode: apartmentCodeResult.rows[0]?.apartment_code ?? '',
       accentColor: resident.accent_color,
       locale: resident.locale,
       currency: resident.currency,
@@ -1039,11 +1061,12 @@ const getResidentNotices = async (access: TenantAccess, subject: string) => {
   if (!resident) throw new ApiFault(404, 'not_found', 'No active resident profile is associated with this account')
 
   const notices = await pool.query(
-    `SELECT n.id, n.title, n.body, n.published_at,
+    `SELECT n.id, n.title, n.body, n.published_at, n.is_important, n.starts_at, n.ends_at,
             (nr.resident_id IS NOT NULL) AS is_read
      FROM notices n
      LEFT JOIN notice_reads nr ON nr.notice_id = n.id AND nr.resident_id = $1
      WHERE n.tenant_id = $2 AND n.status = 'published'
+       AND n.starts_at <= NOW() AND (n.ends_at IS NULL OR n.ends_at > NOW())
      ORDER BY n.published_at DESC
      LIMIT 100`,
     [resident.resident_id, access.tenantId],
@@ -1053,8 +1076,11 @@ const getResidentNotices = async (access: TenantAccess, subject: string) => {
     title: notice.title,
     body: notice.body,
     isRead: notice.is_read,
+    isImportant: notice.is_important,
     channel: 'in_app',
     createdAt: notice.published_at,
+    startsAt: notice.starts_at,
+    endsAt: notice.ends_at,
   }))
 }
 
@@ -1077,6 +1103,7 @@ const markResidentNoticesRead = async (access: TenantAccess, subject: string) =>
       `INSERT INTO notice_reads (resident_id, notice_id)
        SELECT $1, n.id FROM notices n
        WHERE n.tenant_id = $2 AND n.status = 'published'
+         AND n.starts_at <= NOW() AND (n.ends_at IS NULL OR n.ends_at > NOW())
        ON CONFLICT (resident_id, notice_id) DO NOTHING`,
       [resident.id, access.tenantId],
     )
@@ -1088,6 +1115,59 @@ const markResidentNoticesRead = async (access: TenantAccess, subject: string) =>
   } finally {
     client.release()
   }
+}
+
+const markResidentNoticeRead = async (access: TenantAccess, subject: string, noticeId: string) => {
+  requireRole(access, 'resident')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(noticeId)) {
+    throw new ApiFault(404, 'not_found', 'Announcement not found')
+  }
+  const pool = withTenantPool(access)
+  const result = await pool.query(
+    `INSERT INTO notice_reads (resident_id, notice_id)
+     SELECT r.id, n.id FROM residents r
+     JOIN units u ON u.id = r.unit_id
+     JOIN notices n ON n.tenant_id = u.tenant_id AND n.id = $3
+     WHERE r.auth_subject = $1 AND r.status = 'active' AND u.tenant_id = $2
+       AND n.status = 'published' AND n.starts_at <= NOW()
+       AND (n.ends_at IS NULL OR n.ends_at > NOW())
+     ON CONFLICT (resident_id, notice_id) DO NOTHING`,
+    [subject, access.tenantId, noticeId],
+  )
+  return { marked: (result.rowCount ?? 0) > 0 }
+}
+
+const getAdminAnnouncements = async (access: TenantAccess) => {
+  requireRole(access, 'admin')
+  const result = await withTenantPool(access).query(
+    `SELECT id, title, body, is_important, starts_at, ends_at, published_at, status
+     FROM notices WHERE tenant_id = $1 ORDER BY starts_at DESC, published_at DESC LIMIT 200`,
+    [access.tenantId],
+  )
+  return result.rows.map((row) => ({ id: row.id, title: row.title, body: row.body, isImportant: row.is_important, startsAt: row.starts_at, endsAt: row.ends_at, publishedAt: row.published_at, status: row.status }))
+}
+
+const createAdminAnnouncement = async (access: TenantAccess, input: unknown) => {
+  requireRole(access, 'admin')
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault(400, 'invalid_request', 'Announcement details are required')
+  const value = input as Record<string, unknown>
+  const title = typeof value.title === 'string' ? value.title.trim() : ''
+  const body = typeof value.body === 'string' ? value.body.trim() : ''
+  const startsAt = typeof value.startsAt === 'string' ? new Date(value.startsAt) : new Date(Number.NaN)
+  const endsAt = typeof value.endsAt === 'string' && value.endsAt ? new Date(value.endsAt) : null
+  if (title.length < 3 || title.length > 120) throw new ApiFault(400, 'invalid_request', 'Title must be between 3 and 120 characters')
+  if (!body || body.length > 5000) throw new ApiFault(400, 'invalid_request', 'Message must be between 1 and 5000 characters')
+  if (Number.isNaN(startsAt.getTime())) throw new ApiFault(400, 'invalid_request', 'Choose a valid start time')
+  if (endsAt && (Number.isNaN(endsAt.getTime()) || endsAt <= startsAt)) throw new ApiFault(400, 'invalid_request', 'End time must be after the start time')
+  if (typeof value.isImportant !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Choose whether this announcement is important')
+  const result = await withTenantPool(access).query(
+    `INSERT INTO notices (id, tenant_id, title, body, is_read, published_at, status, is_important, starts_at, ends_at, created_by)
+     VALUES (gen_random_uuid(), $1, $2, $3, FALSE, NOW(), 'published', $4, $5, $6, $7)
+     RETURNING id, title, body, is_important, starts_at, ends_at, published_at, status`,
+    [access.tenantId, title, body, value.isImportant, startsAt.toISOString(), endsAt?.toISOString() ?? null, access.subject],
+  )
+  const row = result.rows[0]
+  return { id: row.id, title: row.title, body: row.body, isImportant: row.is_important, startsAt: row.starts_at, endsAt: row.ends_at, publishedAt: row.published_at, status: row.status }
 }
 
 const getAdminOverview = async (access: TenantAccess) => {
@@ -1121,7 +1201,12 @@ const getAdminOverview = async (access: TenantAccess) => {
     pool.query(
       `SELECT u.number,
               COALESCE(u.building_name, 'Unassigned building') AS building,
-              u.status,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM residents current_resident
+                WHERE current_resident.unit_id = u.id AND current_resident.status = 'active'
+                  AND current_resident.start_date <= CURRENT_DATE
+                  AND (current_resident.move_out_date IS NULL OR current_resident.move_out_date >= CURRENT_DATE)
+              ) THEN 'occupied' ELSE 'vacant' END AS status,
               COALESCE(latest.status, 'no_invoice') AS payment_status
        FROM units u
        LEFT JOIN LATERAL (
@@ -1145,12 +1230,16 @@ const getAdminOverview = async (access: TenantAccess) => {
        LIMIT 10`,
     ),
   ])
+  const apartmentCodeResult = await getPlatformPool().query<{ apartment_code: string }>(
+    'SELECT apartment_code FROM tenant_records WHERE tenant_id = $1', [access.tenantId],
+  )
   const amount = totals.rows[0]
   const billedMinor = minorUnits(amount?.billed_minor ?? '0')
   const collectedMinor = minorUnits(amount?.collected_minor ?? '0')
   return {
     tenantId: access.tenantId,
     organization: access.tenantName,
+    apartmentCode: apartmentCodeResult.rows[0]?.apartment_code ?? '',
     billedMinor,
     collectedMinor,
     outstandingMinor: Math.max(billedMinor - collectedMinor, 0),
@@ -1188,8 +1277,15 @@ const getAdminResidents = async (access: TenantAccess) => {
     building: string
     billing_period: string | null
     payment_status: string
+    outstanding_minor: string
+    start_date: string
+    move_out_date: string | null
+    final_meter_reading: string | null
   }>(
-    `SELECT r.id, r.unit_id, r.full_name, r.email::text, r.phone, r.occupancy_type, r.status,
+    `SELECT r.id, r.unit_id, r.full_name, r.email::text, r.phone, r.occupancy_type,
+            CASE WHEN r.status = 'active' AND r.start_date > CURRENT_DATE THEN 'scheduled'
+                 WHEN r.status = 'active' AND r.move_out_date < CURRENT_DATE THEN 'inactive'
+                 ELSE r.status END AS status,
             u.number AS unit, u.building_name AS building,
             latest.billing_period,
             CASE
@@ -1198,8 +1294,20 @@ const getAdminResidents = async (access: TenantAccess) => {
               WHEN latest.due_date < CURRENT_DATE THEN 'overdue'
               ELSE 'due'
             END AS payment_status
+            ,COALESCE(dues.outstanding_minor, 0)::text AS outstanding_minor,
+            r.start_date::text AS start_date, r.move_out_date::text AS move_out_date,
+            r.final_meter_reading::text AS final_meter_reading
      FROM residents r
      JOIN units u ON u.id = r.unit_id
+     LEFT JOIN LATERAL (
+       SELECT SUM(GREATEST(i.total_minor - COALESCE(paid.amount_minor, 0), 0)) AS outstanding_minor
+       FROM invoices i
+       LEFT JOIN LATERAL (
+         SELECT SUM(p.amount_minor) AS amount_minor FROM payments p
+         WHERE p.invoice_id = i.id AND p.status IN ('succeeded', 'reconciled', 'confirmed')
+       ) paid ON TRUE
+       WHERE i.resident_id = r.id AND i.status IN ('open', 'partially_paid')
+     ) dues ON TRUE
      LEFT JOIN LATERAL (
        SELECT i.billing_period, i.due_date, i.total_minor,
               COALESCE((
@@ -1217,22 +1325,29 @@ const getAdminResidents = async (access: TenantAccess) => {
      LIMIT 500`,
     [access.tenantId],
   )
-  return result.rows.map((resident) => ({
-    id: resident.id,
-    unitId: resident.unit_id,
-    name: resident.full_name,
-    email: resident.email,
-    phone: resident.phone,
-    occupancyType: resident.occupancy_type,
-    status: resident.status,
-    unit: resident.unit,
-    building: resident.building,
-    billingPeriod: resident.billing_period,
-    paymentStatus: resident.payment_status,
-  }))
+  return result.rows.map((resident) => {
+    const parsedOutstandingMinor = Number(resident.outstanding_minor)
+    return {
+      id: resident.id,
+      unitId: resident.unit_id,
+      name: resident.full_name,
+      email: resident.email,
+      phone: resident.phone,
+      occupancyType: resident.occupancy_type,
+      status: resident.status,
+      unit: resident.unit,
+      building: resident.building,
+      billingPeriod: resident.billing_period,
+      paymentStatus: resident.payment_status,
+      outstandingMinor: Number.isSafeInteger(parsedOutstandingMinor) && parsedOutstandingMinor >= 0 ? parsedOutstandingMinor : 0,
+      startDate: resident.start_date,
+      moveOutDate: resident.move_out_date,
+      finalMeterReading: resident.final_meter_reading === null ? null : Number(resident.final_meter_reading),
+    }
+  })
 }
 
-type ResidentInvitationInput = { fullName: string; email: string; phone: string | null; unitId: string; occupancyType: 'owner' | 'tenant' }
+type ResidentInvitationInput = { fullName: string; email: string; phone: string | null; unitId: string; occupancyType: 'owner' | 'tenant'; startDate: string }
 
 const parseResidentInvitationInput = (input: unknown): ResidentInvitationInput => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault(400, 'invalid_request', 'Resident invitation details are required')
@@ -1242,20 +1357,23 @@ const parseResidentInvitationInput = (input: unknown): ResidentInvitationInput =
   const phone = typeof value.phone === 'string' ? value.phone.trim() : ''
   const unitId = typeof value.unitId === 'string' ? value.unitId.trim() : ''
   const occupancyType = value.occupancyType
+  const startDate = parseCalendarDate(value.startDate ?? new Date().toISOString().slice(0, 10), 'Resident start date')
   if (fullName.length < 2 || fullName.length > 120) throw new ApiFault(400, 'invalid_request', 'Full name must be between 2 and 120 characters')
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiFault(400, 'invalid_request', 'Enter a valid email address')
   if (phone && (!/^\+?[0-9 ()-]{7,24}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) throw new ApiFault(400, 'invalid_request', 'Enter a valid mobile number or leave it blank')
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(unitId)) throw new ApiFault(400, 'invalid_request', 'Choose a valid unit')
   if (occupancyType !== 'owner' && occupancyType !== 'tenant') throw new ApiFault(400, 'invalid_request', 'Choose owner or tenant occupancy')
-  return { fullName, email, phone: phone || null, unitId, occupancyType }
+  return { fullName, email, phone: phone || null, unitId, occupancyType, startDate }
 }
 
 const requireResidentInvitationSchema = async (access: TenantAccess): Promise<void> => {
   const result = await withTenantPool(access).query<{ ready: boolean }>(
     `SELECT to_regclass('public.resident_invitations') IS NOT NULL
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'residents' AND column_name = 'occupancy_type') AS ready`,
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'residents' AND column_name = 'occupancy_type')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'residents' AND column_name = 'move_out_date')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'resident_invitations' AND column_name = 'start_date') AS ready`,
   )
-  if (!result.rows[0]?.ready) throw new ApiFault(503, 'dependency_unavailable', 'Resident invitations are not installed for this tenant database. Apply migrations/tenant_db/004_resident_invitations.sql, then retry.')
+  if (!result.rows[0]?.ready) throw new ApiFault(503, 'dependency_unavailable', 'Resident lifecycle support is not installed for this tenant database. Apply migrations/tenant_db/010_resident_lifecycle.sql, then retry.')
 }
 
 const getAdminResidentInvitations = async (access: TenantAccess) => {
@@ -1263,7 +1381,7 @@ const getAdminResidentInvitations = async (access: TenantAccess) => {
   await requireResidentInvitationSchema(access)
   const result = await withTenantPool(access).query(
     `SELECT i.id, i.unit_id AS "unitId", i.full_name AS "fullName", i.email::text AS email, i.phone,
-            i.occupancy_type AS "occupancyType", i.invited_by AS "invitedBy", i.status,
+            i.occupancy_type AS "occupancyType", i.invited_by AS "invitedBy", i.status, i.start_date::text AS "startDate",
             CASE WHEN i.status = 'pending' AND i.expires_at <= NOW() THEN 'expired' ELSE i.status END AS "displayStatus",
             i.expires_at AS "expiresAt", u.number AS unit, u.building_name AS building
      FROM resident_invitations i
@@ -1313,8 +1431,11 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     )
     if (!unit.rows[0]) throw new ApiFault(400, 'invalid_request', 'The selected unit is no longer available. Refresh the unit list and try again.')
     const activeResident = await client.query(
-      "SELECT id FROM residents WHERE unit_id = $1 AND status = 'active' LIMIT 1",
-      [input.unitId],
+      `SELECT id FROM residents
+       WHERE unit_id = $1 AND status = 'active'
+         AND (move_out_date IS NULL OR move_out_date >= $2::date)
+       LIMIT 1`,
+      [input.unitId, input.startDate],
     )
     if (activeResident.rowCount) throw new ApiFault(409, 'invalid_request', 'This unit already has an active resident. Refresh the unit list and choose another unit.')
     unitLabel = `${unit.rows[0].building_name} · ${unit.rows[0].number}`
@@ -1327,21 +1448,30 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     if (existing && existing.invited_by !== access.subject) {
       throw new ApiFault(409, 'invalid_request', 'A pending invitation for this email is already managed by another administrator')
     }
+    if (!existing) {
+      const pendingUnit = await client.query(
+        `SELECT id FROM resident_invitations
+         WHERE tenant_id = $1 AND unit_id = $2 AND status = 'pending' AND expires_at > NOW()
+         LIMIT 1`,
+        [access.tenantId, input.unitId],
+      )
+      if (pendingUnit.rowCount) throw new ApiFault(409, 'invalid_request', 'This flat already has a pending resident invitation')
+    }
     if (existing) {
       await client.query(
         `UPDATE resident_invitations
          SET token_hash = $2, unit_id = $3, full_name = $4, phone = $5, occupancy_type = $6,
-             expires_at = $7, updated_at = NOW()
+             start_date = $7, expires_at = $8, updated_at = NOW()
          WHERE id = $1`,
-        [existing.id, tokenHash, input.unitId, input.fullName, input.phone, input.occupancyType, expiresAt],
+        [existing.id, tokenHash, input.unitId, input.fullName, input.phone, input.occupancyType, input.startDate, expiresAt],
       )
       invitationId = existing.id
     } else {
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO resident_invitations
-           (tenant_id, token_hash, unit_id, full_name, email, phone, occupancy_type, invited_by, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [access.tenantId, tokenHash, input.unitId, input.fullName, input.email, input.phone, input.occupancyType, access.subject, expiresAt],
+           (tenant_id, token_hash, unit_id, full_name, email, phone, occupancy_type, invited_by, start_date, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        [access.tenantId, tokenHash, input.unitId, input.fullName, input.email, input.phone, input.occupancyType, access.subject, input.startDate, expiresAt],
       )
       invitationId = inserted.rows[0]?.id ?? ''
     }
@@ -1381,6 +1511,185 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
   return { id: invitationId, email: input.email, fullName: input.fullName, unit: unitLabel, expiresAt, status: 'pending' as const }
 }
 
+const recordResidentMoveOut = async (access: TenantAccess, residentId: string, rawInput: unknown) => {
+  requireRole(access, 'admin')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(residentId)) throw new ApiFault(400, 'invalid_request', 'Choose a valid resident')
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) throw new ApiFault(400, 'invalid_request', 'Move-out details are required')
+  const input = rawInput as Record<string, unknown>
+  const moveOutDate = parseCalendarDate(input.moveOutDate, 'Move-out date')
+  const newResidentStartDate = parseCalendarDate(input.newResidentStartDate, 'New resident start date')
+  if (newResidentStartDate <= moveOutDate) throw new ApiFault(400, 'invalid_request', 'The new resident start date must be after the move-out date')
+  if (input.markDuesPaid !== undefined && typeof input.markDuesPaid !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Dues settlement must be true or false')
+  const finalReadingRaw = input.finalMeterReading
+  let finalMeterReading: number | null = null
+  if (finalReadingRaw !== null && finalReadingRaw !== undefined && finalReadingRaw !== '') {
+    const reading = typeof finalReadingRaw === 'number' ? finalReadingRaw : Number(finalReadingRaw)
+    if (!Number.isFinite(reading) || reading < 0 || reading > 1_000_000_000 || !/^\d+(?:\.\d{1,3})?$/.test(String(reading))) {
+      throw new ApiFault(400, 'invalid_request', 'Final meter reading must be non-negative with up to 3 decimal places')
+    }
+    finalMeterReading = reading
+  }
+
+  const client = await withTenantPool(access).connect()
+  try {
+    await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE')
+    const residentResult = await client.query<{
+      unit_id: string; full_name: string; status: string; start_date: string; move_out_date: string | null;
+      final_meter_reading: string | null; number: string; building_name: string;
+    }>(
+      `SELECT r.unit_id, r.full_name, r.status, r.start_date::text, r.move_out_date::text,
+              r.final_meter_reading::text, u.number, u.building_name
+       FROM residents r JOIN units u ON u.id = r.unit_id
+       WHERE r.id = $1 AND u.tenant_id = $2 FOR UPDATE OF r`,
+      [residentId, access.tenantId],
+    )
+    const resident = residentResult.rows[0]
+    if (!resident) throw new ApiFault(404, 'not_found', 'Resident not found')
+    if (resident.status !== 'active' && resident.move_out_date !== moveOutDate) throw new ApiFault(409, 'invalid_request', 'This resident has already moved out')
+    if (moveOutDate < resident.start_date) throw new ApiFault(400, 'invalid_request', 'Move-out date cannot be before the resident start date')
+    if (resident.move_out_date && resident.move_out_date !== moveOutDate) throw new ApiFault(409, 'invalid_request', 'A different move-out date is already recorded for this resident')
+
+    const rules = await client.query<{ template: string }>('SELECT template FROM billing_rules WHERE id = 1')
+    if (rules.rows[0]?.template === 'metered_water' && finalMeterReading === null) throw new ApiFault(400, 'invalid_request', 'Enter the final water meter reading before moving this resident out')
+    if (finalMeterReading !== null) {
+      const lastReading = await client.query<{ reading: string | null }>(
+        `SELECT GREATEST(
+           COALESCE((SELECT MAX(input.closing_meter_reading) FROM billing_unit_inputs input
+                     JOIN billing_runs run ON run.billing_period = input.billing_period
+                     WHERE input.unit_id = $1 AND input.closing_meter_reading IS NOT NULL
+                       AND run.billing_period <= date_trunc('month', $2::date)::date), 0),
+           COALESCE((SELECT MAX(previous.final_meter_reading) FROM residents previous
+                     WHERE previous.unit_id = $1 AND previous.id <> $3
+                       AND previous.move_out_date < $2::date AND previous.final_meter_reading IS NOT NULL), 0)
+         )::text AS reading`,
+        [resident.unit_id, moveOutDate, residentId],
+      )
+      if (finalMeterReading < Number(lastReading.rows[0]?.reading ?? 0)) throw new ApiFault(400, 'invalid_request', 'Final meter reading cannot be lower than the last recorded reading')
+    }
+
+    const invoices = await client.query<{ id: string; total_minor: string; confirmed_minor: string; pending_minor: string }>(
+      `SELECT i.id, i.total_minor::text,
+              COALESCE(payments.confirmed_minor, 0)::text AS confirmed_minor,
+              COALESCE(payments.pending_minor, 0)::text AS pending_minor
+       FROM invoices i
+       LEFT JOIN LATERAL (
+         SELECT SUM(p.amount_minor) FILTER (WHERE p.status IN ('succeeded', 'reconciled', 'confirmed')) AS confirmed_minor,
+                SUM(p.amount_minor) FILTER (WHERE p.status = 'pending') AS pending_minor
+         FROM payments p WHERE p.invoice_id = i.id
+       ) payments ON TRUE
+       WHERE i.resident_id = $1 AND i.status IN ('open', 'partially_paid')
+       ORDER BY i.billing_period FOR UPDATE OF i`,
+      [residentId],
+    )
+    if (input.markDuesPaid === true && invoices.rows.some((invoice) => BigInt(invoice.pending_minor) > 0n)) {
+      throw new ApiFault(409, 'invalid_request', 'Resolve pending offline payment confirmations before marking move-out dues as paid')
+    }
+    const outstandingMinor = invoices.rows.reduce((total, invoice) => {
+      const due = BigInt(invoice.total_minor) - BigInt(invoice.confirmed_minor)
+      return total + (due > 0n ? due : 0n)
+    }, 0n)
+    if (outstandingMinor > BigInt(Number.MAX_SAFE_INTEGER)) throw new ApiFault(500, 'data_integrity_error', 'Resident dues exceed the supported amount range')
+    if (input.markDuesPaid === true) {
+      for (const invoice of invoices.rows) {
+        const due = BigInt(invoice.total_minor) - BigInt(invoice.confirmed_minor)
+        if (due <= 0n) continue
+        await client.query(
+          `INSERT INTO payments (invoice_id, amount_minor, currency, method, status, reference, confirmed_by, confirmed_at)
+           VALUES ($1, $2, 'INR', 'offline_manual', 'confirmed', 'Move-out settlement', $3, NOW())`,
+          [invoice.id, due.toString(), access.subject],
+        )
+        await client.query("UPDATE invoices SET status = 'paid' WHERE id = $1", [invoice.id])
+      }
+    }
+
+    await client.query(
+      `UPDATE residents
+       SET move_out_date = $2::date, final_meter_reading = $3,
+           status = CASE WHEN $2::date < CURRENT_DATE THEN 'inactive' ELSE status END,
+           move_out_recorded_by = $4, move_out_dues_minor = COALESCE(residents.move_out_dues_minor, $5), updated_at = NOW()
+       WHERE id = $1`,
+      [residentId, moveOutDate, finalMeterReading, access.subject, outstandingMinor.toString()],
+    )
+    await client.query(
+      `UPDATE units u SET status = CASE WHEN EXISTS (
+         SELECT 1 FROM residents current_resident
+         WHERE current_resident.unit_id = u.id AND current_resident.status = 'active'
+           AND current_resident.start_date <= CURRENT_DATE
+           AND (current_resident.move_out_date IS NULL OR current_resident.move_out_date >= CURRENT_DATE)
+       ) THEN 'occupied' ELSE 'vacant' END, updated_at = NOW()
+       WHERE u.id = $1`,
+      [resident.unit_id],
+    )
+    await client.query('COMMIT')
+    return {
+      residentId,
+      resident: resident.full_name,
+      unit: `${resident.building_name} · ${resident.number}`,
+      moveOutDate,
+      finalMeterReading,
+      outstandingMinor: input.markDuesPaid === true ? 0 : Number(outstandingMinor),
+      duesSettledMinor: input.markDuesPaid === true ? Number(outstandingMinor) : 0,
+    }
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+const settleFormerResidentDues = async (access: TenantAccess, residentId: string) => {
+  requireRole(access, 'admin')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(residentId)) throw new ApiFault(400, 'invalid_request', 'Choose a valid resident')
+  const client = await withTenantPool(access).connect()
+  try {
+    await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE')
+    const resident = await client.query<{ id: string; full_name: string; unit: string; building: string }>(
+      `SELECT r.id, r.full_name, u.number AS unit, u.building_name AS building
+       FROM residents r JOIN units u ON u.id = r.unit_id
+       WHERE r.id = $1 AND u.tenant_id = $2 FOR UPDATE OF r`,
+      [residentId, access.tenantId],
+    )
+    const residentRow = resident.rows[0]
+    if (!residentRow) throw new ApiFault(404, 'not_found', 'Resident not found')
+    const invoices = await client.query<{ id: string; total_minor: string; confirmed_minor: string; pending_minor: string }>(
+      `SELECT i.id, i.total_minor::text,
+              COALESCE(payments.confirmed_minor, 0)::text AS confirmed_minor,
+              COALESCE(payments.pending_minor, 0)::text AS pending_minor
+       FROM invoices i
+       LEFT JOIN LATERAL (
+         SELECT SUM(p.amount_minor) FILTER (WHERE p.status IN ('succeeded', 'reconciled', 'confirmed')) AS confirmed_minor,
+                SUM(p.amount_minor) FILTER (WHERE p.status = 'pending') AS pending_minor
+         FROM payments p WHERE p.invoice_id = i.id
+       ) payments ON TRUE
+       WHERE i.resident_id = $1 AND i.status IN ('open', 'partially_paid')
+       ORDER BY i.billing_period FOR UPDATE OF i`,
+      [residentId],
+    )
+    if (invoices.rows.some((invoice) => BigInt(invoice.pending_minor) > 0n)) throw new ApiFault(409, 'invalid_request', 'Resolve pending offline payment confirmations before settling these dues')
+    let settledMinor = 0n
+    for (const invoice of invoices.rows) {
+      const due = BigInt(invoice.total_minor) - BigInt(invoice.confirmed_minor)
+      if (due <= 0n) continue
+      settledMinor += due
+      await client.query(
+        `INSERT INTO payments (invoice_id, amount_minor, currency, method, status, reference, confirmed_by, confirmed_at)
+         VALUES ($1, $2, 'INR', 'offline_manual', 'confirmed', 'Former resident dues settlement', $3, NOW())`,
+        [invoice.id, due.toString(), access.subject],
+      )
+      await client.query("UPDATE invoices SET status = 'paid' WHERE id = $1", [invoice.id])
+    }
+    if (settledMinor > BigInt(Number.MAX_SAFE_INTEGER)) throw new ApiFault(500, 'data_integrity_error', 'Resident dues exceed the supported amount range')
+    await client.query('COMMIT')
+    return { resident: residentRow.full_name, unit: `${residentRow.building} · ${residentRow.unit}`, settledMinor: Number(settledMinor), status: 'paid' as const }
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 const parseResidentInvitationToken = (token: unknown): { tenantId: string; token: string; tokenHash: string } => {
   if (typeof token !== 'string' || token.length > 140) throw new ApiFault(400, 'invalid_request', 'A valid resident invitation token is required')
   const match = token.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{40,50})$/i)
@@ -1402,15 +1711,15 @@ const lookupResidentInvitation = async (rawInput: unknown) => {
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) throw new ApiFault(400, 'invalid_request', 'A resident invitation token is required')
   const { tenantId, tokenHash } = parseResidentInvitationToken((rawInput as Record<string, unknown>).token)
   const tenant = await getInvitationTenant(tenantId)
-  const result = await getTenantPool(tenant.database_name as string).query<{ email: string; full_name: string; building_name: string; number: string }>(
-    `SELECT i.email::text, i.full_name, u.building_name, u.number
+  const result = await getTenantPool(tenant.database_name as string).query<{ email: string; full_name: string; building_name: string; number: string; start_date: string }>(
+    `SELECT i.email::text, i.full_name, i.start_date::text, u.building_name, u.number
      FROM resident_invitations i JOIN units u ON u.id = i.unit_id AND u.tenant_id = i.tenant_id
      WHERE i.tenant_id = $1 AND i.token_hash = $2 AND i.status = 'pending' AND i.expires_at > NOW()`,
     [tenantId, tokenHash],
   )
   const invitation = result.rows[0]
   if (!invitation) throw new ApiFault(400, 'invalid_request', 'This invitation is invalid, expired, or already accepted')
-  return { email: invitation.email, fullName: invitation.full_name, organizationName: tenant.org_name, unit: `${invitation.building_name} · ${invitation.number}` }
+  return { email: invitation.email, fullName: invitation.full_name, organizationName: tenant.org_name, unit: `${invitation.building_name} · ${invitation.number}`, startDate: invitation.start_date }
 }
 
 const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unknown) => {
@@ -1439,10 +1748,10 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
     await client.query('BEGIN')
     const result = await client.query<{
       id: string; unit_id: string; full_name: string; email: string; phone: string | null;
-      occupancy_type: 'owner' | 'tenant'; status: string; expires_at: Date;
+      occupancy_type: 'owner' | 'tenant'; status: string; expires_at: Date; start_date: string;
       building_name: string; number: string;
     }>(
-      `SELECT i.id, i.unit_id, i.full_name, i.email::text, i.phone, i.occupancy_type, i.status, i.expires_at,
+      `SELECT i.id, i.unit_id, i.full_name, i.email::text, i.phone, i.occupancy_type, i.status, i.expires_at, i.start_date::text,
               u.building_name, u.number
        FROM resident_invitations i JOIN units u ON u.id = i.unit_id AND u.tenant_id = i.tenant_id
        WHERE i.tenant_id = $1 AND i.token_hash = $2 FOR UPDATE OF i`,
@@ -1463,11 +1772,19 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
       if (existing.rows[0] && (existing.rows[0].email.toLowerCase() !== invitation.email.toLowerCase() || existing.rows[0].unit_id !== invitation.unit_id)) {
         throw new ApiFault(409, 'invalid_request', 'This account already has a different resident profile in the organization')
       }
+      const conflictingResident = await client.query(
+        `SELECT id FROM residents
+         WHERE unit_id = $1 AND status = 'active'
+           AND (move_out_date IS NULL OR move_out_date >= $2::date)
+         LIMIT 1`,
+        [invitation.unit_id, invitation.start_date],
+      )
+      if (conflictingResident.rowCount) throw new ApiFault(409, 'invalid_request', 'Another resident is scheduled for this flat on or after the invited start date')
       if (!existing.rows[0]) {
         await client.query(
-          `INSERT INTO residents (auth_subject, unit_id, full_name, email, phone, occupancy_type, status)
-           VALUES ($1, $2, $3, $4, $5, $6, 'active')`,
-          [identity.subject, invitation.unit_id, invitation.full_name, invitation.email, invitation.phone, invitation.occupancy_type],
+          `INSERT INTO residents (auth_subject, unit_id, full_name, email, phone, occupancy_type, status, start_date)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)`,
+          [identity.subject, invitation.unit_id, invitation.full_name, invitation.email, invitation.phone, invitation.occupancy_type, invitation.start_date],
         )
       }
       await client.query(`UPDATE resident_invitations SET status = 'accepted', accepted_at = NOW(), updated_at = NOW() WHERE id = $1`, [invitation.id])
@@ -1495,7 +1812,13 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
 const getAdminUnits = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   const result = await withTenantPool(access).query(
-    `SELECT u.id, u.building_name AS building, u.number, u.status AS occupancy_status,
+    `SELECT u.id, u.apartment_building_id AS building_id, u.building_name AS building, u.number,
+            CASE WHEN EXISTS (
+              SELECT 1 FROM residents current_resident
+              WHERE current_resident.unit_id = u.id AND current_resident.status = 'active'
+                AND current_resident.start_date <= CURRENT_DATE
+                AND (current_resident.move_out_date IS NULL OR current_resident.move_out_date >= CURRENT_DATE)
+            ) THEN 'occupied' ELSE 'vacant' END AS occupancy_status,
             CASE
               WHEN latest.status IS NULL THEN 'no_invoice'
               WHEN latest.status IN ('open', 'partially_paid') AND latest.due_date < CURRENT_DATE THEN 'overdue'
@@ -1514,6 +1837,7 @@ const getAdminUnits = async (access: TenantAccess) => {
   )
   return result.rows.map((unit) => ({
     id: unit.id,
+    buildingId: unit.building_id,
     building: unit.building ?? 'Unassigned building',
     number: unit.number,
     occupancyStatus: unit.occupancy_status,
@@ -1521,34 +1845,26 @@ const getAdminUnits = async (access: TenantAccess) => {
   }))
 }
 
-const parseApartmentInput = (input: unknown): { name: string; city: string; address: string; billingStartMonth: string; buildingName: string; floors: number; unitsPerFloor: number; unitPrefix: string; maintenanceRatePerSqft: number | null } => {
+const parseBlockInput = (input: unknown): { buildingName: string; floors: number; unitsPerFloor: number; unitPrefix: string; maintenanceRatePerSqft: number | null } => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new ApiFault(400, 'invalid_request', 'Apartment details are required')
+    throw new ApiFault(400, 'invalid_request', 'Block details are required')
   }
   const value = input as Record<string, unknown>
-  const name = typeof value.name === 'string' ? value.name.trim() : ''
-  const city = typeof value.city === 'string' ? value.city.trim() : ''
-  const address = typeof value.address === 'string' ? value.address.trim() : ''
   const buildingName = typeof value.buildingName === 'string' ? value.buildingName.trim() : ''
   const floors = value.floors
   const unitsPerFloor = value.unitsPerFloor
   const unitPrefix = typeof value.unitPrefix === 'string' ? value.unitPrefix.trim() : ''
   const maintenanceRatePerSqft = value.maintenanceRatePerSqft
-  const billingStartMonth = value.billingStartMonth
-  if (name.length < 2 || name.length > 120) throw new ApiFault(400, 'invalid_request', 'Apartment name must be between 2 and 120 characters')
-  if (city.length < 2 || city.length > 100) throw new ApiFault(400, 'invalid_request', 'City must be between 2 and 100 characters')
-  if (address.length < 3 || address.length > 300) throw new ApiFault(400, 'invalid_request', 'Address must be between 3 and 300 characters')
-  if (buildingName.length < 1 || buildingName.length > 80) throw new ApiFault(400, 'invalid_request', 'Building name must be between 1 and 80 characters')
+  if (buildingName.length < 1 || buildingName.length > 80 || !/^[\p{L}\p{N}][\p{L}\p{N}\p{M} .,'’()&\/#-]{0,79}$/u.test(buildingName)) {
+    throw new ApiFault(400, 'invalid_request', 'Block name must start with a letter or number and contain only letters, numbers, spaces, or common punctuation')
+  }
   if (typeof floors !== 'number' || !Number.isInteger(floors) || floors < 1 || floors > 200) throw new ApiFault(400, 'invalid_request', 'Floors must be a whole number between 1 and 200')
   if (typeof unitsPerFloor !== 'number' || !Number.isInteger(unitsPerFloor) || unitsPerFloor < 1 || unitsPerFloor > 100 || floors * unitsPerFloor > 20000) throw new ApiFault(400, 'invalid_request', 'Units per floor must be a whole number and total units cannot exceed 20,000')
   if (!/^[A-Za-z0-9]{1,8}$/.test(unitPrefix)) throw new ApiFault(400, 'invalid_request', 'Unit prefix must contain 1 to 8 letters or numbers')
-  if (maintenanceRatePerSqft !== null && (typeof maintenanceRatePerSqft !== 'number' || !Number.isFinite(maintenanceRatePerSqft) || maintenanceRatePerSqft < 0 || maintenanceRatePerSqft > 100000)) {
-    throw new ApiFault(400, 'invalid_request', 'Maintenance rate must be between 0 and 100,000 rupees per sq. ft.')
+  if (maintenanceRatePerSqft !== null && (typeof maintenanceRatePerSqft !== 'number' || !Number.isInteger(maintenanceRatePerSqft) || maintenanceRatePerSqft < 0 || maintenanceRatePerSqft > 100000)) {
+    throw new ApiFault(400, 'invalid_request', 'Maintenance rate must be a whole rupee amount from 0 to 100,000 per sq. ft.')
   }
-  if (typeof billingStartMonth !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(billingStartMonth)) {
-    throw new ApiFault(400, 'invalid_request', 'Choose a valid billing start month')
-  }
-  return { name, city, address, buildingName, floors, unitsPerFloor, unitPrefix, billingStartMonth, maintenanceRatePerSqft }
+  return { buildingName, floors, unitsPerFloor, unitPrefix, maintenanceRatePerSqft }
 }
 
 const requireApartmentSchema = async (access: TenantAccess): Promise<void> => {
@@ -1567,22 +1883,25 @@ const requireApartmentSchema = async (access: TenantAccess): Promise<void> => {
   }
 }
 
-const createAdminApartment = async (access: TenantAccess, rawInput: unknown) => {
+const createAdminBuilding = async (access: TenantAccess, rawInput: unknown) => {
   requireRole(access, 'admin')
-  const input = parseApartmentInput(rawInput)
+  const input = parseBlockInput(rawInput)
   await requireApartmentSchema(access)
+  const entitlement = await getPlatformPool().query<{ allowed_blocks: number }>(
+    'SELECT allowed_blocks FROM tenant_records WHERE tenant_id = $1', [access.tenantId],
+  )
+  const allowedBlocks = Number(entitlement.rows[0]?.allowed_blocks)
+  if (!Number.isInteger(allowedBlocks) || allowedBlocks < 1) throw new ApiFault(403, 'forbidden', 'This apartment has no block allowance configured')
   const pool = withTenantPool(access)
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    const apartment = await client.query<{ id: string }>(
-      `INSERT INTO apartments (tenant_id, name, city, address, billing_start_month)
-       VALUES ($1, $2, $3, $4, $5::date) RETURNING id`,
-      [access.tenantId, input.name, input.city, input.address, `${input.billingStartMonth}-01`],
-    )
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [access.tenantId])
+    const countResult = await client.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM apartment_buildings WHERE tenant_id = $1', [access.tenantId])
+    if (Number(countResult.rows[0]?.count ?? 0) >= allowedBlocks) throw new ApiFault(409, 'block_limit_reached', 'The allowed number of blocks has been reached')
+    const apartment = await client.query<{ id: string }>('SELECT id FROM apartments WHERE tenant_id = $1 ORDER BY created_at LIMIT 1', [access.tenantId])
     const apartmentId = apartment.rows[0]?.id
-    if (!apartmentId) throw new ApiFault(500, 'data_integrity_error', 'Apartment creation did not return an identifier')
-    const buildings: Array<{ id: string; name: string }> = []
+    if (!apartmentId) throw new ApiFault(409, 'invalid_request', 'The apartment workspace is not initialized')
     const building = await client.query<{ id: string }>(
       `INSERT INTO apartment_buildings (tenant_id, apartment_id, name, maintenance_rate_per_sqft)
        VALUES ($1, $2, $3, $4) RETURNING id`,
@@ -1590,7 +1909,6 @@ const createAdminApartment = async (access: TenantAccess, rawInput: unknown) => 
     )
     const buildingId = building.rows[0]?.id
     if (!buildingId) throw new ApiFault(500, 'data_integrity_error', 'Building creation did not return an identifier')
-    buildings.push({ id: buildingId, name: input.buildingName })
     await client.query(
       `INSERT INTO units (id, tenant_id, number, status, building_name, floor_number, apartment_id, apartment_building_id)
        SELECT gen_random_uuid(), $1,
@@ -1601,11 +1919,11 @@ const createAdminApartment = async (access: TenantAccess, rawInput: unknown) => 
       [access.tenantId, input.unitPrefix, input.buildingName, apartmentId, buildingId, input.floors, input.unitsPerFloor],
     )
     await client.query('COMMIT')
-    return { id: apartmentId, name: input.name, city: input.city, address: input.address, billingStartMonth: input.billingStartMonth, buildings, unitCount: input.floors * input.unitsPerFloor }
+    return { id: buildingId, name: input.buildingName, unitCount: input.floors * input.unitsPerFloor }
   } catch (error) {
     await client.query('ROLLBACK')
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
-      throw new ApiFault(409, 'invalid_request', 'An apartment with this name already exists in this organization')
+      throw new ApiFault(409, 'invalid_request', 'A block with this name already exists in this apartment')
     }
     throw error
   } finally {
@@ -1627,13 +1945,14 @@ const getAdminBuildings = async (access: TenantAccess) => {
      ORDER BY a.name, b.name`,
     [access.tenantId],
   )
-  return result.rows.map((building) => ({
+  const allowance = await getPlatformPool().query<{ allowed_blocks: number }>('SELECT allowed_blocks FROM tenant_records WHERE tenant_id = $1', [access.tenantId])
+  return { allowedBlocks: Number(allowance.rows[0]?.allowed_blocks ?? 0), buildings: result.rows.map((building) => ({
     id: building.id,
     name: building.name,
     apartment: building.apartment,
     city: building.city,
     unitCount: Number(building.unit_count),
-  }))
+  })) }
 }
 
 type BillingRules = {
@@ -1708,12 +2027,10 @@ const parseBillingRules = (input: unknown): BillingRules => {
   }
   const money = (key: string, label: string): number => {
     const amount = value[key]
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || amount > 10_000_000) {
-      throw new ApiFault(400, 'invalid_request', `${label} must be between 0 and 10,000,000 rupees`)
+    if (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0 || amount > 10_000_000) {
+      throw new ApiFault(400, 'invalid_request', `${label} must be a whole rupee amount from 0 to 10,000,000`)
     }
-    const parts = String(amount).match(/^(\d+)(?:\.(\d{1,2}))?$/)
-    if (!parts) throw new ApiFault(400, 'invalid_request', `${label} must have no more than two decimal places`)
-    const minor = BigInt(parts[1] ?? '0') * 100n + BigInt((parts[2] ?? '').padEnd(2, '0') || '0')
+    const minor = BigInt(amount) * 100n
     if (minor > BigInt(Number.MAX_SAFE_INTEGER)) throw new ApiFault(400, 'invalid_request', `${label} is outside the supported range`)
     return Number(minor)
   }
@@ -1738,6 +2055,13 @@ const parseBillingRules = (input: unknown): BillingRules => {
   }
 }
 
+const parseCalendarDate = (input: unknown, label: string): string => {
+  if (typeof input !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(input)) throw new ApiFault(400, 'invalid_request', `${label} must be a valid date`)
+  const date = new Date(`${input}T00:00:00.000Z`)
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== input) throw new ApiFault(400, 'invalid_request', `${label} must be a valid date`)
+  return input
+}
+
 const parseBillingPeriod = (input: unknown): string => {
   if (typeof input !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(input)) {
     throw new ApiFault(400, 'invalid_request', 'Choose a valid billing period in YYYY-MM format')
@@ -1748,7 +2072,10 @@ const parseBillingPeriod = (input: unknown): string => {
 const getBillingResidents = async (db: BillingDatabase, tenantId: string, period: string): Promise<BillingResident[]> => {
   const result = await db.query<BillingResident>(
     `WITH resident_counts AS (
-       SELECT u.id AS unit_id, u.number AS unit, COUNT(r.id) FILTER (WHERE r.status = 'active') AS active_count
+       SELECT u.id AS unit_id, u.number AS unit,
+              COUNT(r.id) FILTER (WHERE r.status = 'active'
+                AND r.start_date <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+                AND (r.move_out_date IS NULL OR r.move_out_date >= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date)) AS active_count
        FROM units u LEFT JOIN residents r ON r.unit_id = u.id
        WHERE u.tenant_id = $1
        GROUP BY u.id, u.number
@@ -1788,6 +2115,8 @@ const getBillingResidents = async (db: BillingDatabase, tenantId: string, period
      FROM units u
      JOIN resident_counts rc ON rc.unit_id = u.id AND rc.active_count = 1
      JOIN residents r ON r.unit_id = u.id AND r.status = 'active'
+       AND r.start_date <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+       AND (r.move_out_date IS NULL OR r.move_out_date >= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date)
      LEFT JOIN previous_dues pd ON pd.resident_id = r.id
      WHERE u.tenant_id = $1
      GROUP BY r.id, r.full_name, u.id, u.number, u.maintenance_minor, u.area_sqft, pd.outstanding_minor
@@ -1814,7 +2143,9 @@ type BillingUnitInput = {
 const getPeriodBillingUnitInputs = async (db: BillingDatabase, tenantId: string, period: string): Promise<BillingUnitInput[]> => {
   const result = await db.query<BillingUnitInput>(
     `SELECT u.id AS unit_id, u.number AS unit, u.building_name AS building,
-            COUNT(r.id) FILTER (WHERE r.status = 'active')::text AS resident_count,
+            COUNT(r.id) FILTER (WHERE r.status = 'active'
+              AND r.start_date <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+              AND (r.move_out_date IS NULL OR r.move_out_date >= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date))::text AS resident_count,
             u.area_sqft,
             current_input.opening_meter_reading::text,
             current_input.closing_meter_reading::text,
@@ -1827,13 +2158,26 @@ const getPeriodBillingUnitInputs = async (db: BillingDatabase, tenantId: string,
      LEFT JOIN billing_unit_inputs current_input
        ON current_input.unit_id = u.id AND current_input.billing_period = $2::date
      LEFT JOIN LATERAL (
-       SELECT input.closing_meter_reading
-       FROM billing_unit_inputs input
-       JOIN billing_runs published_run ON published_run.billing_period = input.billing_period
-       WHERE input.unit_id = u.id
-         AND input.billing_period < $2::date
-         AND input.closing_meter_reading IS NOT NULL
-       ORDER BY input.billing_period DESC
+       SELECT history.closing_meter_reading
+       FROM (
+         SELECT input.closing_meter_reading, input.billing_period AS reading_date
+         FROM billing_unit_inputs input
+         JOIN billing_runs published_run ON published_run.billing_period = input.billing_period
+         WHERE input.unit_id = u.id AND input.closing_meter_reading IS NOT NULL
+         UNION ALL
+         SELECT prior_resident.final_meter_reading, prior_resident.move_out_date AS reading_date
+         FROM residents prior_resident
+         WHERE prior_resident.unit_id = u.id AND prior_resident.final_meter_reading IS NOT NULL
+           AND prior_resident.move_out_date IS NOT NULL
+       ) history
+       WHERE history.reading_date < COALESCE((
+         SELECT MIN(next_resident.start_date)
+         FROM residents next_resident
+         WHERE next_resident.unit_id = u.id AND next_resident.status = 'active'
+           AND next_resident.start_date >= $2::date
+           AND next_resident.start_date <= ($2::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+       ), $2::date)
+       ORDER BY history.reading_date DESC
        LIMIT 1
      ) previous_input ON TRUE
      WHERE u.tenant_id = $1
@@ -1857,7 +2201,8 @@ const getAdminBillingUnits = async (access: TenantAccess) => {
     maintenance_minor: string | null
   }>(
     `SELECT u.id, u.number AS unit, u.building_name AS building,
-            COUNT(r.id) FILTER (WHERE r.status = 'active')::text AS resident_count,
+            COUNT(r.id) FILTER (WHERE r.status = 'active' AND r.start_date <= CURRENT_DATE
+              AND (r.move_out_date IS NULL OR r.move_out_date >= CURRENT_DATE))::text AS resident_count,
             u.area_sqft, u.maintenance_minor::text
      FROM units u LEFT JOIN residents r ON r.unit_id = u.id
      WHERE u.tenant_id = $1
@@ -1875,16 +2220,21 @@ const getAdminBillingUnits = async (access: TenantAccess) => {
   }))
 }
 
-const getBillingExceptions = async (db: BillingDatabase, tenantId: string, excludedUnitIds: string[]): Promise<string[]> => {
+const getBillingExceptions = async (db: BillingDatabase, tenantId: string, excludedUnitIds: string[], period: string): Promise<string[]> => {
   const result = await db.query<{ unit: string; active_count: string }>(
-    `SELECT u.number AS unit, COUNT(r.id) FILTER (WHERE r.status = 'active')::text AS active_count
+    `SELECT u.number AS unit,
+            COUNT(r.id) FILTER (WHERE r.status = 'active'
+              AND r.start_date <= ($3::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+              AND (r.move_out_date IS NULL OR r.move_out_date >= ($3::date + INTERVAL '1 month' - INTERVAL '1 day')::date))::text AS active_count
      FROM units u LEFT JOIN residents r ON r.unit_id = u.id
      WHERE u.tenant_id = $1
      GROUP BY u.id, u.number
-     HAVING COUNT(r.id) FILTER (WHERE r.status = 'active') <> 1
+     HAVING COUNT(r.id) FILTER (WHERE r.status = 'active'
+       AND r.start_date <= ($3::date + INTERVAL '1 month' - INTERVAL '1 day')::date
+       AND (r.move_out_date IS NULL OR r.move_out_date >= ($3::date + INTERVAL '1 month' - INTERVAL '1 day')::date)) <> 1
        AND NOT (u.id = ANY($2::uuid[]))
      ORDER BY u.number`,
-    [tenantId, excludedUnitIds],
+    [tenantId, excludedUnitIds, `${period}-01`],
   )
   return result.rows.map((row) => Number(row.active_count) === 0
     ? `Unit ${row.unit} has no active resident and will be excluded`
@@ -1901,7 +2251,7 @@ const createBillingSnapshot = async (db: BillingDatabase, access: TenantAccess, 
   ])
   const inputByUnit = new Map(unitInputs.map((input) => [input.unit_id, input]))
   const excludedUnitIds = unitInputs.filter((input) => input.excluded_from_billing).map((input) => input.unit_id)
-  const unitExceptions = await getBillingExceptions(db, access.tenantId, excludedUnitIds)
+  const unitExceptions = await getBillingExceptions(db, access.tenantId, excludedUnitIds, period)
   const alreadyInvoiced = residents.filter((resident) => resident.already_invoiced)
   const excludedResidents = residents.filter((resident) => inputByUnit.get(resident.unit_id)?.excluded_from_billing)
   const eligible = residents.filter((resident) => !resident.already_invoiced && !inputByUnit.get(resident.unit_id)?.excluded_from_billing)
@@ -1971,7 +2321,7 @@ const createBillingSnapshot = async (db: BillingDatabase, access: TenantAccess, 
       water = rules.waterMinor
     }
 
-    const extraCharge = rules.template === 'standard' ? 0 : minorUnits(input?.extra_charge_minor ?? '0')
+    const extraCharge = minorUnits(input?.extra_charge_minor ?? '0')
     const extraChargeDescription = input?.extra_charge_description?.trim() || 'Additional charge'
     if (![maintenance, water, rules.sinkingFundMinor, extraCharge, minorUnits(resident.previous_dues_minor)].every(Number.isSafeInteger)) {
       throw new ApiFault(500, 'data_integrity_error', 'An invoice line item exceeds the supported amount range')
@@ -2259,12 +2609,10 @@ const saveAdminBillingInputs = async (access: TenantAccess, rawInput: unknown) =
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new ApiFault(400, 'invalid_request', 'Each billing input must be an object')
     const row = item as Record<string, unknown>
     const extraCharge = row.extraCharge
-    if (typeof extraCharge !== 'number' || !Number.isFinite(extraCharge) || extraCharge < 0 || extraCharge > 10_000_000) {
-      throw new ApiFault(400, 'invalid_request', 'Extra charge must be between 0 and 10,000,000 rupees')
+    if (typeof extraCharge !== 'number' || !Number.isInteger(extraCharge) || extraCharge < 0 || extraCharge > 10_000_000) {
+      throw new ApiFault(400, 'invalid_request', 'Extra charge must be a whole rupee amount from 0 to 10,000,000')
     }
-    const amountParts = String(extraCharge).match(/^(\d+)(?:\.(\d{1,2}))?$/)
-    if (!amountParts) throw new ApiFault(400, 'invalid_request', 'Extra charge can have at most two decimal places')
-    const extraChargeMinor = Number(BigInt(amountParts[1] ?? '0') * 100n + BigInt((amountParts[2] ?? '').padEnd(2, '0') || '0'))
+    const extraChargeMinor = Number(BigInt(extraCharge) * 100n)
     const description = typeof row.extraChargeDescription === 'string' ? row.extraChargeDescription.trim() : ''
     if (description.length > 120) throw new ApiFault(400, 'invalid_request', 'Extra charge description must be 120 characters or fewer')
     if (row.excludedFromBilling !== undefined && typeof row.excludedFromBilling !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Flat billing exclusion must be true or false')
@@ -2575,7 +2923,8 @@ const getPlatformOverview = async (request: IncomingMessage) => {
     ),
     pool.query(
       `SELECT tenant_id AS id, slug, org_name AS name, status, plan_name, city,
-              admin_email AS "adminEmail", estimated_units AS "estimatedUnits",
+              admin_email AS "adminEmail", allowed_blocks AS "allowedBlocks",
+              apartment_code AS "apartmentCode",
               admin_invited_at AS "invitedAt",
               admin_invite_accepted_at AS "inviteAcceptedAt",
               (SELECT status FROM provisioning_state ps WHERE ps.tenant_id = tr.tenant_id) AS "provisioningStatus",
@@ -2681,6 +3030,9 @@ type OnboardingRecord = {
   database_name: string
   plan_name: string
   admin_email: string
+  city: string
+  allowed_blocks: number
+  apartment_code: string
   status?: string
 }
 
@@ -2705,6 +3057,12 @@ const completeOrganizationOnboarding = async (record: OnboardingRecord) => {
        VALUES ($1, $2, $3, 'en-IN', 'INR', 'Asia/Kolkata')
        ON CONFLICT (tenant_id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`,
       [record.id, record.tenant_id, record.org_name],
+    )
+    await getTenantPool(record.database_name).query(
+      `INSERT INTO apartments (tenant_id, name, city, address, billing_start_month)
+       VALUES ($1, $2, $3, '', date_trunc('month', CURRENT_DATE)::date)
+       ON CONFLICT (tenant_id, name) DO NOTHING`,
+      [record.tenant_id, record.org_name, record.city],
     )
     await platformPool.query(
       `UPDATE provisioning_state
@@ -2767,7 +3125,8 @@ const completeOrganizationOnboarding = async (record: OnboardingRecord) => {
   )
   return {
     tenantId: record.tenant_id,
-    organizationName: record.org_name,
+    apartmentName: record.org_name,
+    apartmentCode: record.apartment_code,
     administratorEmail: record.admin_email,
     status: 'onboarding',
     invitationStatus: 'sent',
@@ -2803,19 +3162,20 @@ const createOrganizationOnboarding = async (request: IncomingMessage, requestId:
   const slug = `${slugBase}-${id.slice(0, 8)}`
 
   const client = await getPlatformPool().connect()
+  let apartmentCode = ''
   try {
     await client.query('BEGIN')
-    const duplicateName = await client.query(
-      `SELECT 1 FROM tenant_records WHERE lower(btrim(org_name)) = lower(btrim($1)) LIMIT 1`,
-      [input.name],
+    const apartmentCodeResult = await client.query<{ code: string }>(
+      `SELECT 'APT-' || LPAD(nextval('apartment_code_seq')::text, 6, '0') AS code`,
     )
-    if (duplicateName.rowCount) throw new ApiFault(409, 'invalid_request', 'An organization with this name already exists. Choose a unique name.')
+    apartmentCode = apartmentCodeResult.rows[0]?.code ?? ''
+    if (!apartmentCode) throw new ApiFault(500, 'data_integrity_error', 'Apartment ID generation failed')
     await client.query(
       `INSERT INTO tenant_records
         (id, tenant_id, slug, org_name, status, database_locator, database_name, plan_name,
-         city, admin_email, estimated_units)
-       VALUES ($1, $2, $3, $4, 'onboarding', $5, $5, $6, $7, $8, $9)`,
-      [id, tenantId, slug, input.name, databaseName, input.plan, input.city, input.adminEmail, input.estimatedUnits],
+         city, admin_email, allowed_blocks, apartment_code)
+       VALUES ($1, $2, $3, $4, 'onboarding', $5, $5, $6, $7, $8, $9, $10)`,
+      [id, tenantId, slug, input.name, databaseName, input.plan, input.city, input.adminEmail, input.allowedBlocks, apartmentCode],
     )
     await client.query(
       `INSERT INTO provisioning_state
@@ -2834,9 +3194,6 @@ const createOrganizationOnboarding = async (request: IncomingMessage, requestId:
     await client.query('ROLLBACK')
     if (error instanceof ApiFault) throw error
     if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
-      if ('constraint' in error && error.constraint === 'tenant_records_org_name_ci_idx') {
-        throw new ApiFault(409, 'invalid_request', 'An organization with this name already exists. Choose a unique name.')
-      }
       throw new ApiFault(409, 'invalid_request', 'An organization with these details already exists')
     }
     throw error
@@ -2852,6 +3209,9 @@ const createOrganizationOnboarding = async (request: IncomingMessage, requestId:
     database_name: databaseName,
     plan_name: input.plan,
     admin_email: input.adminEmail,
+    city: input.city,
+    allowed_blocks: input.allowedBlocks,
+    apartment_code: apartmentCode,
   }
   return completeOrganizationOnboarding(record)
 }
@@ -2860,7 +3220,7 @@ const retryOrganizationOnboarding = async (request: IncomingMessage, tenantId: s
   await requireOperator(request)
   assertInvitationConfiguration()
   const result = await getPlatformPool().query<OnboardingRecord>(
-    `SELECT id, tenant_id, slug, org_name, database_name, plan_name, admin_email, status
+    `SELECT id, tenant_id, slug, org_name, database_name, plan_name, admin_email, city, allowed_blocks, apartment_code, status
      FROM tenant_records WHERE tenant_id = $1`,
     [tenantId],
   )
@@ -2985,6 +3345,22 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, await markResidentNoticesRead(access, access.subject), requestId)
         return
       }
+      const noticeReadMatch = requestUrl.pathname.match(/^\/v1\/tenant\/notices\/([^/]+)\/read$/)
+      if (request.method === 'POST' && noticeReadMatch) {
+        const access = await resolveTenantAccess(request, 'resident')
+        respond(response, 200, await markResidentNoticeRead(access, access.subject, decodeURIComponent(noticeReadMatch[1] ?? '')), requestId)
+        return
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/announcements') {
+        const access = await resolveTenantAccess(request)
+        respond(response, 200, await getAdminAnnouncements(access), requestId)
+        return
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/announcements') {
+        const access = await resolveTenantAccess(request)
+        respond(response, 201, await createAdminAnnouncement(access, await readJsonBody(request)), requestId)
+        return
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/overview') {
         const access = await resolveTenantAccess(request)
         respond(response, 200, await getAdminOverview(access), requestId)
@@ -2993,6 +3369,18 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/residents') {
         const access = await resolveTenantAccess(request)
         respond(response, 200, await getAdminResidents(access), requestId)
+        return
+      }
+      const residentMoveOutMatch = requestUrl.pathname.match(/^\/v1\/admin\/residents\/([^/]+)\/move-out$/)
+      if (request.method === 'POST' && residentMoveOutMatch) {
+        const access = await resolveTenantAccess(request)
+        respond(response, 200, await recordResidentMoveOut(access, decodeURIComponent(residentMoveOutMatch[1] ?? ''), await readJsonBody(request)), requestId)
+        return
+      }
+      const residentSettleDuesMatch = requestUrl.pathname.match(/^\/v1\/admin\/residents\/([^/]+)\/settle-dues$/)
+      if (request.method === 'POST' && residentSettleDuesMatch) {
+        const access = await resolveTenantAccess(request)
+        respond(response, 200, await settleFormerResidentDues(access, decodeURIComponent(residentSettleDuesMatch[1] ?? '')), requestId)
         return
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/resident-invitations') {
@@ -3016,14 +3404,14 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, await getAdminUnits(access), requestId)
         return
       }
-      if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/apartments') {
-        const access = await resolveTenantAccess(request)
-        respond(response, 201, await createAdminApartment(access, await readJsonBody(request)), requestId)
-        return
-      }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/buildings') {
         const access = await resolveTenantAccess(request)
         respond(response, 200, await getAdminBuildings(access), requestId)
+        return
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/buildings') {
+        const access = await resolveTenantAccess(request)
+        respond(response, 201, await createAdminBuilding(access, await readJsonBody(request)), requestId)
         return
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/billing') {
@@ -3105,7 +3493,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       const status = apiFault?.status ?? 503
       const errorObject = error && typeof error === 'object' ? error as { code?: unknown; cause?: { code?: unknown } } : undefined
       const causeCode = String(errorObject?.code ?? errorObject?.cause?.code ?? 'unknown')
-      const apartmentSchemaRequest = requestUrl.pathname === '/v1/admin/buildings' || requestUrl.pathname === '/v1/admin/apartments' || requestUrl.pathname.startsWith('/v1/admin/resident-invitations') || requestUrl.pathname.startsWith('/v1/public/resident-invitations')
+      const apartmentSchemaRequest = requestUrl.pathname === '/v1/admin/buildings' || requestUrl.pathname.startsWith('/v1/admin/residents') || requestUrl.pathname.startsWith('/v1/admin/resident-invitations') || requestUrl.pathname.startsWith('/v1/public/resident-invitations') || requestUrl.pathname.startsWith('/v1/tenant/')
       const billingSchemaRequest = requestUrl.pathname.startsWith('/v1/admin/billing')
       const tenantSchemaRequest = apartmentSchemaRequest || billingSchemaRequest
       const tenantSchemaUnavailable = !apiFault && tenantSchemaRequest && ['42P01', '42703', '3F000'].includes(causeCode)
@@ -3127,7 +3515,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       const dependencyMessage = tenantSchemaUnavailable && billingSchemaRequest
         ? 'The selected tenant database is missing billing schema. Apply the required migrations/tenant_db/005_billing_runs.sql through migrations/tenant_db/009_billing_unit_exclusions.sql, then retry.'
         : tenantSchemaUnavailable && apartmentSchemaRequest
-          ? 'The selected tenant database is missing apartment or resident-invitation schema. Apply migrations/tenant_db/003_apartments.sql and migrations/tenant_db/004_resident_invitations.sql to that tenant database, then rebuild and restart the API.'
+          ? 'The selected tenant database is missing apartment or resident-lifecycle schema. Apply migrations/tenant_db/003_apartments.sql, migrations/tenant_db/004_resident_invitations.sql, and migrations/tenant_db/010_resident_lifecycle.sql to that tenant database, then rebuild and restart the API.'
           : tenantDatabaseMissing
           ? 'The selected tenant database does not exist. Check the tenant database_name in platform_db and complete tenant provisioning.'
           : 'A required data service is unavailable'

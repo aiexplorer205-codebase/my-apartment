@@ -2,6 +2,7 @@ import './globals.css'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
 import { I18nProvider, getAppConfig } from '@nivasa/app-platform'
+import { AppMessagesProvider } from '@nivasa/ui'
 
 const config = getAppConfig()
 
@@ -17,7 +18,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <I18nProvider namespaces={['common', 'admin', 'validation']}>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider><AppMessagesProvider>{children}</AppMessagesProvider></AuthProvider>
         </I18nProvider>
       </body>
     </html>

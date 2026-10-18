@@ -41,20 +41,20 @@ describe('MVP API runtime', () => {
       name: 'Lakeview Residency',
       city: 'Pune',
       adminEmail: 'ADMIN@lakeview.in',
-      estimatedUnits: 216,
+      allowedBlocks: 12,
       plan: 'growth',
     })).toEqual({
       name: 'Lakeview Residency',
       city: 'Pune',
       adminEmail: 'admin@lakeview.in',
-      estimatedUnits: 216,
+      allowedBlocks: 12,
       plan: 'growth',
     })
     expect(() => parseOrganizationOnboardingInput({
       name: 'A',
       city: 'Pune',
       adminEmail: 'not-an-email',
-      estimatedUnits: -1,
+      allowedBlocks: 0,
       plan: 'growth',
     })).toThrow()
   })
@@ -112,7 +112,7 @@ describe('MVP API runtime', () => {
         name: 'Not Authorized',
         city: 'Pune',
         adminEmail: 'admin@example.test',
-        estimatedUnits: 10,
+        allowedBlocks: 10,
         plan: 'growth',
       }),
     })

@@ -55,7 +55,7 @@
     "paidInFull": "పూర్తిగా చెల్లించబడింది",
     "paid": "చెల్లించబడింది",
     "reportedOfflinePayments": "నివేదించిన ఆఫ్‌లైన్ చెల్లింపులు",
-    "unreadNotices": "చదవని నోటీసులు",
+    "unreadNotices": "చదవని ప్రకటనలు",
     "communityUpdates": "కమ్యూనిటీ సమాచారం",
     "currentBillTitle": "ప్రస్తుత బిల్లు",
     "maintenance": "నిర్వహణ",
@@ -68,8 +68,8 @@
     "paymentUnavailable": "చెల్లింపు ప్రొవైడర్ మరియు సెటిల్‌మెంట్ విధానం ఆమోదం పొందే వరకు ఆన్‌లైన్ చెల్లింపులు నిలిపివేయబడ్డాయి.",
     "recentTransactions": "ఇటీవలి లావాదేవీలు",
     "noPaymentRecords": "ఇంకా చెల్లింపు వివరాలు లేవు.",
-    "communityNotices": "కమ్యూనిటీ నోటీసులు",
-    "noPublishedNotices": "ప్రచురించిన నోటీసులు ఏవీ లేవు."
+    "communityNotices": "కమ్యూనిటీ ప్రకటనలు",
+    "noPublishedNotices": "ప్రచురించిన ప్రకటనలు ఏవీ లేవు."
   }
 }
 

@@ -102,10 +102,10 @@ export const provisionPasswordlessUser = async (email: string): Promise<{ userId
 
 export const sendPasswordlessOtpToRegisteredUser = async (email: string, application: 'admin' | 'resident'): Promise<void> => {
   const config = managementConfiguration()
-  const clientId = (application === 'admin'
-    ? process.env.AUTH0_ADMIN_CLIENT_ID
-    : process.env.AUTH0_RESIDENT_CLIENT_ID)?.trim()
-  if (!clientId) throw new Error(`AUTH0_${application.toUpperCase()}_CLIENT_ID must be configured to send sign-in codes`)
+  const clientName = application === 'admin' ? 'ADMIN' : 'RESIDENT'
+  const clientId = process.env[`AUTH0_${clientName}_CLIENT_ID`]?.trim()
+  const clientSecret = process.env[`AUTH0_${clientName}_CLIENT_SECRET`]?.trim()
+  if (!clientId || !clientSecret) throw new Error(`AUTH0_${clientName}_CLIENT_ID and AUTH0_${clientName}_CLIENT_SECRET must be configured to send sign-in codes`)
 
   const accessToken = await getManagementToken(config)
   const user = await findProvisionedUser(config, accessToken, email)
@@ -114,7 +114,7 @@ export const sendPasswordlessOtpToRegisteredUser = async (email: string, applica
   const response = await globalThis.fetch(`https://${config.domain}/passwordless/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_id: clientId, connection: config.connection, email, send: 'code' }),
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, connection: config.connection, email, send: 'code' }),
     signal: AbortSignal.timeout(10_000),
   })
   if (!response.ok) throw new Error(`Auth0 passwordless OTP request failed (${response.status})`)

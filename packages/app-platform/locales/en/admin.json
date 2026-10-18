@@ -21,8 +21,8 @@
     "noMetrics": "No organization metrics are available to this account."
   },
   "units": {
-    "title": "Buildings & Units",
-    "name": "Unit",
+    "title": "Blocks & Flats",
+    "name": "Block",
     "building": "Building",
     "occupancy": "Occupancy",
     "paymentStatus": "Payment status"
@@ -30,7 +30,7 @@
   "transactions": {
     "recent": "Recent Transactions",
     "resident": "Resident",
-    "unit": "Unit",
+    "unit": "Block",
     "amount": "Amount",
     "status": "Status",
     "date": "Date"

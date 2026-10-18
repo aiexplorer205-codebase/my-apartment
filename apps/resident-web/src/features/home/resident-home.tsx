@@ -5,6 +5,7 @@ import { AuthBoundary, LoadState, TenantWorkspacePicker } from '../../lib/auth-u
 import { useApiPatch, useApiPost, useApiQuery } from '../../lib/use-api'
 import { useAuth0 } from '../../app/auth-provider'
 import { getAppConfig, useTranslation, LanguageSwitcher } from '@nivasa/app-platform'
+import { useAppMessages } from '@nivasa/ui'
 
 type Payment = {
   id: string
@@ -24,6 +25,7 @@ type Notice = {
   body: string
   isRead: boolean
   publishedAt: string
+  isImportant: boolean
 }
 
 type InvoiceBalance = {
@@ -55,7 +57,7 @@ type ResidentHome = {
   announcements: Notice[]
   paymentUnavailableReason: string
   profile: { fullName: string; email: string; phone: string | null; unit: string }
-  brand: { name: string; locale: string; timezone: string }
+  brand: { name: string; apartmentCode: string; locale: string; timezone: string }
 }
 
 type ResidentProfile = {
@@ -67,7 +69,7 @@ type ResidentProfile = {
   timezone: string
 }
 
-type ResidentNotice = Omit<Notice, 'publishedAt'> & { createdAt: string; channel: string }
+type ResidentNotice = Omit<Notice, 'publishedAt'> & { createdAt: string; channel: string; startsAt: string; endsAt: string | null }
 type ActiveTab = 'home' | 'payments' | 'history' | 'notices' | 'profile'
 type HistoryFilter = 'All' | 'Paid' | 'Pending'
 
@@ -75,7 +77,7 @@ const residentNavigation: Array<{ tab: ActiveTab; label: string; navKey: string;
   { tab: 'home', label: 'Home', navKey: 'home', icon: 'home' },
   { tab: 'payments', label: 'Payments', navKey: 'billing', icon: 'wallet' },
   { tab: 'history', label: 'History', navKey: 'history', icon: 'history' },
-  { tab: 'notices', label: 'Notices', navKey: 'notices', icon: 'bell' },
+  { tab: 'notices', label: 'Announcements', navKey: 'announcements', icon: 'bell' },
   { tab: 'profile', label: 'Profile', navKey: 'profile', icon: 'user' },
 ]
 
@@ -136,24 +138,20 @@ const paymentStatusLabel = (payment: Payment) => {
 
 function ResidentContent() {
   const { logout } = useAuth0()
+  const { pushMessage } = useAppMessages()
   const { t } = useTranslation(['common', 'resident'])
   const [activeTab, setActiveTab] = useState<ActiveTab>('home')
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('All')
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
-  const [manualPaymentError, setManualPaymentError] = useState<string | null>(null)
-  const [manualPaymentMessage, setManualPaymentMessage] = useState<string | null>(null)
   const [submittingManualPayment, setSubmittingManualPayment] = useState(false)
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileName, setProfileName] = useState('')
   const [profilePhone, setProfilePhone] = useState('')
-  const [profileError, setProfileError] = useState<string | null>(null)
-  const [profileMessage, setProfileMessage] = useState<string | null>(null)
   const [profilePlaceholder, setProfilePlaceholder] = useState<string | null>(null)
   const [savingProfile, setSavingProfile] = useState(false)
   const [pullDistance, setPullDistance] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
+  const [dismissedAnnouncementIds, setDismissedAnnouncementIds] = useState<string[]>([])
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const pullDistanceRef = useRef(0)
   const refreshStartedAtRef = useRef(0)
@@ -170,6 +168,7 @@ function ResidentContent() {
   const activeNavigation = residentNavigation.find(({ tab }) => tab === activeTab) ?? residentNavigation[0]
   const unreadNoticeCount = home.data?.announcements.filter(({ isRead }) => !isRead).length ?? 0
   const unreadNotificationCount = notices.data?.filter(({ isRead }) => !isRead).length ?? unreadNoticeCount
+  const importantAnnouncements = (notices.data ?? []).filter((item) => item.isImportant && !dismissedAnnouncementIds.includes(item.id))
   const openInvoiceCount = home.data?.invoiceBalances.filter(({ remainingDueMinor }) => remainingDueMinor > 0).length ?? 0
   const historyPayments = home.data?.recentPayments.filter((payment) => {
     if (historyFilter === 'All') return true
@@ -193,6 +192,18 @@ function ResidentContent() {
   const dueInDays = home.data?.dueDate
     ? Math.ceil((new Date(`${home.data.dueDate}T00:00:00`).getTime() - new Date(new Date().toDateString()).getTime()) / 86_400_000)
     : null
+
+  useEffect(() => {
+    try {
+      const stored = globalThis.localStorage.getItem('nivasa-dismissed-announcements')
+      if (stored) setDismissedAnnouncementIds(JSON.parse(stored) as string[])
+    } catch { /* Ignore unavailable or invalid local storage. */ }
+  }, [])
+
+  useEffect(() => {
+    const interval = globalThis.setInterval(notices.reload, 60_000)
+    return () => globalThis.clearInterval(interval)
+  }, [notices.reload])
 
   const handleTouchStart = (event: ReactTouchEvent<HTMLElement>) => {
     if (globalThis.innerWidth > 640 || globalThis.scrollY > 0 || refreshing || event.touches.length !== 1) return
@@ -262,8 +273,6 @@ function ResidentContent() {
   const submitManualPayment = async (event: FormEvent) => {
     event.preventDefault()
     if (!home.data || (!selectedInvoice && !isTotalSelected)) return
-    setManualPaymentError(null)
-    setManualPaymentMessage(null)
     setSubmittingManualPayment(true)
     try {
       const result = await post<{ amountMinor: number; allocations: Array<{ billingPeriod: string }> }>('/v1/tenant/payments/manual', {
@@ -278,33 +287,49 @@ function ResidentContent() {
           ? `for ${allocationPeriods[0]}`
           : `across ${allocationPeriods[0]} to ${allocationPeriods[allocationPeriods.length - 1]}`
         : `for ${formatBillingPeriod(selectedInvoice!.billingPeriod)}`
-      setManualPaymentMessage(`${formatMoney(result.amountMinor, home.data.currency)} ${allocationSummary} recorded. It will be applied to your balance after administrator confirmation.`)
+      pushMessage(`${formatMoney(result.amountMinor, home.data.currency)} ${allocationSummary} recorded. It will be applied to your balance after administrator confirmation.`, 'success')
       setSelectedInvoiceId(null)
       home.reload()
     } catch (cause) {
-      setManualPaymentError(cause instanceof Error ? cause.message : 'Could not record the offline payment. Please try again.')
+      pushMessage(cause instanceof Error ? cause.message : 'Could not record the offline payment. Please try again.', 'error')
     } finally {
       setSubmittingManualPayment(false)
     }
   }
 
   const markAllRead = async () => {
-    setActionError(null)
-    setActionMessage(null)
     try {
       const response = await post('/v1/tenant/notices/read-all')
-      setActionMessage(`${response.markedCount} notice${response.markedCount === 1 ? '' : 's'} marked as read.`)
+      pushMessage(`${response.markedCount} notice${response.markedCount === 1 ? '' : 's'} marked as read.`, 'success')
       notices.reload()
       home.reload()
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : 'Could not update notice status.')
+      pushMessage(cause instanceof Error ? cause.message : 'Could not update notice status.', 'error')
     }
+  }
+
+  const openAnnouncement = async (noticeId: string) => {
+    const notice = notices.data?.find(({ id }) => id === noticeId)
+    if (!notice || notice.isRead) return
+    try {
+      await post(`/v1/tenant/notices/${encodeURIComponent(noticeId)}/read`)
+      notices.reload()
+      home.reload()
+    } catch (cause) {
+      pushMessage(cause instanceof Error ? cause.message : 'Could not update announcement status.', 'error')
+    }
+  }
+
+  const dismissAnnouncement = (noticeId: string) => {
+    setDismissedAnnouncementIds((current) => {
+      const next = [...new Set([...current, noticeId])]
+      try { globalThis.localStorage.setItem('nivasa-dismissed-announcements', JSON.stringify(next)) } catch { /* Dismiss for this session if storage is unavailable. */ }
+      return next
+    })
   }
 
   const saveProfile = async (event: FormEvent) => {
     event.preventDefault()
-    setProfileError(null)
-    setProfileMessage(null)
     setSavingProfile(true)
     try {
       const updated = await patch<ResidentProfile>('/v1/tenant/profile', {
@@ -314,11 +339,11 @@ function ResidentContent() {
       setProfileName(updated.fullName)
       setProfilePhone(updated.phone ?? '')
       setEditingProfile(false)
-      setProfileMessage('Your profile details have been updated.')
+      pushMessage('Your profile details have been updated.', 'success')
       profile.reload()
       home.reload()
     } catch (cause) {
-      setProfileError(cause instanceof Error ? cause.message : 'Could not update your profile. Please try again.')
+      pushMessage(cause instanceof Error ? cause.message : 'Could not update your profile. Please try again.', 'error')
     } finally {
       setSavingProfile(false)
     }
@@ -334,6 +359,7 @@ function ResidentContent() {
         <div className="resident-workspace">
           <span className="resident-workspace-label">{t('common:labels.currentWorkspace', 'Current workspace')}</span>
           <strong>{home.data?.brand.name ?? t('resident:workspace.yourCommunity', 'Your community')}</strong>
+          {home.data?.brand.apartmentCode && <small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small>}
           <TenantWorkspacePicker />
         </div>
         <nav className="nav-list" aria-label="Resident navigation">
@@ -354,24 +380,25 @@ function ResidentContent() {
         <div className={`resident-pull-indicator${refreshing ? ' refreshing' : ''}`} style={{ height: refreshing ? 46 : pullDistance }} role="status" aria-live="polite" aria-hidden={!refreshing && pullDistance === 0}>
           {(refreshing || pullDistance > 0) && <><span className="resident-pull-spinner" />{refreshing ? t('common:messages.refreshing', 'Refreshing…') : pullDistance >= 58 ? t('common:messages.releaseToRefresh', 'Release to refresh') : t('common:messages.pullToRefresh', 'Pull to refresh')}</>}
         </div>
+        {importantAnnouncements.length > 0 && <aside className="resident-announcement-banners" aria-label="Important announcements">{importantAnnouncements.map((announcement) => <div className="resident-announcement-banner" key={announcement.id}><button type="button" className="resident-announcement-banner-copy" onClick={() => { setActiveTab('notices'); void openAnnouncement(announcement.id) }}><span className="resident-announcement-banner-label">Important announcement</span><strong>{announcement.title}</strong><span>{announcement.body}</span></button><button className="resident-announcement-banner-close" type="button" aria-label="Dismiss announcement" onClick={() => dismissAnnouncement(announcement.id)}>×</button></div>)}</aside>}
         {activeTab === 'home' && home.data && <header className="resident-mobile-home-header">
-          <div><h1>{greeting}, {firstName}</h1><p>{home.data.brand.name} · {home.data.profile.unit.split('·').at(-1)?.trim() ?? home.data.profile.unit}</p></div>
-          <button type="button" aria-label={`Notices${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
+          <div><h1>{greeting}, {firstName}</h1><p>{home.data.brand.name} · {home.data.profile.unit.split('·').at(-1)?.trim() ?? home.data.profile.unit}</p><small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small></div>
+          <button type="button" aria-label={`Announcements${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
         </header>}
         {activeTab === 'history' && <header className="resident-mobile-history-header">
           <div><h1>Payment history</h1><p>Invoices and receipts</p></div>
-          <button type="button" aria-label={`Notices${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
+          <button type="button" aria-label={`Announcements${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
         </header>}
         {activeTab === 'payments' && <header className="resident-mobile-payment-header">
           <div><h1>Record payment</h1><p>Review your amount due</p></div>
-          <button type="button" aria-label={`Notices${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
+          <button type="button" aria-label={`Announcements${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
         </header>}
         {activeTab === 'notices' && <header className="resident-mobile-notifications-header">
-          <div><h1>Notifications</h1><p>{home.data?.brand.name ?? 'Your community'}</p></div>
-          <button type="button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNotificationCount > 0 && <i />}</button>
+          <div><h1>Announcements</h1><p>{home.data?.brand.name ?? 'Your community'}</p></div>
+          <button type="button" aria-label={`Announcements${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNotificationCount > 0 && <i />}</button>
         </header>}
         <header className="topbar">
-          <div className="resident-heading"><div className="eyebrow">{home.data?.brand.name ?? t('resident:dashboard.brand', 'RESIDENT EXPERIENCE')}</div><h1>{t(`common:navigation.${activeNavigation.navKey}`, activeNavigation.label)}</h1><p>{t(`resident:dashboard.subtitle.${activeTab}`)}</p></div>
+          <div className="resident-heading"><div className="eyebrow">{home.data?.brand.name ?? t('resident:dashboard.brand', 'RESIDENT EXPERIENCE')}</div><h1>{t(`common:navigation.${activeNavigation.navKey}`, activeNavigation.label)}</h1><p>{t(`resident:dashboard.subtitle.${activeTab}`)}</p>{home.data?.brand.apartmentCode && <small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small>}</div>
           <div className="resident-top-actions"><span className="resident-unit-chip">{home.data?.profile.unit ?? t('resident:dashboard.account', 'Resident account')}</span><button type="button" className="secondary" onClick={home.reload}>{t('common:actions.refresh', 'Refresh')}</button></div>
         </header>
 
@@ -395,15 +422,6 @@ function ResidentContent() {
                   <span className="resident-mobile-receipt-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6m-6 4h6m-6 4h3" /></svg></span>
                   <span className="resident-mobile-payment-copy"><strong>{formatBillingPeriod(payment.billingPeriod)} maintenance</strong><small>{new Date(payment.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · {payment.method}</small></span>
                   <span className="resident-mobile-payment-amount"><strong>{formatMoney(payment.amountMinor, payment.currency)}</strong><small className={payment.status === 'pending' ? 'pending' : ['confirmed', 'reconciled', 'succeeded'].includes(payment.status) ? 'paid' : ''}>{payment.status === 'pending' ? 'Pending' : ['confirmed', 'reconciled', 'succeeded'].includes(payment.status) ? 'Paid' : paymentStatusLabel(payment)}</small></span>
-                </article>)}
-              </div>}
-            </section>
-            <section className="resident-mobile-section">
-              <div className="resident-mobile-section-heading"><h2>Community announcements</h2><button type="button" onClick={() => setActiveTab('notices')}>See all</button></div>
-              {home.data.announcements.length === 0 ? <div className="resident-mobile-empty">No published announcements.</div> : <div className="resident-mobile-announcements">
-                {home.data.announcements.slice(0, 2).map((notice) => <article className="resident-mobile-announcement" key={notice.id}>
-                  <span className="resident-mobile-announcement-date">{new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short' }).format(new Date(notice.publishedAt)).toUpperCase()}</span>
-                  <span><strong>{notice.title}</strong><small>{notice.body}</small></span>
                 </article>)}
               </div>}
             </section>
@@ -453,12 +471,6 @@ function ResidentContent() {
                 ))}
               </section>
             </div>
-            <section className="card resident-card">
-              <h3>{t('resident:dashboard.communityNotices')}</h3>
-              {home.data.announcements.length === 0 ? <p>{t('resident:dashboard.noPublishedNotices')}</p> : home.data.announcements.map((notice) => (
-                <div className="notice-item" key={notice.id}><strong>{notice.title}</strong><p>{notice.body}</p><small>{notice.isRead ? 'Read' : 'Unread'}</small></div>
-              ))}
-            </section>
           </div>
           </>
         )}
@@ -506,7 +518,6 @@ function ResidentContent() {
                     aria-pressed={selectedInvoice?.invoiceId === balance.invoiceId}
                     onClick={() => {
                       setSelectedInvoiceId(balance.invoiceId)
-                      setManualPaymentError(null)
                     }}
                   >
                     <span className="payment-month-name">{formatBillingPeriod(balance.billingPeriod)}</span>
@@ -530,7 +541,6 @@ function ResidentContent() {
                   disabled={totalAvailableToReportMinor === 0}
                   onClick={() => {
                     setSelectedInvoiceId('total')
-                    setManualPaymentError(null)
                   }}
                 >
                   <span className="payment-month-name">Total outstanding</span>
@@ -544,8 +554,6 @@ function ResidentContent() {
               </div>
             </details>}
             {home.data.invoiceBalances.length === 0 && <p className="payment-settled-note" role="status">There are no unpaid monthly invoices to report a payment for.</p>}
-            {manualPaymentMessage && <p className="payment-feedback success" role="status">{manualPaymentMessage}</p>}
-            {manualPaymentError && <p className="form-error" role="alert">{manualPaymentError}</p>}
             {isTotalSelected && home.data.totalPendingPaymentMinor > 0 && <p className="payment-pending-note" role="status">{formatMoney(home.data.totalPendingPaymentMinor, home.data.currency)} across your invoices is awaiting administrator confirmation. The total option includes only the amount still available to report.</p>}
             {!isTotalSelected && selectedInvoice && selectedInvoice.pendingPaymentMinor > 0 && selectedInvoice.availableToReportMinor > 0 && <p className="payment-pending-note" role="status">For {formatBillingPeriod(selectedInvoice.billingPeriod)}, {formatMoney(selectedInvoice.pendingPaymentMinor, home.data.currency)} is awaiting administrator confirmation. You can report another payment for the remaining available amount.</p>}
             {selectedAvailableMinor > 0 && (selectedInvoice || isTotalSelected)
@@ -605,10 +613,8 @@ function ResidentContent() {
               <span className="resident-notification-new-count">{unreadNotificationCount > 0 && <i />}{unreadNotificationCount} new</span>
               <button type="button" onClick={() => void markAllRead()} disabled={notices.loading || notices.error !== null || unreadNotificationCount === 0}>Mark all as read</button>
             </div>
-            {actionMessage && <p className="resident-notification-feedback" role="status">{actionMessage}</p>}
-            {actionError && <p className="resident-notification-feedback error-text" role="alert">{actionError}</p>}
             <LoadState loading={notices.loading} error={notices.error} onRetry={notices.reload} />
-            {!notices.loading && !notices.error && notices.data?.length === 0 && <div className="resident-notification-empty">New community updates will appear here. Payment and invoice notifications will be available after notification support is added.</div>}
+            {!notices.loading && !notices.error && notices.data?.length === 0 && <div className="resident-notification-empty">There are no active announcements right now.</div>}
             <div className="resident-notification-list">
               {notices.data?.map((notice) => {
                 const category = /payment|paid|receipt|confirm/i.test(`${notice.title} ${notice.body}`) ? 'payment' : /bill|invoice|due/i.test(`${notice.title} ${notice.body}`) ? 'billing' : 'community'
@@ -616,11 +622,10 @@ function ResidentContent() {
                   <span className="resident-notification-icon" aria-hidden="true">
                     {category === 'payment' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 4 4L19 6" /></svg> : category === 'billing' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 18-5-5 17-3-7-7-5Z" /><path d="m13 16 5-6" /></svg>}
                   </span>
-                  <span className="resident-notification-copy"><strong>{notice.title}</strong><span>{notice.body}</span><small>{formatRelativeTime(notice.createdAt)}</small></span>
+                  <details className="resident-announcement-details" onToggle={(event) => { if ((event.currentTarget as HTMLDetailsElement).open) void openAnnouncement(notice.id) }}><summary className="resident-notification-copy"><strong>{notice.title}{notice.isImportant && <span className="resident-announcement-important-label">Important</span>}</strong><small>{formatRelativeTime(notice.createdAt)} · {notice.isRead ? 'Read' : 'Unread'}</small></summary><p>{notice.body}</p></details>
                 </article>
               })}
             </div>
-            {!notices.loading && !notices.error && notices.data && notices.data.length > 0 && <p className="resident-notification-placeholder">Payment and invoice notifications will appear here after notification support is added.</p>}
           </section>
         )}
 
@@ -628,27 +633,25 @@ function ResidentContent() {
           <>
             <header className="resident-mobile-profile-header">
               <div><h1>Profile</h1><p>Account and preferences</p></div>
-              <button type="button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNotificationCount > 0 && <i />}</button>
+              <button type="button" aria-label={`Announcements${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNotificationCount > 0 && <i />}</button>
             </header>
             <section className="resident-profile-page">
               <LoadState loading={profile.loading} error={profile.error} onRetry={profile.reload} />
-              {profile.data && <button className="resident-profile-identity" type="button" onClick={() => { setProfilePlaceholder(null); setProfileName(profile.data!.fullName); setProfilePhone(profile.data!.phone ?? ''); setProfileError(null); setProfileMessage(null); setEditingProfile((isEditing) => !isEditing) }} aria-expanded={editingProfile}>
+              {profile.data && <button className="resident-profile-identity" type="button" onClick={() => { setProfilePlaceholder(null); setProfileName(profile.data!.fullName); setProfilePhone(profile.data!.phone ?? ''); setEditingProfile((isEditing) => !isEditing) }} aria-expanded={editingProfile}>
                 <span className="resident-profile-avatar">{profile.data.fullName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>
                 <span className="resident-profile-identity-copy"><strong>{profile.data.fullName}</strong><small>Resident · {profile.data.unit}</small><small>{profile.data.email}</small></span>
                 <svg className={`resident-profile-chevron${editingProfile ? ' expanded' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
               </button>}
-              {profileMessage && <p className="profile-feedback success" role="status">{profileMessage}</p>}
-              {profileError && <p className="form-error" role="alert">{profileError}</p>}
               {profilePlaceholder && <p className="resident-profile-placeholder" role="status"><strong>{profilePlaceholder}</strong> is a placeholder for a future release.</p>}
               {editingProfile && profile.data ? <section className="resident-profile-edit-card">
                 <div className="resident-profile-edit-heading"><h2>Profile details</h2><button type="button" onClick={() => setEditingProfile(false)}>Close</button></div>
-                <form className="resident-profile-form" onSubmit={(event) => void saveProfile(event)} onChange={() => { setProfileError(null); setProfileMessage(null) }}>
+                <form className="resident-profile-form" onSubmit={(event) => void saveProfile(event)}>
                   <label><span>Full name</span><input autoComplete="name" maxLength={120} minLength={2} required value={profileName} onChange={(event) => setProfileName(event.target.value)} /></label>
                   <label><span>Phone number</span><input autoComplete="tel" type="tel" maxLength={24} pattern="\\+?[0-9 ()-]{7,24}" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} placeholder="Add a phone number" /><small>Leave blank to remove your phone number.</small></label>
                   <div className="profile-grid resident-profile-readonly">
-                    <div><span>Email</span><strong>{profile.data.email}</strong></div><div><span>Unit</span><strong>{profile.data.unit}</strong></div><div><span>Community</span><strong>{profile.data.organizationName}</strong></div><div><span>Time zone</span><strong>{profile.data.timezone}</strong></div>
+                    <div><span>Email</span><strong>{profile.data.email}</strong></div><div><span>Block</span><strong>{profile.data.unit}</strong></div><div><span>Community</span><strong>{profile.data.organizationName}</strong></div><div><span>Time zone</span><strong>{profile.data.timezone}</strong></div>
                   </div>
-                  <div className="resident-profile-actions"><button type="button" className="secondary" disabled={savingProfile} onClick={() => { setProfileName(profile.data!.fullName); setProfilePhone(profile.data!.phone ?? ''); setProfileError(null); setProfileMessage(null); setEditingProfile(false) }}>Cancel</button><button type="submit" className="primary" disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save changes'}</button></div>
+                  <div className="resident-profile-actions"><button type="button" className="secondary" disabled={savingProfile} onClick={() => { setProfileName(profile.data!.fullName); setProfilePhone(profile.data!.phone ?? ''); setEditingProfile(false) }}>Cancel</button><button type="submit" className="primary" disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save changes'}</button></div>
                 </form>
               </section> : <>
                 {profileOptionGroups.map((group) => <section className="resident-profile-option-group" key={group.title}>

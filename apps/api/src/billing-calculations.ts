@@ -14,7 +14,8 @@ export const calculateMeteredWaterCharge = (
     throw new RangeError('Water readings and rate are outside the supported range')
   }
   const consumptionMilliKl = Math.round((closingReadingKl - openingReadingKl) * 1_000)
-  const amountMinorBigInt = (BigInt(consumptionMilliKl) * BigInt(ratePerKlMinor) + 500n) / 1_000n
+  const amountRupeesBigInt = (BigInt(consumptionMilliKl) * BigInt(ratePerKlMinor) + 50_000n) / 100_000n
+  const amountMinorBigInt = amountRupeesBigInt * 100n
   if (amountMinorBigInt > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError('Water charge exceeds the supported range')
   const consumptionKl = consumptionMilliKl / 1_000
   const amountMinor = Number(amountMinorBigInt)

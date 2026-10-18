@@ -664,3 +664,12 @@ body { background: #f7f8fa; color: #20212a; font-family: Inter, ui-sans-serif, s
   .operator-shell .modal-actions > button { flex: 1 1 130px; }
   .operator-shell .stack-list li { min-width: 0; overflow-wrap: anywhere; }
 }
+.app-message-stack { position: fixed; z-index: 1000; top: 16px; right: 16px; display: grid; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 32px); gap: 10px; overflow-y: auto; }
+.app-message { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid #e1e3e8; border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(20, 22, 34, .14); color: #292a33; }
+.app-message p { margin: 0; font-size: 13px; line-height: 1.5; }
+.app-message > button { flex: 0 0 auto; padding: 0 2px; border: 0; background: transparent; color: inherit; font-size: 20px; line-height: 1; cursor: pointer; }
+.app-message-error { border-color: #f0c4c8; background: #fff0f1; color: #a82836; }
+.app-message-success { border-color: #a7f3d0; background: #ecfdf5; color: #065f46; }
+.operator-dismissible-error { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.operator-dismissible-error p { margin-bottom: 0; }
+.operator-dismissible-error > button { border: 0; background: transparent; color: inherit; font-size: 20px; line-height: 1; cursor: pointer; }

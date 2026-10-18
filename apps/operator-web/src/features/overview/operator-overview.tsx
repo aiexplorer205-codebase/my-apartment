@@ -6,6 +6,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useOperatorOverview } from '../../lib/operator-api'
 import { formValidationMessage } from '../../lib/form-validation'
 import { getAppConfig } from '@nivasa/app-platform'
+import { useAppMessages } from '@nivasa/ui'
 
 type OperatorNavIconName = 'grid' | 'building' | 'settings' | 'chart' | 'megaphone' | 'wallet' | 'support' | 'audit'
 
@@ -62,7 +63,8 @@ function Overview() {
   const [retrying, setRetrying] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [formValidationError, setFormValidationError] = useState<string | null>(null)
-  const [createdOrganization, setCreatedOrganization] = useState<string | null>(null)
+  const [createdOrganization, setCreatedOrganization] = useState<{ name: string; code: string } | null>(null)
+  const { pushMessage } = useAppMessages()
   const [organizationSearch, setOrganizationSearch] = useState('')
   const [organizationStatus, setOrganizationStatus] = useState('all')
   const openOnboarding = () => {
@@ -85,16 +87,16 @@ function Overview() {
           name: form.get('name'),
           city: form.get('city'),
           adminEmail: form.get('adminEmail'),
-          estimatedUnits: Number(form.get('estimatedUnits')),
+          allowedBlocks: Number(form.get('allowedBlocks')),
           plan: form.get('plan'),
         }),
       })
-      const payload = await response.json() as { organizationName?: string; message?: string }
+      const payload = await response.json() as { apartmentName?: string; apartmentCode?: string; message?: string }
       if (!response.ok) throw new Error(payload.message ?? `Request failed (${response.status})`)
-      setCreatedOrganization(payload.organizationName ?? String(form.get('name')))
+      setCreatedOrganization({ name: payload.apartmentName ?? String(form.get('name')), code: payload.apartmentCode ?? 'ID pending' })
       reload()
     } catch (cause) {
-      setFormError(cause instanceof Error ? cause.message : 'Could not complete organization onboarding')
+      setFormError(cause instanceof Error ? cause.message : 'Could not complete apartment onboarding')
       reload()
     } finally {
       setSaving(false)
@@ -110,19 +112,23 @@ function Overview() {
       if (!response.ok) throw new Error(payload.message ?? `Request failed (${response.status})`)
       reload()
     } catch (cause) {
-      setFormError(cause instanceof Error ? cause.message : 'Could not retry organization onboarding')
+      setFormError(cause instanceof Error ? cause.message : 'Could not retry apartment onboarding')
       reload()
     } finally {
       setRetrying(null)
     }
   }
 
-  const changeOrganization = async (organization: { id: string; name: string }, action: 'deactivate' | 'reactivate' | 'delete') => {
-    if (action === 'deactivate' && !globalThis.confirm(`Deactivate ${organization.name}? Tenant access will stop, but its data will remain.`)) return
-    if (action === 'reactivate' && !globalThis.confirm(`Reactivate ${organization.name} and restore tenant access?`)) return
+  const changeOrganization = async (organization: { id: string; name: string; apartmentCode: string }, action: 'deactivate' | 'reactivate' | 'delete') => {
+    if (action === 'deactivate' && !globalThis.confirm(`Deactivate ${organization.name} (${organization.apartmentCode})? Apartment access will stop, but its data will remain.`)) return
+    if (action === 'reactivate' && !globalThis.confirm(`Reactivate ${organization.name} (${organization.apartmentCode}) and restore apartment access?`)) return
     if (action === 'delete') {
-      const confirmation = globalThis.prompt(`Permanently delete ${organization.name}, its tenant database, and its dedicated Auth0 admin account? A shared Auth0 account will be retained. Type the organization name to continue.`)
-      if (confirmation !== organization.name) return
+      const confirmation = globalThis.prompt(`Permanently delete ${organization.name} (${organization.apartmentCode}), its apartment data, and its dedicated Auth0 admin account? A shared Auth0 account will be retained. Type the Apartment ID to continue.`)
+      if (confirmation === null) return
+      if (confirmation.trim() !== organization.apartmentCode) {
+        pushMessage(`Apartment was not deleted. The ID entered for ${organization.name} does not match ${organization.apartmentCode}.`, 'error')
+        return
+      }
     }
     setRetrying(organization.id)
     setFormError(null)
@@ -132,12 +138,21 @@ function Overview() {
       })
       const payload = await response.json() as { status?: string; auth0AdminRemoved?: boolean; message?: string }
       if (!response.ok) throw new Error(payload.message ?? `Request failed (${response.status})`)
+      if (action === 'delete' && payload.status !== 'deleted') {
+        pushMessage(`Could not delete ${organization.name} (${organization.apartmentCode}). The server did not confirm deletion. Please refresh and try again.`, 'error')
+        reload()
+        return
+      }
       if (action === 'delete' && !payload.auth0AdminRemoved) {
-        setFormError(`${organization.name} and its tenant database were deleted. Its Auth0 user was retained because the email is shared with another tenant or no dedicated passwordless account was found.`)
+        pushMessage(`${organization.name} (${organization.apartmentCode}) and its apartment database were deleted. Its Auth0 user was retained because the email is shared with another apartment or no dedicated passwordless account was found.`, 'info')
       }
       reload()
     } catch (cause) {
-      setFormError(cause instanceof Error ? cause.message : `Could not ${action} organization`)
+      const detail = cause instanceof Error ? cause.message : `Could not ${action} apartment`
+      const message = action === 'delete'
+        ? `Could not delete ${organization.name} (${organization.apartmentCode}): ${detail}`
+        : detail
+      pushMessage(message, 'error')
       reload()
     } finally {
       setRetrying(null)
@@ -145,15 +160,15 @@ function Overview() {
   }
 
   const metrics = data ? [
-    { label: 'Organizations', value: String(data.organizationCount), detail: 'Registered tenants' },
-    { label: 'Active', value: String(data.activeOrganizationCount), detail: 'Active organizations' },
+    { label: 'Apartments', value: String(data.organizationCount), detail: 'Registered apartments' },
+    { label: 'Active', value: String(data.activeOrganizationCount), detail: 'Active apartments' },
     { label: 'Onboarding', value: String(data.onboardingCount), detail: 'Awaiting activation' },
     { label: 'Provisioning failures', value: String(data.provisioningFailures), detail: 'Require review' },
   ] : []
 
   const navigation: Array<{ id: View; label: string; icon: OperatorNavIconName }> = [
     { id: 'overview', label: 'Overview', icon: 'grid' },
-    { id: 'organizations', label: 'Organizations', icon: 'building' },
+    { id: 'organizations', label: 'Apartments', icon: 'building' },
     { id: 'provisioning', label: 'Provisioning', icon: 'settings' },
     { id: 'monetization', label: 'Monetization', icon: 'chart' },
     { id: 'campaigns', label: 'Ad campaigns', icon: 'megaphone' },
@@ -179,11 +194,11 @@ function Overview() {
           <div><div className="eyebrow">PRIVATE OPERATOR CONSOLE</div><h1>{navigation.find((item) => item.id === activeView)?.label}</h1></div>
           <div className="topbar-actions">
             {activeView !== 'campaigns' && <button type="button" className="secondary-button" onClick={reload}>Refresh live data</button>}
-            {activeView === 'organizations' && <button type="button" className="primary-button" onClick={openOnboarding}>Onboard organization</button>}
+            {activeView === 'organizations' && <button type="button" className="primary-button" onClick={openOnboarding}>Onboard Apartment</button>}
           </div>
         </header>
 
-        {formError && <section className="card form-error" role="alert"><strong>Operator action needs attention</strong><p>{formError}</p></section>}
+        {formError && <section className="card form-error operator-dismissible-error" role="alert"><div><strong>Operator action needs attention</strong><p>{formError}</p></div><button type="button" aria-label="Dismiss error message" onClick={() => setFormError(null)}>×</button></section>}
         {loading && <p role="status">Loading aggregate platform data…</p>}
         {error && (
           <section className="card availability-card" role="alert">
@@ -206,16 +221,17 @@ function Overview() {
             <div className="panel-grid">
               <section className="card panel-card">
                 <div className="card-header">
-                  <div><h2>Organizations</h2><span>Tenant workspaces and administrator invitations</span></div>
+                  <div><h2>Apartments</h2><span>Apartment workspaces and administrator invitations</span></div>
                   <button type="button" className="secondary-button" onClick={openOnboarding}>Onboard</button>
                 </div>
-                {data.organizations.length === 0 ? <p>No organizations have been provisioned.</p> : (
+                {data.organizations.length === 0 ? <p>No apartments have been provisioned.</p> : (
                   <ul className="stack-list">
                     {data.organizations.map((organization) => (
                       <li key={organization.id}>
                         <div className="organization-details">
                           <strong>{organization.name}</strong>
-                          <small>{organization.city ?? 'City not set'} · {organization.estimatedUnits ?? '—'} estimated units · {organization.plan_name}</small>
+                          <small>Apartment ID: {organization.apartmentCode}</small>
+                          <small>{organization.city ?? 'City not set'} · {organization.allowedBlocks ?? '—'} allowed blocks · {organization.plan_name}</small>
                           <small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.inviteAcceptedAt ? 'Invitation accepted' : organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small>
                           {organization.provisioningError && <small className="inline-error">{organization.provisioningError}</small>}
                         </div>
@@ -240,33 +256,33 @@ function Overview() {
             </div>
             <section className="card availability-card">
               <h2>Other operator actions are gated</h2>
-              <p>Organization workspace provisioning, deactivation, and deletion are enabled. Campaign publication is not configured. No database locator or resident details are exposed by this overview.</p>
+              <p>Apartment workspace provisioning, deactivation, and deletion are enabled. Campaign publication is not configured. No database locator or resident details are exposed by this overview.</p>
             </section>
           </>
         )}
         {data && activeView === 'organizations' && (
           <>
             <div className="kpi-grid three slim">
-              <article className="card kpi-card"><span>Total organizations</span><strong>{data.organizationCount}</strong><small>{data.activeOrganizationCount} active</small></article>
+              <article className="card kpi-card"><span>Total apartments</span><strong>{data.organizationCount}</strong><small>{data.activeOrganizationCount} active</small></article>
               <article className="card kpi-card"><span>In onboarding</span><strong>{data.onboardingCount}</strong><small>Awaiting activation</small></article>
               <article className="card kpi-card"><span>Setup exceptions</span><strong>{data.provisioningFailures}</strong><small>Require operator review</small></article>
             </div>
             <section className="card panel-card">
-              <div className="organization-tools"><label className="organization-search"><span aria-hidden="true">⌕</span><input aria-label="Search organizations" placeholder="Search organizations…" value={organizationSearch} onChange={(event) => setOrganizationSearch(event.target.value)} /></label><select aria-label="Filter organizations by status" value={organizationStatus} onChange={(event) => setOrganizationStatus(event.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="onboarding">Onboarding</option><option value="inactive">Inactive</option><option value="deleting">Deleting</option></select></div>
-              <div className="card-header"><div><h2>Organizations</h2><span>{data.organizationCount} registered tenant workspaces</span></div></div>
-              {data.organizations.length === 0 ? <p>No organizations have been provisioned.</p> : <ul className="stack-list">{data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).map((organization) => <li key={organization.id}><div className="organization-details"><strong>{organization.name}</strong><small>{organization.city ?? 'City not set'} · {organization.estimatedUnits ?? '—'} units · {organization.plan_name}</small><small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.inviteAcceptedAt ? 'Invitation accepted' : organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small></div><div className="organization-actions"><span className="status-pill">{organization.status}</span>{organization.status === 'inactive' ? <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'reactivate')}>Reactivate</button> : organization.status === 'active' && <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'deactivate')}>Deactivate</button>}<button type="button" className="secondary-button danger-button" disabled={retrying === organization.id || organization.status === 'deleting'} onClick={() => void changeOrganization(organization, 'delete')}>{retrying === organization.id ? 'Working…' : 'Delete permanently'}</button></div></li>)}</ul>}
-              {data.organizations.length > 0 && data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).length === 0 && <p>No organizations match these filters.</p>}
+              <div className="organization-tools"><label className="organization-search"><span aria-hidden="true">⌕</span><input aria-label="Search apartments" placeholder="Search apartments…" value={organizationSearch} onChange={(event) => setOrganizationSearch(event.target.value)} /></label><select aria-label="Filter apartments by status" value={organizationStatus} onChange={(event) => setOrganizationStatus(event.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="onboarding">Onboarding</option><option value="inactive">Inactive</option><option value="deleting">Deleting</option></select></div>
+              <div className="card-header"><div><h2>Apartments</h2><span>{data.organizationCount} registered apartments</span></div></div>
+              {data.organizations.length === 0 ? <p>No apartments have been provisioned.</p> : <ul className="stack-list">{data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.apartmentCode} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).map((organization) => <li key={organization.id}><div className="organization-details"><strong>{organization.name}</strong><small>Apartment ID: {organization.apartmentCode}</small><small>{organization.city ?? 'City not set'} · {organization.allowedBlocks ?? '—'} allowed blocks · {organization.plan_name}</small><small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.inviteAcceptedAt ? 'Invitation accepted' : organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small></div><div className="organization-actions"><span className="status-pill">{organization.status}</span>{organization.status === 'inactive' ? <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'reactivate')}>Reactivate</button> : organization.status === 'active' && <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'deactivate')}>Deactivate</button>}<button type="button" className="secondary-button danger-button" disabled={retrying === organization.id || organization.status === 'deleting'} onClick={() => void changeOrganization(organization, 'delete')}>{retrying === organization.id ? 'Working…' : 'Delete permanently'}</button></div></li>)}</ul>}
+              {data.organizations.length > 0 && data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.apartmentCode} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).length === 0 && <p>No apartments match these filters.</p>}
             </section>
           </>
         )}
         {data && activeView === 'provisioning' && (
-          <section className="card panel-card"><div className="card-header"><div><h2>Tenant provisioning</h2><span>{data.provisioningFailures} failed setup attempts</span></div></div>
+          <section className="card panel-card"><div className="card-header"><div><h2>Apartment provisioning</h2><span>{data.provisioningFailures} failed setup attempts</span></div></div>
             {data.organizations.filter((organization) => organization.provisioningStatus === 'failed').length === 0 ? <p>No provisioning failures need attention.</p> : <ul className="stack-list">{data.organizations.filter((organization) => organization.provisioningStatus === 'failed').map((organization) => <li key={organization.id}><div className="organization-details"><strong>{organization.name}</strong><small>{organization.provisioningError ?? 'Provisioning failed without a recorded reason'}</small></div><div className="organization-actions"><span className="status-pill">Failed</span>{!organization.invitedAt && <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void retryOnboarding(organization.id)}>{retrying === organization.id ? 'Retrying…' : 'Retry setup'}</button>}</div></li>)}</ul>}
           </section>
         )}
         {activeView === 'campaigns' && <section className="section-stack"><div className="prototype-policy"><strong>Resident trust policy</strong><span>Sponsored content must be clearly labelled and cannot replace essential community notices.</span></div><section className="card availability-card"><h2>Campaign management is not configured</h2><p>Campaign drafts, review, targeting, and publishing need a platform campaign service. No sample campaigns or delivery metrics are shown here.</p></section></section>}
         {activeView === 'monetization' && <section className="card availability-card"><h2>Platform monetization is unavailable</h2><p>{data?.revenueUnavailableReason ?? 'Revenue data is not available.'} Tenant collections remain separate from platform revenue.</p></section>}
-        {activeView === 'transactions' && <section className="card availability-card"><h2>Platform transaction reporting is unavailable</h2><p>Tenant payment records are scoped to each organization and are not aggregated into this operator console.</p></section>}
+        {activeView === 'transactions' && <section className="card availability-card"><h2>Platform transaction reporting is unavailable</h2><p>Apartment payment records are scoped to each apartment and are not aggregated into this operator console.</p></section>}
         {activeView === 'support' && <section className="card availability-card"><h2>Support queue is not configured</h2><p>No support ticket service is connected to this platform yet.</p></section>}
         {activeView === 'audit' && <AuditPanel />}
         {activeView === 'settings' && <section className="card availability-card"><h2>Platform settings</h2><p>Operator access and service configuration are managed through server-side deployment settings.</p></section>}
@@ -280,23 +296,24 @@ function Overview() {
             {createdOrganization ? (
               <div className="onboarding-success">
                 <div className="success-mark" aria-hidden="true">✓</div>
-                <h2 id="onboarding-title">Organization created</h2>
-                <strong>{createdOrganization}</strong>
-                <p>The isolated workspace is provisioned and Auth0 sent an administrator invitation. The administrator should use the invited email address to accept it.</p>
+                <h2 id="onboarding-title">Apartment onboarded</h2>
+                <strong>{createdOrganization.name}</strong>
+                <div className="invitation-status"><span>Apartment ID</span><strong>{createdOrganization.code}</strong></div>
+                <p>The apartment workspace is provisioned and an administrator invitation has been sent. The administrator should use the invited email address to accept it.</p>
                 <div className="invitation-status"><span>Activation status</span><span className="status-pill">Invite sent</span></div>
                 <button type="button" className="primary-button" onClick={() => setOnboardingOpen(false)}>Done</button>
               </div>
             ) : (
               <>
                 <div className="eyebrow">PLATFORM OPERATIONS</div>
-                <h2 id="onboarding-title">Onboard organization</h2>
+                <h2 id="onboarding-title">Onboard Apartment</h2>
                 <p className="modal-description">Create an isolated tenant workspace and invite its first administrator.</p>
                 <form onSubmit={(event) => void submitOnboarding(event)} onInvalidCapture={(event) => formValidationMessage(event, setFormValidationError)} onChangeCapture={() => setFormValidationError(null)}>
                   <div className="form-grid">
-                    <label className="form-field"><span>Organization name</span><input name="name" required minLength={2} maxLength={120} autoFocus /><small>Each organization must have a unique name.</small></label>
+                    <label className="form-field"><span>Apartment Name</span><input name="name" required minLength={2} maxLength={120} autoFocus /><small>Apartment names can be reused. A unique Apartment ID is assigned automatically.</small></label>
                     <label className="form-field"><span>City</span><input name="city" required minLength={2} maxLength={100} /></label>
                     <label className="form-field"><span>Admin email</span><input name="adminEmail" type="email" required maxLength={254} /></label>
-                    <label className="form-field"><span>Estimated units</span><input name="estimatedUnits" type="number" min={1} max={200000} step={1} required /></label>
+                    <label className="form-field"><span>Number of blocks</span><input name="allowedBlocks" type="number" min={1} max={500} step={1} required /></label>
                     <label className="form-field form-field-wide"><span>Plan</span>
                       <select name="plan" defaultValue="growth">
                         <option value="starter">Starter · ₹1,499/month</option>

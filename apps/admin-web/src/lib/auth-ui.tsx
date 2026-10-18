@@ -80,16 +80,19 @@ export function TenantWorkspacePicker() {
   if (loading) return <span className="tenant-picker-status" role="status">Loading workspaces…</span>
   if (error) return <button className="tenant-picker-retry" type="button" onClick={reload}>Could not load workspaces · Retry</button>
   if (!memberships?.length) return <span className="tenant-picker-status">No active workspaces for this app</span>
-  if (memberships.length === 1) return null
+  const selectedMembership = memberships.find((membership) => membership.tenantId === activeTenantId) ?? memberships[0]
 
   return (
-    <label className="tenant-picker-label">
-      <span className="visually-hidden">Switch organization</span>
-      <select aria-label="Switch organization" value={activeTenantId ?? ''} onChange={(event) => setActiveTenantId(event.target.value || null)}>
-        <option value="">Select an organization…</option>
-        {memberships.map((membership) => <option key={membership.tenantId} value={membership.tenantId}>{membership.name} · {membership.role}</option>)}
-      </select>
-    </label>
+    <>
+      {selectedMembership && <small className="tenant-apartment-code">Apartment ID: {selectedMembership.apartmentCode}</small>}
+      {memberships.length > 1 && <label className="tenant-picker-label">
+        <span className="visually-hidden">Switch apartment</span>
+        <select aria-label="Switch apartment" value={activeTenantId ?? ''} onChange={(event) => setActiveTenantId(event.target.value || null)}>
+          <option value="">Select an apartment…</option>
+          {memberships.map((membership) => <option key={membership.tenantId} value={membership.tenantId}>{membership.name} · {membership.apartmentCode}</option>)}
+        </select>
+      </label>}
+    </>
   )
 }
 

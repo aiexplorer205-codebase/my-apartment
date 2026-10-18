@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
 import { PwaRegistration } from './pwa-registration'
 import { I18nProvider, getAppConfig } from '@nivasa/app-platform'
+import { AppMessagesProvider } from '@nivasa/ui'
 
 const config = getAppConfig()
 
@@ -19,8 +20,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <I18nProvider namespaces={['common', 'resident', 'validation']}>
           <AuthProvider>
-            <PwaRegistration />
-            {children}
+            <AppMessagesProvider>
+              <PwaRegistration />
+              {children}
+            </AppMessagesProvider>
           </AuthProvider>
         </I18nProvider>
       </body>

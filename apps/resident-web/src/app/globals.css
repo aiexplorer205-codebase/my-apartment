@@ -1286,6 +1286,8 @@ body { background: #f7f8fa; color: #20212a; font-family: Inter, ui-sans-serif, s
 .resident-workspace { display: grid; gap: 6px; margin: 0 0 18px; padding: 11px; border: 1px solid rgba(255,255,255,.12); border-radius: 9px; background: rgba(255,255,255,.06); }
 .resident-workspace-label { color: #aeb8ca; font-size: 9px; }
 .resident-workspace > strong { overflow: hidden; color: #fff; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.resident-workspace .tenant-apartment-code { color: #c6c8d1; font-size: 10px; }
+.resident-heading .resident-apartment-code, .resident-mobile-home-header .resident-apartment-code { display: block; margin-top: 4px; color: #777987; font-size: 10px; }
 .resident-workspace .tenant-picker-label { display: block; width: 100%; margin-top: 3px; }
 .resident-workspace .tenant-picker-label select { width: 100%; max-width: none; border-color: rgba(255,255,255,.2); background: #242531; color: #fff; }
 .resident-workspace .tenant-picker-status { color: #c6c8d1; font-size: 10px; }
@@ -1842,3 +1844,23 @@ body { background: #f7f8fa; color: #20212a; font-family: Inter, ui-sans-serif, s
   .resident-shell[data-active-tab="profile"] .resident-mobile-profile-header { padding-right: 15px; padding-left: 15px; }
   .resident-shell[data-active-tab="profile"] .resident-profile-page { padding-right: 14px; padding-left: 14px; }
 }
+.app-message-stack { position: fixed; z-index: 1000; top: 16px; right: 16px; display: grid; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 32px); gap: 10px; overflow-y: auto; }
+.app-message { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid #e1e3e8; border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(20, 22, 34, .14); color: #292a33; }
+.app-message p { margin: 0; font-size: 13px; line-height: 1.5; }
+.app-message > button { flex: 0 0 auto; padding: 0 2px; border: 0; background: transparent; color: inherit; font-size: 20px; line-height: 1; cursor: pointer; }
+.app-message-error { border-color: #f0c4c8; background: #fff0f1; color: #a82836; }
+.app-message-success { border-color: #a7f3d0; background: #ecfdf5; color: #065f46; }
+.resident-announcement-banners { display: grid; gap: 8px; padding: 10px 24px 0; }
+.resident-announcement-banner { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border: 1px solid #f1d28a; border-radius: 12px; background: #fff8e7; color: #523a08; box-shadow: 0 3px 12px rgba(64, 47, 8, .06); }
+.resident-announcement-banner-copy { display: grid; flex: 1; gap: 4px; text-align: left; color: inherit; }
+.resident-announcement-banner-copy strong { font-size: 14px; }
+.resident-announcement-banner-copy > span:last-child { color: #735d2e; font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
+.resident-announcement-banner-label { color: #9a6700; font-size: 10px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.resident-announcement-banner-close { width: 28px; height: 28px; border-radius: 7px; color: #70591f; font-size: 22px; line-height: 1; }
+.resident-announcement-banner-close:hover { background: rgba(130, 92, 0, .1); }
+.resident-announcement-details { min-width: 0; }
+.resident-announcement-details summary { cursor: pointer; }
+.resident-announcement-details summary::marker { color: #8680dc; }
+.resident-announcement-details > p { margin: 8px 0 0; color: #626573; font-size: 12px; white-space: pre-wrap; }
+.resident-announcement-important-label { display: inline-flex; margin-left: 8px; padding: 3px 7px; border-radius: 99px; background: #fff2ce; color: #8a5b00; font-size: 9px; vertical-align: middle; }
+@media (max-width: 640px) { .resident-announcement-banners { padding: 8px 14px 0; } .resident-announcement-banner { padding: 12px; } }

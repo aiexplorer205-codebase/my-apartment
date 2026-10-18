@@ -25,6 +25,8 @@
     "overview": "అవలోకనం",
     "buildings": "భవనాలు & యూనిట్లు",
     "residents": "నివాసితులు",
+    "flatsResidents": "ఫ్లాట్లు & నివాసితులు",
+    "announcements": "ప్రకటనలు",
     "billing": "బిల్లింగ్",
     "collections": "వసూళ్లు",
     "overdues": "బకాయిలు",
@@ -32,7 +34,7 @@
     "settings": "సెట్టింగులు",
     "home": "హోమ్",
     "history": "చరిత్ర",
-    "notices": "నోటీసులు",
+    "notices": "ప్రకటనలు",
     "directory": "డైరెక్టరీ",
     "profile": "ప్రొఫైల్",
     "support": "సహాయం"

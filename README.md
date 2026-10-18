@@ -72,14 +72,15 @@ docker compose exec -T postgres psql -U postgres -d tenant_template \
   -f /migrations/tenant_db/006_billing_templates.sql \
   -f /migrations/tenant_db/007_manual_payment_confirmation.sql \
   -f /migrations/tenant_db/008_invoice_rounding.sql \
-  -f /migrations/tenant_db/009_billing_unit_exclusions.sql
+  -f /migrations/tenant_db/009_billing_unit_exclusions.sql \
+  -f /migrations/tenant_db/010_resident_lifecycle.sql \
+  -f /migrations/tenant_db/011_announcements_scheduling.sql
 ```
 
 The template migration only affects tenant databases created afterward. To
-upgrade an existing tenant with the apartment, resident-invitation, and billing
-features, first identify its database name in
-`platform_db`, then apply the apartment and resident-invitation migrations to
-that database:
+upgrade an existing tenant with the apartment, resident-invitation, billing,
+resident move-in/move-out, and announcement features, first identify its
+database name in `platform_db`, then apply the migrations to that database:
 
 ```sh
 docker compose exec -T postgres psql -U postgres -d platform_db \
@@ -91,7 +92,9 @@ docker compose exec -T postgres psql -U postgres -d YOUR_TENANT_DATABASE \
   -f /migrations/tenant_db/006_billing_templates.sql \
   -f /migrations/tenant_db/007_manual_payment_confirmation.sql \
   -f /migrations/tenant_db/008_invoice_rounding.sql \
-  -f /migrations/tenant_db/009_billing_unit_exclusions.sql
+  -f /migrations/tenant_db/009_billing_unit_exclusions.sql \
+  -f /migrations/tenant_db/010_resident_lifecycle.sql \
+  -f /migrations/tenant_db/011_announcements_scheduling.sql
 ```
 
 Replace `YOUR_TENANT_DATABASE` with the `database_name` for the organization
