@@ -50,6 +50,7 @@ export type OperatorOverview = {
     city: string | null
     adminEmail: string | null
     allowedBlocks: number | null
+    allowedFlatsPerBlock: number[] | null
     invitedAt: string | null
     inviteAcceptedAt: string | null
     provisioningStatus: string | null

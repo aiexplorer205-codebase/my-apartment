@@ -179,7 +179,7 @@ export function EmbeddedLogin({ experienceName, initialEmail = '', lockEmail = f
     <form className={`auth-form embedded-login-form${codeSent ? ' otp-active' : ''}`} onSubmit={(event) => void submit(event)}>
       <label>
         <span>Email address</span>
-        <input type="email" autoComplete="email" required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} onBlur={() => setEmailTouched(true)} aria-invalid={emailTouched && !emailIsValid} readOnly={lockEmail} disabled={busy || codeSent} />
+        <input type="email" name="username" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} onBlur={() => setEmailTouched(true)} aria-invalid={emailTouched && !emailIsValid} readOnly={lockEmail} disabled={busy || codeSent} />
       </label>
       {!codeSent && emailTouched && !emailIsValid && <p className="embedded-login-error" role="alert">Enter a valid email address to receive an OTP.</p>}
       {!codeSent && <button className="button primary wide" type="submit" disabled={busy || !emailIsValid}>{busy ? 'Sending OTP…' : 'Send OTP'}</button>}

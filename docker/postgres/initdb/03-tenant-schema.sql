@@ -10,3 +10,5 @@
 \i /migrations/tenant_db/009_billing_unit_exclusions.sql
 \i /migrations/tenant_db/010_resident_lifecycle.sql
 \i /migrations/tenant_db/011_announcements_scheduling.sql
+\i /migrations/tenant_db/012_apartment_building_flat_limit.sql
+\i /migrations/tenant_db/013_announcement_banners.sql

@@ -14,7 +14,7 @@ import { createResidentInvitationToken, hashResidentInvitationToken, sendResiden
 import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
 import { checkDatabaseReadiness, dropTenantDatabase, getPlatformPool, getTenantPool, provisionTenantDatabase } from './persistence.js'
 
-type ApiFaultCode = 'unauthorized' | 'forbidden' | 'not_found' | 'configuration_error' | 'dependency_unavailable' | 'tenant_selection_required' | 'data_integrity_error' | 'invalid_request' | 'block_limit_reached'
+type ApiFaultCode = 'unauthorized' | 'forbidden' | 'not_found' | 'configuration_error' | 'dependency_unavailable' | 'tenant_selection_required' | 'data_integrity_error' | 'invalid_request' | 'block_limit_reached' | 'flat_limit_reached'
 
 class ApiFault extends Error {
   constructor(
@@ -270,6 +270,7 @@ export interface OrganizationOnboardingInput {
   city: string
   adminEmail: string
   allowedBlocks: number
+  flatsPerBlock: number[]
   plan: 'starter' | 'growth' | 'scale'
 }
 
@@ -301,6 +302,7 @@ export const parseOrganizationOnboardingInput = (value: unknown): OrganizationOn
   const adminEmail = typeof input.adminEmail === 'string' ? input.adminEmail.trim().toLowerCase() : ''
   const plan = input.plan
   const allowedBlocks = input.allowedBlocks
+  const flatsPerBlock = input.flatsPerBlock
   if (name.length < 2 || name.length > 120) {
     throw new ApiFault(400, 'invalid_request', 'Apartment name must be between 2 and 120 characters')
   }
@@ -313,10 +315,16 @@ export const parseOrganizationOnboardingInput = (value: unknown): OrganizationOn
   if (typeof allowedBlocks !== 'number' || !Number.isInteger(allowedBlocks) || allowedBlocks < 1 || allowedBlocks > 500) {
     throw new ApiFault(400, 'invalid_request', 'Number of blocks must be a whole number between 1 and 500')
   }
+  if (!Array.isArray(flatsPerBlock) || flatsPerBlock.length !== allowedBlocks || flatsPerBlock.some((count) => typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 20000)) {
+    throw new ApiFault(400, 'invalid_request', 'Enter a whole number of flats from 1 to 20,000 for every block')
+  }
+  if (flatsPerBlock.reduce((total, count) => total + count, 0) > 100000) {
+    throw new ApiFault(400, 'invalid_request', 'Total configured flats cannot exceed 100,000')
+  }
   if (plan !== 'starter' && plan !== 'growth' && plan !== 'scale') {
     throw new ApiFault(400, 'invalid_request', 'Choose a supported apartment plan')
   }
-  return { name, city, adminEmail, allowedBlocks, plan }
+  return { name, city, adminEmail, allowedBlocks, flatsPerBlock, plan }
 }
 
 const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
@@ -514,7 +522,10 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     },
     '/v1/admin/announcements': {
       get: { tags: ['tenant'], summary: 'List apartment announcements', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant announcements' }, '403': { description: 'Administrator permission required' } } },
-      post: { tags: ['tenant'], summary: 'Publish an announcement immediately or on a schedule', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['title', 'body', 'startsAt', 'isImportant'], properties: { title: { type: 'string', minLength: 3, maxLength: 120 }, body: { type: 'string', minLength: 1, maxLength: 5000 }, startsAt: { type: 'string', format: 'date-time' }, endsAt: { type: ['string', 'null'], format: 'date-time' }, isImportant: { type: 'boolean' } } } } } }, responses: { '201': { description: 'Announcement created' }, '400': { description: 'Invalid announcement details' }, '403': { description: 'Administrator permission required' } } },
+      post: { tags: ['tenant'], summary: 'Publish an announcement immediately or on a schedule', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['title', 'body', 'startsAt', 'endsAt', 'isImportant', 'isBanner'], properties: { title: { type: 'string', minLength: 3, maxLength: 120 }, body: { type: 'string', minLength: 1, maxLength: 5000 }, startsAt: { type: 'string', format: 'date-time' }, endsAt: { type: 'string', format: 'date-time' }, isImportant: { type: 'boolean' }, isBanner: { type: 'boolean' } } } } } }, responses: { '201': { description: 'Announcement created' }, '400': { description: 'Invalid announcement details' }, '403': { description: 'Administrator permission required' } } },
+    },
+    '/v1/admin/announcements/{announcementId}/end': {
+      post: { tags: ['tenant'], summary: 'End a published announcement immediately', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Announcement ended' }, '403': { description: 'Administrator permission required' }, '404': { description: 'Announcement not found' } } },
     },
     '/v1/admin/residents': {
       get: { tags: ['tenant'], summary: 'List residents and their unit/payment status', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped resident list' }, '403': { description: 'Administrator permission required' } } },
@@ -537,7 +548,7 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     },
     '/v1/admin/buildings': {
       get: { tags: ['tenant'], summary: 'List apartment blocks and allowance', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Building inventory and allowed block count' }, '403': { description: 'Administrator permission required' } } },
-      post: { tags: ['tenant'], summary: 'Add a block within the allowed block count', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Block and units created atomically' }, '400': { description: 'Invalid block details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Block allowance reached or duplicate block name' } } },
+      post: { tags: ['tenant'], summary: 'Add a block within its configured flat allowance', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Block and units created atomically' }, '400': { description: 'Invalid block details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Block allowance reached, flat allowance exceeded, or duplicate block name' } } },
     },
     '/v1/admin/billing': {
       get: { tags: ['tenant'], summary: 'Read billing rules, published invoice runs, and invoices', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped billing data' }, '403': { description: 'Administrator permission required' } } },
@@ -778,7 +789,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       [resident.id],
     ),
     pool.query(
-      `SELECT n.id, n.title, n.body, n.published_at, n.is_important, n.starts_at, n.ends_at,
+      `SELECT n.id, n.title, n.body, n.published_at, n.is_important, n.is_banner, n.starts_at, n.ends_at,
               (nr.resident_id IS NOT NULL) AS is_read
        FROM notices n
        LEFT JOIN notice_reads nr ON nr.notice_id = n.id AND nr.resident_id = $1
@@ -827,6 +838,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       publishedAt: notice.published_at,
       isRead: notice.is_read,
       isImportant: notice.is_important,
+      isBanner: notice.is_banner,
     })),
     supportedPaymentMethods: [],
     paymentUnavailableReason: 'Online payments are disabled until a payment provider and settlement model are approved.',
@@ -1061,7 +1073,7 @@ const getResidentNotices = async (access: TenantAccess, subject: string) => {
   if (!resident) throw new ApiFault(404, 'not_found', 'No active resident profile is associated with this account')
 
   const notices = await pool.query(
-    `SELECT n.id, n.title, n.body, n.published_at, n.is_important, n.starts_at, n.ends_at,
+    `SELECT n.id, n.title, n.body, n.published_at, n.is_important, n.is_banner, n.starts_at, n.ends_at,
             (nr.resident_id IS NOT NULL) AS is_read
      FROM notices n
      LEFT JOIN notice_reads nr ON nr.notice_id = n.id AND nr.resident_id = $1
@@ -1077,6 +1089,7 @@ const getResidentNotices = async (access: TenantAccess, subject: string) => {
     body: notice.body,
     isRead: notice.is_read,
     isImportant: notice.is_important,
+    isBanner: notice.is_banner,
     channel: 'in_app',
     createdAt: notice.published_at,
     startsAt: notice.starts_at,
@@ -1140,11 +1153,11 @@ const markResidentNoticeRead = async (access: TenantAccess, subject: string, not
 const getAdminAnnouncements = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   const result = await withTenantPool(access).query(
-    `SELECT id, title, body, is_important, starts_at, ends_at, published_at, status
+    `SELECT id, title, body, is_important, is_banner, starts_at, ends_at, published_at, status
      FROM notices WHERE tenant_id = $1 ORDER BY starts_at DESC, published_at DESC LIMIT 200`,
     [access.tenantId],
   )
-  return result.rows.map((row) => ({ id: row.id, title: row.title, body: row.body, isImportant: row.is_important, startsAt: row.starts_at, endsAt: row.ends_at, publishedAt: row.published_at, status: row.status }))
+  return result.rows.map((row) => ({ id: row.id, title: row.title, body: row.body, isImportant: row.is_important, isBanner: row.is_banner, startsAt: row.starts_at, endsAt: row.ends_at, publishedAt: row.published_at, status: row.status }))
 }
 
 const createAdminAnnouncement = async (access: TenantAccess, input: unknown) => {
@@ -1154,20 +1167,36 @@ const createAdminAnnouncement = async (access: TenantAccess, input: unknown) => 
   const title = typeof value.title === 'string' ? value.title.trim() : ''
   const body = typeof value.body === 'string' ? value.body.trim() : ''
   const startsAt = typeof value.startsAt === 'string' ? new Date(value.startsAt) : new Date(Number.NaN)
-  const endsAt = typeof value.endsAt === 'string' && value.endsAt ? new Date(value.endsAt) : null
+  const endsAt = typeof value.endsAt === 'string' && value.endsAt ? new Date(value.endsAt) : new Date(Number.NaN)
   if (title.length < 3 || title.length > 120) throw new ApiFault(400, 'invalid_request', 'Title must be between 3 and 120 characters')
   if (!body || body.length > 5000) throw new ApiFault(400, 'invalid_request', 'Message must be between 1 and 5000 characters')
   if (Number.isNaN(startsAt.getTime())) throw new ApiFault(400, 'invalid_request', 'Choose a valid start time')
-  if (endsAt && (Number.isNaN(endsAt.getTime()) || endsAt <= startsAt)) throw new ApiFault(400, 'invalid_request', 'End time must be after the start time')
+  if (Number.isNaN(endsAt.getTime()) || endsAt <= startsAt) throw new ApiFault(400, 'invalid_request', 'Choose an end time after the start time')
   if (typeof value.isImportant !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Choose whether this announcement is important')
+  if (typeof value.isBanner !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Choose whether this announcement should appear as a banner')
   const result = await withTenantPool(access).query(
-    `INSERT INTO notices (id, tenant_id, title, body, is_read, published_at, status, is_important, starts_at, ends_at, created_by)
-     VALUES (gen_random_uuid(), $1, $2, $3, FALSE, NOW(), 'published', $4, $5, $6, $7)
-     RETURNING id, title, body, is_important, starts_at, ends_at, published_at, status`,
-    [access.tenantId, title, body, value.isImportant, startsAt.toISOString(), endsAt?.toISOString() ?? null, access.subject],
+    `INSERT INTO notices (id, tenant_id, title, body, is_read, published_at, status, is_important, is_banner, starts_at, ends_at, created_by)
+     VALUES (gen_random_uuid(), $1, $2, $3, FALSE, NOW(), 'published', $4, $5, $6, $7, $8)
+     RETURNING id, title, body, is_important, is_banner, starts_at, ends_at, published_at, status`,
+    [access.tenantId, title, body, value.isImportant, value.isBanner, startsAt.toISOString(), endsAt.toISOString(), access.subject],
   )
   const row = result.rows[0]
-  return { id: row.id, title: row.title, body: row.body, isImportant: row.is_important, startsAt: row.starts_at, endsAt: row.ends_at, publishedAt: row.published_at, status: row.status }
+  return { id: row.id, title: row.title, body: row.body, isImportant: row.is_important, isBanner: row.is_banner, startsAt: row.starts_at, endsAt: row.ends_at, publishedAt: row.published_at, status: row.status }
+}
+
+const endAdminAnnouncement = async (access: TenantAccess, announcementId: string) => {
+  requireRole(access, 'admin')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(announcementId)) {
+    throw new ApiFault(404, 'not_found', 'Announcement not found')
+  }
+  const result = await withTenantPool(access).query(
+    `UPDATE notices SET status = 'archived'
+     WHERE tenant_id = $1 AND id = $2
+     RETURNING id`,
+    [access.tenantId, announcementId],
+  )
+  if (!result.rows[0]) throw new ApiFault(404, 'not_found', 'Announcement not found')
+  return { id: result.rows[0].id, status: 'ended' }
 }
 
 const getAdminOverview = async (access: TenantAccess) => {
@@ -1845,26 +1874,42 @@ const getAdminUnits = async (access: TenantAccess) => {
   }))
 }
 
-const parseBlockInput = (input: unknown): { buildingName: string; floors: number; unitsPerFloor: number; unitPrefix: string; maintenanceRatePerSqft: number | null } => {
+type ApartmentFlatInput = { floorNumber: number; number: string }
+
+const parseBlockInput = (input: unknown): { buildingName: string; floors: number; flats: ApartmentFlatInput[]; unitPrefix: string; maintenanceRatePerSqft: number | null } => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new ApiFault(400, 'invalid_request', 'Block details are required')
   }
   const value = input as Record<string, unknown>
   const buildingName = typeof value.buildingName === 'string' ? value.buildingName.trim() : ''
   const floors = value.floors
-  const unitsPerFloor = value.unitsPerFloor
+  const flats = value.flats
   const unitPrefix = typeof value.unitPrefix === 'string' ? value.unitPrefix.trim() : ''
   const maintenanceRatePerSqft = value.maintenanceRatePerSqft
   if (buildingName.length < 1 || buildingName.length > 80 || !/^[\p{L}\p{N}][\p{L}\p{N}\p{M} .,'’()&\/#-]{0,79}$/u.test(buildingName)) {
     throw new ApiFault(400, 'invalid_request', 'Block name must start with a letter or number and contain only letters, numbers, spaces, or common punctuation')
   }
   if (typeof floors !== 'number' || !Number.isInteger(floors) || floors < 1 || floors > 200) throw new ApiFault(400, 'invalid_request', 'Floors must be a whole number between 1 and 200')
-  if (typeof unitsPerFloor !== 'number' || !Number.isInteger(unitsPerFloor) || unitsPerFloor < 1 || unitsPerFloor > 100 || floors * unitsPerFloor > 20000) throw new ApiFault(400, 'invalid_request', 'Units per floor must be a whole number and total units cannot exceed 20,000')
-  if (!/^[A-Za-z0-9]{1,8}$/.test(unitPrefix)) throw new ApiFault(400, 'invalid_request', 'Unit prefix must contain 1 to 8 letters or numbers')
+  if (!Array.isArray(flats) || flats.length < 1 || flats.length > 20000) throw new ApiFault(400, 'invalid_request', 'Add between 1 and 20,000 flats before creating this block')
+  if (unitPrefix.length > 8 || (unitPrefix.length > 0 && !/^[A-Za-z0-9]{1,8}$/.test(unitPrefix))) throw new ApiFault(400, 'invalid_request', 'Unit prefix must contain 1 to 8 letters or numbers')
   if (maintenanceRatePerSqft !== null && (typeof maintenanceRatePerSqft !== 'number' || !Number.isInteger(maintenanceRatePerSqft) || maintenanceRatePerSqft < 0 || maintenanceRatePerSqft > 100000)) {
     throw new ApiFault(400, 'invalid_request', 'Maintenance rate must be a whole rupee amount from 0 to 100,000 per sq. ft.')
   }
-  return { buildingName, floors, unitsPerFloor, unitPrefix, maintenanceRatePerSqft }
+  const parsedFlats: ApartmentFlatInput[] = []
+  const flatNumbers = new Set<string>()
+  for (const candidate of flats) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new ApiFault(400, 'invalid_request', 'Every flat must include a floor and flat number')
+    const flat = candidate as Record<string, unknown>
+    const floorNumber = flat.floorNumber
+    const number = typeof flat.number === 'string' ? flat.number.trim() : ''
+    if (typeof floorNumber !== 'number' || !Number.isInteger(floorNumber) || floorNumber < 1 || floorNumber > floors) throw new ApiFault(400, 'invalid_request', 'Each flat must belong to a valid floor')
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} ./_#-]{0,39}$/u.test(number)) throw new ApiFault(400, 'invalid_request', 'Flat numbers must start with a letter or number and contain only letters, numbers, spaces, or . / _ # -')
+    const normalizedNumber = number.toLocaleLowerCase('en')
+    if (flatNumbers.has(normalizedNumber)) throw new ApiFault(400, 'invalid_request', 'Flat numbers must be unique within the block')
+    flatNumbers.add(normalizedNumber)
+    parsedFlats.push({ floorNumber, number })
+  }
+  return { buildingName, floors, flats: parsedFlats, unitPrefix, maintenanceRatePerSqft }
 }
 
 const requireApartmentSchema = async (access: TenantAccess): Promise<void> => {
@@ -1876,10 +1921,14 @@ const requireApartmentSchema = async (access: TenantAccess): Promise<void> => {
        AND EXISTS (
          SELECT 1 FROM information_schema.columns
          WHERE table_schema = 'public' AND table_name = 'units' AND column_name = 'apartment_building_id'
+       )
+       AND EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'apartment_buildings' AND column_name = 'flat_limit'
        ) AS ready`,
   )
   if (!result.rows[0]?.ready) {
-    throw new ApiFault(503, 'dependency_unavailable', 'Apartment setup is not installed for this tenant database. Apply migrations/tenant_db/003_apartments.sql, then retry.')
+    throw new ApiFault(503, 'dependency_unavailable', 'Apartment setup is not up to date for this tenant database. Apply the tenant database migrations, including migrations/tenant_db/012_apartment_building_flat_limit.sql, then retry.')
   }
 }
 
@@ -1887,39 +1936,49 @@ const createAdminBuilding = async (access: TenantAccess, rawInput: unknown) => {
   requireRole(access, 'admin')
   const input = parseBlockInput(rawInput)
   await requireApartmentSchema(access)
-  const entitlement = await getPlatformPool().query<{ allowed_blocks: number }>(
-    'SELECT allowed_blocks FROM tenant_records WHERE tenant_id = $1', [access.tenantId],
+  const entitlement = await getPlatformPool().query<{ allowed_blocks: number; allowed_flats_per_block: number[] | null }>(
+    'SELECT allowed_blocks, allowed_flats_per_block FROM tenant_records WHERE tenant_id = $1', [access.tenantId],
   )
   const allowedBlocks = Number(entitlement.rows[0]?.allowed_blocks)
+  const flatAllowances = entitlement.rows[0]?.allowed_flats_per_block ?? null
   if (!Number.isInteger(allowedBlocks) || allowedBlocks < 1) throw new ApiFault(403, 'forbidden', 'This apartment has no block allowance configured')
+  if (allowedBlocks > 1 && !input.unitPrefix) throw new ApiFault(400, 'invalid_request', 'A flat prefix is required when this apartment has multiple blocks')
   const pool = withTenantPool(access)
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [access.tenantId])
     const countResult = await client.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM apartment_buildings WHERE tenant_id = $1', [access.tenantId])
-    if (Number(countResult.rows[0]?.count ?? 0) >= allowedBlocks) throw new ApiFault(409, 'block_limit_reached', 'The allowed number of blocks has been reached')
+    const blockIndex = Number(countResult.rows[0]?.count ?? 0)
+    if (blockIndex >= allowedBlocks) throw new ApiFault(409, 'block_limit_reached', 'The allowed number of blocks has been reached')
+    const flatLimit = flatAllowances?.[blockIndex] ?? null
+    const requestedFlats = input.flats.length
+    if (flatLimit !== null && requestedFlats > flatLimit) {
+      throw new ApiFault(409, 'flat_limit_reached', `This block is configured for a maximum of ${flatLimit} flats`)
+    }
+    const existingFlat = await client.query<{ exists: boolean }>(
+      'SELECT EXISTS (SELECT 1 FROM units WHERE tenant_id = $1 AND lower(number) = ANY($2::text[])) AS exists',
+      [access.tenantId, input.flats.map((flat) => flat.number.toLocaleLowerCase('en'))],
+    )
+    if (existingFlat.rows[0]?.exists) throw new ApiFault(409, 'invalid_request', 'One or more flat numbers already exist in this apartment')
     const apartment = await client.query<{ id: string }>('SELECT id FROM apartments WHERE tenant_id = $1 ORDER BY created_at LIMIT 1', [access.tenantId])
     const apartmentId = apartment.rows[0]?.id
     if (!apartmentId) throw new ApiFault(409, 'invalid_request', 'The apartment workspace is not initialized')
     const building = await client.query<{ id: string }>(
-      `INSERT INTO apartment_buildings (tenant_id, apartment_id, name, maintenance_rate_per_sqft)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [access.tenantId, apartmentId, input.buildingName, input.maintenanceRatePerSqft],
+      `INSERT INTO apartment_buildings (tenant_id, apartment_id, name, maintenance_rate_per_sqft, flat_limit)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [access.tenantId, apartmentId, input.buildingName, input.maintenanceRatePerSqft, flatLimit],
     )
     const buildingId = building.rows[0]?.id
     if (!buildingId) throw new ApiFault(500, 'data_integrity_error', 'Building creation did not return an identifier')
     await client.query(
       `INSERT INTO units (id, tenant_id, number, status, building_name, floor_number, apartment_id, apartment_building_id)
-       SELECT gen_random_uuid(), $1,
-              $2 || '-' || LPAD(floor_number::text, 2, '0') || LPAD(unit_number::text, 2, '0'),
-              'vacant', $3, floor_number, $4, $5
-       FROM generate_series(1, $6::int) AS floor_number
-       CROSS JOIN generate_series(1, $7::int) AS unit_number`,
-      [access.tenantId, input.unitPrefix, input.buildingName, apartmentId, buildingId, input.floors, input.unitsPerFloor],
+       SELECT gen_random_uuid(), $1, flat_number, 'vacant', $2, floor_number, $3, $4
+       FROM unnest($5::int[], $6::text[]) AS flat(floor_number, flat_number)`,
+      [access.tenantId, input.buildingName, apartmentId, buildingId, input.flats.map((flat) => flat.floorNumber), input.flats.map((flat) => flat.number)],
     )
     await client.query('COMMIT')
-    return { id: buildingId, name: input.buildingName, unitCount: input.floors * input.unitsPerFloor }
+    return { id: buildingId, name: input.buildingName, unitCount: input.flats.length }
   } catch (error) {
     await client.query('ROLLBACK')
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
@@ -1935,24 +1994,26 @@ const getAdminBuildings = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   await requireApartmentSchema(access)
   const result = await withTenantPool(access).query(
-    `SELECT b.id, b.name, a.name AS apartment, a.city,
+    `SELECT b.id, b.name, a.name AS apartment, a.city, b.flat_limit,
             COUNT(u.id)::int AS unit_count
      FROM apartment_buildings b
      JOIN apartments a ON a.id = b.apartment_id AND a.tenant_id = b.tenant_id
      LEFT JOIN units u ON u.tenant_id = b.tenant_id AND u.apartment_building_id = b.id
      WHERE b.tenant_id = $1
      GROUP BY b.id, b.name, a.name, a.city
-     ORDER BY a.name, b.name`,
+     ORDER BY b.created_at, b.id`,
     [access.tenantId],
   )
-  const allowance = await getPlatformPool().query<{ allowed_blocks: number }>('SELECT allowed_blocks FROM tenant_records WHERE tenant_id = $1', [access.tenantId])
+  const allowance = await getPlatformPool().query<{ allowed_blocks: number; allowed_flats_per_block: number[] | null }>('SELECT allowed_blocks, allowed_flats_per_block FROM tenant_records WHERE tenant_id = $1', [access.tenantId])
+  const flatAllowances = allowance.rows[0]?.allowed_flats_per_block ?? null
   return { allowedBlocks: Number(allowance.rows[0]?.allowed_blocks ?? 0), buildings: result.rows.map((building) => ({
     id: building.id,
     name: building.name,
     apartment: building.apartment,
     city: building.city,
     unitCount: Number(building.unit_count),
-  })) }
+    flatLimit: building.flat_limit === null ? null : Number(building.flat_limit),
+  })), nextFlatLimit: flatAllowances?.[result.rows.length] ?? null }
 }
 
 type BillingRules = {
@@ -2924,6 +2985,7 @@ const getPlatformOverview = async (request: IncomingMessage) => {
     pool.query(
       `SELECT tenant_id AS id, slug, org_name AS name, status, plan_name, city,
               admin_email AS "adminEmail", allowed_blocks AS "allowedBlocks",
+              allowed_flats_per_block AS "allowedFlatsPerBlock",
               apartment_code AS "apartmentCode",
               admin_invited_at AS "invitedAt",
               admin_invite_accepted_at AS "inviteAcceptedAt",
@@ -3032,6 +3094,7 @@ type OnboardingRecord = {
   admin_email: string
   city: string
   allowed_blocks: number
+  allowed_flats_per_block: number[]
   apartment_code: string
   status?: string
 }
@@ -3173,9 +3236,9 @@ const createOrganizationOnboarding = async (request: IncomingMessage, requestId:
     await client.query(
       `INSERT INTO tenant_records
         (id, tenant_id, slug, org_name, status, database_locator, database_name, plan_name,
-         city, admin_email, allowed_blocks, apartment_code)
-       VALUES ($1, $2, $3, $4, 'onboarding', $5, $5, $6, $7, $8, $9, $10)`,
-      [id, tenantId, slug, input.name, databaseName, input.plan, input.city, input.adminEmail, input.allowedBlocks, apartmentCode],
+         city, admin_email, allowed_blocks, allowed_flats_per_block, apartment_code)
+       VALUES ($1, $2, $3, $4, 'onboarding', $5, $5, $6, $7, $8, $9, $10, $11)`,
+      [id, tenantId, slug, input.name, databaseName, input.plan, input.city, input.adminEmail, input.allowedBlocks, input.flatsPerBlock, apartmentCode],
     )
     await client.query(
       `INSERT INTO provisioning_state
@@ -3211,6 +3274,7 @@ const createOrganizationOnboarding = async (request: IncomingMessage, requestId:
     admin_email: input.adminEmail,
     city: input.city,
     allowed_blocks: input.allowedBlocks,
+    allowed_flats_per_block: input.flatsPerBlock,
     apartment_code: apartmentCode,
   }
   return completeOrganizationOnboarding(record)
@@ -3220,7 +3284,7 @@ const retryOrganizationOnboarding = async (request: IncomingMessage, tenantId: s
   await requireOperator(request)
   assertInvitationConfiguration()
   const result = await getPlatformPool().query<OnboardingRecord>(
-    `SELECT id, tenant_id, slug, org_name, database_name, plan_name, admin_email, city, allowed_blocks, apartment_code, status
+    `SELECT id, tenant_id, slug, org_name, database_name, plan_name, admin_email, city, allowed_blocks, allowed_flats_per_block, apartment_code, status
      FROM tenant_records WHERE tenant_id = $1`,
     [tenantId],
   )
@@ -3359,6 +3423,12 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/announcements') {
         const access = await resolveTenantAccess(request)
         respond(response, 201, await createAdminAnnouncement(access, await readJsonBody(request)), requestId)
+        return
+      }
+      const adminAnnouncementEndMatch = requestUrl.pathname.match(/^\/v1\/admin\/announcements\/([^/]+)\/end$/)
+      if (request.method === 'POST' && adminAnnouncementEndMatch) {
+        const access = await resolveTenantAccess(request)
+        respond(response, 200, await endAdminAnnouncement(access, decodeURIComponent(adminAnnouncementEndMatch[1] ?? '')), requestId)
         return
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/overview') {

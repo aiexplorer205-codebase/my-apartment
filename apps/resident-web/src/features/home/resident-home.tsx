@@ -26,6 +26,7 @@ type Notice = {
   isRead: boolean
   publishedAt: string
   isImportant: boolean
+  isBanner: boolean
 }
 
 type InvoiceBalance = {
@@ -152,6 +153,7 @@ function ResidentContent() {
   const [pullDistance, setPullDistance] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [dismissedAnnouncementIds, setDismissedAnnouncementIds] = useState<string[]>([])
+  const [openAnnouncementId, setOpenAnnouncementId] = useState<string | null>(null)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const pullDistanceRef = useRef(0)
   const refreshStartedAtRef = useRef(0)
@@ -168,7 +170,8 @@ function ResidentContent() {
   const activeNavigation = residentNavigation.find(({ tab }) => tab === activeTab) ?? residentNavigation[0]
   const unreadNoticeCount = home.data?.announcements.filter(({ isRead }) => !isRead).length ?? 0
   const unreadNotificationCount = notices.data?.filter(({ isRead }) => !isRead).length ?? unreadNoticeCount
-  const importantAnnouncements = (notices.data ?? []).filter((item) => item.isImportant && !dismissedAnnouncementIds.includes(item.id))
+  const bannerAnnouncements = (notices.data ?? []).filter((item) => item.isBanner && !dismissedAnnouncementIds.includes(item.id))
+  const openNotice = notices.data?.find((notice) => notice.id === openAnnouncementId)
   const openInvoiceCount = home.data?.invoiceBalances.filter(({ remainingDueMinor }) => remainingDueMinor > 0).length ?? 0
   const historyPayments = home.data?.recentPayments.filter((payment) => {
     if (historyFilter === 'All') return true
@@ -192,13 +195,6 @@ function ResidentContent() {
   const dueInDays = home.data?.dueDate
     ? Math.ceil((new Date(`${home.data.dueDate}T00:00:00`).getTime() - new Date(new Date().toDateString()).getTime()) / 86_400_000)
     : null
-
-  useEffect(() => {
-    try {
-      const stored = globalThis.localStorage.getItem('nivasa-dismissed-announcements')
-      if (stored) setDismissedAnnouncementIds(JSON.parse(stored) as string[])
-    } catch { /* Ignore unavailable or invalid local storage. */ }
-  }, [])
 
   useEffect(() => {
     const interval = globalThis.setInterval(notices.reload, 60_000)
@@ -321,11 +317,7 @@ function ResidentContent() {
   }
 
   const dismissAnnouncement = (noticeId: string) => {
-    setDismissedAnnouncementIds((current) => {
-      const next = [...new Set([...current, noticeId])]
-      try { globalThis.localStorage.setItem('nivasa-dismissed-announcements', JSON.stringify(next)) } catch { /* Dismiss for this session if storage is unavailable. */ }
-      return next
-    })
+    setDismissedAnnouncementIds((current) => [...new Set([...current, noticeId])])
   }
 
   const saveProfile = async (event: FormEvent) => {
@@ -380,7 +372,7 @@ function ResidentContent() {
         <div className={`resident-pull-indicator${refreshing ? ' refreshing' : ''}`} style={{ height: refreshing ? 46 : pullDistance }} role="status" aria-live="polite" aria-hidden={!refreshing && pullDistance === 0}>
           {(refreshing || pullDistance > 0) && <><span className="resident-pull-spinner" />{refreshing ? t('common:messages.refreshing', 'Refreshing…') : pullDistance >= 58 ? t('common:messages.releaseToRefresh', 'Release to refresh') : t('common:messages.pullToRefresh', 'Pull to refresh')}</>}
         </div>
-        {importantAnnouncements.length > 0 && <aside className="resident-announcement-banners" aria-label="Important announcements">{importantAnnouncements.map((announcement) => <div className="resident-announcement-banner" key={announcement.id}><button type="button" className="resident-announcement-banner-copy" onClick={() => { setActiveTab('notices'); void openAnnouncement(announcement.id) }}><span className="resident-announcement-banner-label">Important announcement</span><strong>{announcement.title}</strong><span>{announcement.body}</span></button><button className="resident-announcement-banner-close" type="button" aria-label="Dismiss announcement" onClick={() => dismissAnnouncement(announcement.id)}>×</button></div>)}</aside>}
+        {bannerAnnouncements.length > 0 && <aside className="resident-announcement-banners" aria-label="Banner announcements">{bannerAnnouncements.map((announcement) => <div className="resident-announcement-banner" key={announcement.id}><button type="button" className="resident-announcement-banner-copy" onClick={() => { setActiveTab('notices'); setOpenAnnouncementId(announcement.id); void openAnnouncement(announcement.id) }}><span className="resident-announcement-banner-label">{announcement.isImportant ? 'Important announcement' : 'Announcement'}</span><strong>{announcement.isImportant && !/^important:\s*/i.test(announcement.title) ? `IMPORTANT: ${announcement.title}` : announcement.title}</strong><span>{announcement.body}</span></button><button className="resident-announcement-banner-close" type="button" aria-label="Dismiss announcement" onClick={() => dismissAnnouncement(announcement.id)}>×</button></div>)}</aside>}
         {activeTab === 'home' && home.data && <header className="resident-mobile-home-header">
           <div><h1>{greeting}, {firstName}</h1><p>{home.data.brand.name} · {home.data.profile.unit.split('·').at(-1)?.trim() ?? home.data.profile.unit}</p><small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small></div>
           <button type="button" aria-label={`Announcements${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
@@ -614,18 +606,29 @@ function ResidentContent() {
               <button type="button" onClick={() => void markAllRead()} disabled={notices.loading || notices.error !== null || unreadNotificationCount === 0}>Mark all as read</button>
             </div>
             <LoadState loading={notices.loading} error={notices.error} onRetry={notices.reload} />
-            {!notices.loading && !notices.error && notices.data?.length === 0 && <div className="resident-notification-empty">There are no active announcements right now.</div>}
-            <div className="resident-notification-list">
-              {notices.data?.map((notice) => {
-                const category = /payment|paid|receipt|confirm/i.test(`${notice.title} ${notice.body}`) ? 'payment' : /bill|invoice|due/i.test(`${notice.title} ${notice.body}`) ? 'billing' : 'community'
-                return <article className={`resident-notification-item ${notice.isRead ? 'read' : 'unread'} ${category}`} key={notice.id}>
-                  <span className="resident-notification-icon" aria-hidden="true">
-                    {category === 'payment' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 4 4L19 6" /></svg> : category === 'billing' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 18-5-5 17-3-7-7-5Z" /><path d="m13 16 5-6" /></svg>}
-                  </span>
-                  <details className="resident-announcement-details" onToggle={(event) => { if ((event.currentTarget as HTMLDetailsElement).open) void openAnnouncement(notice.id) }}><summary className="resident-notification-copy"><strong>{notice.title}{notice.isImportant && <span className="resident-announcement-important-label">Important</span>}</strong><small>{formatRelativeTime(notice.createdAt)} · {notice.isRead ? 'Read' : 'Unread'}</small></summary><p>{notice.body}</p></details>
-                </article>
-              })}
-            </div>
+            {openNotice ? <article className="resident-announcement-detail-page">
+                <button type="button" className="resident-announcement-detail-close" onClick={() => setOpenAnnouncementId(null)}>Close announcement</button>
+                <div className="resident-announcement-detail-tags">{openNotice.isImportant && <span className="resident-announcement-important-label">Important</span>}{openNotice.isBanner && <span className="resident-announcement-banner-tag">Banner announcement</span>}</div>
+                <h2>{openNotice.isImportant && !/^important:\s*/i.test(openNotice.title) ? `IMPORTANT: ${openNotice.title}` : openNotice.title}</h2>
+                <time dateTime={openNotice.createdAt}>{formatRelativeTime(openNotice.createdAt)}</time>
+                <p>{openNotice.body}</p>
+              </article> : <>
+              {!notices.loading && !notices.error && notices.data?.length === 0 && <div className="resident-notification-empty">There are no active announcements right now.</div>}
+              <div className="resident-notification-list">
+                {notices.data?.map((notice) => {
+                  const category = /payment|paid|receipt|confirm/i.test(`${notice.title} ${notice.body}`) ? 'payment' : /bill|invoice|due/i.test(`${notice.title} ${notice.body}`) ? 'billing' : 'community'
+                  return <article className={`resident-notification-item ${notice.isRead ? 'read' : 'unread'} ${category}`} key={notice.id}>
+                    <span className="resident-notification-icon" aria-hidden="true">
+                      {category === 'payment' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 4 4L19 6" /></svg> : category === 'billing' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 18-5-5 17-3-7-7-5Z" /><path d="m13 16 5-6" /></svg>}
+                    </span>
+                    <button type="button" className="resident-notification-copy resident-notification-open" onClick={() => { setOpenAnnouncementId(notice.id); void openAnnouncement(notice.id) }}>
+                      <strong>{notice.isImportant && !/^important:\s*/i.test(notice.title) ? `IMPORTANT: ${notice.title}` : notice.title}{notice.isImportant && <span className="resident-announcement-important-label">Important</span>}</strong>
+                      <small>{formatRelativeTime(notice.createdAt)} · {notice.isRead ? 'Read' : 'Unread'}{notice.isBanner ? ' · Banner' : ''}</small>
+                    </button>
+                  </article>
+                })}
+              </div>
+            </>}
           </section>
         )}
 

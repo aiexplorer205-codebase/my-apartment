@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { AuthBoundary, LoadState, TenantWorkspacePicker } from '../../lib/auth-ui'
 import { formValidationMessage } from '../../lib/form-validation'
 import { useApiPost, useApiQuery } from '../../lib/use-api'
@@ -49,10 +49,11 @@ const adminNavigation = [
   { label: 'Settings', navKey: 'settings', icon: 'settings' },
 ] as const
 
-function AdminNavIcon({ name }: { name: typeof adminNavigation[number]['icon'] }) {
-  const paths: Record<typeof adminNavigation[number]['icon'], ReactNode> = {
+type AdminIconName = typeof adminNavigation[number]['icon'] | 'building'
+
+function AdminNavIcon({ name }: { name: AdminIconName }) {
+  const paths: Record<AdminIconName, ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
-    building: <><path d="M4 21V5l8-3 8 3v16" /><path d="M8 8h1m6 0h1M8 12h1m6 0h1M10 21v-4h4v4" /></>,
     users: <><circle cx="9" cy="7" r="4" /><path d="M2 21v-2a7 7 0 0 1 14 0v2m2-14a4 4 0 0 1 0 8m2 6v-2a6 6 0 0 0-3-5.2" /></>,
     file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M8 13h8m-8 4h6" /></>,
     megaphone: <><path d="m3 11 18-5-5 17-3-7-7-5Z" /><path d="m13 16 5-6M5 14l-2 5m4-4 2 5" /></>,
@@ -60,6 +61,7 @@ function AdminNavIcon({ name }: { name: typeof adminNavigation[number]['icon'] }
     alert: <><path d="m10.3 3.7-7.7 13.3a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4m0 4h.01" /></>,
     chart: <><path d="M4 19V9m6 10V5m6 14v-7m6 7H2" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1 1.4 1.4-2.8 2.8-1.5-1.5a7 7 0 0 1-2.1.9V21h-4v-2.3a7 7 0 0 1-2.1-.9l-1.5 1.5-2.8-2.8L5.6 15a7 7 0 0 1-.9-2.1H2.5v-4h2.2a7 7 0 0 1 .9-2.1L4.2 5.3l2.8-2.8 1.5 1.5a7 7 0 0 1 2.1-.9V1h4v2.1a7 7 0 0 1 2.1.9l1.5-1.5L21 5.3 19.5 6.8a7 7 0 0 1 .9 2.1h2.1v4h-2.1a7 7 0 0 1-1 2.1Z" /></>,
+    building: <><path d="M4 21V5l8-3 8 3v16" /><path d="M8 8h1m6 0h1M8 12h1m6 0h1M10 21v-4h4v4" /></>,
   }
   return <svg className="admin-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
@@ -67,9 +69,13 @@ function AdminNavIcon({ name }: { name: typeof adminNavigation[number]['icon'] }
 function AdminContent() {
   type Section = 'Overview' | 'Flats & Residents' | 'Announcements' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
   const [section, setSection] = useState<Section>('Overview')
+  const [firstBlockFlowOpen, setFirstBlockFlowOpen] = useState(false)
   const { data, loading, error, reload } = useApiQuery<AdminOverview>('/v1/admin/overview')
+  const blockInventory = useApiQuery<{ allowedBlocks: number; buildings: Array<{ id: string }> }>('/v1/admin/buildings')
   const { logout } = useAuth0()
   const { t } = useTranslation(['common', 'admin'])
+  const hasBlocks = !blockInventory.loading && !blockInventory.error && (blockInventory.data?.buildings.length ?? 0) > 0
+  const needsInitialBlock = !blockInventory.loading && !blockInventory.error && blockInventory.data?.buildings.length === 0
 
   const metrics = data ? [
     { label: t('admin:overview.totalBilled', 'Total billed'), value: data.billedMinor, detail: t('admin:overview.totalBilledDetail', 'Latest invoice balance per resident'), tone: 'blue' },
@@ -82,15 +88,15 @@ function AdminContent() {
     <main className="dashboard-shell admin-shell">
       <aside className="sidebar">
         <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span><strong>{getAppConfig().application.productName}</strong><small>{t('admin:header.title', 'APARTMENT ADMIN')}</small></span></div>
-        <div style={{ padding: '0 12px 8px 12px' }}>
+        {hasBlocks && <div style={{ padding: '0 12px 8px 12px' }}>
           <LanguageSwitcher />
-        </div>
-        <div className="workspace-box">
+        </div>}
+        {hasBlocks && <div className="workspace-box">
           <span className="workspace-avatar">{data?.organization.slice(0, 1) ?? 'A'}</span>
           <span className="workspace-details"><strong>{data?.organization ?? 'Your organization'}</strong><small>{t('common:labels.currentWorkspace', 'Current workspace')}</small></span>
           <TenantWorkspacePicker />
-        </div>
-        <nav className="nav-list admin-nav" aria-label="Administrator navigation">
+        </div>}
+        {hasBlocks && <nav className="nav-list admin-nav" aria-label="Administrator navigation">
           {adminNavigation.map(({ label, navKey, icon }) => {
             const translatedLabel = navKey === 'flatsResidents' || navKey === 'announcements' ? label : t(`common:navigation.${navKey}`, label)
             return (
@@ -100,8 +106,8 @@ function AdminContent() {
               </button>
             )
           })}
-        </nav>
-        <div className="sidebar-help"><span className="sidebar-help-mark">?</span><span><strong>{t('common:labels.needHelp', 'Need a hand?')}</strong><small>{t('common:labels.contactSupport', 'Contact your workspace support')}</small></span></div>
+        </nav>}
+        {hasBlocks && <div className="sidebar-help"><span className="sidebar-help-mark">?</span><span><strong>{t('common:labels.needHelp', 'Need a hand?')}</strong><small>{t('common:labels.contactSupport', 'Contact your workspace support')}</small></span></div>}
         <div className="sidebar-account admin-sidebar-footer">
           <span className="account-avatar">A</span>
           <span><strong>{t('admin:header.role', 'Administrator')}</strong><small>{t('admin:header.apartmentAdmin', 'Apartment admin')}</small></span>
@@ -110,8 +116,13 @@ function AdminContent() {
       </aside>
       <section className="content-panel">
         <header className="topbar">
-          <div><h1 className="admin-navbar-section">{['flatsResidents', 'announcements'].includes(adminNavigation.find((n) => n.label === section)?.navKey ?? '') ? section : adminNavigation.find((n) => n.label === section) ? t(`common:navigation.${adminNavigation.find((n) => n.label === section)!.navKey}`, section) : section}</h1>{data?.apartmentCode && <small className="admin-apartment-code">Apartment ID: {data.apartmentCode}</small>}</div>
+          <div><h1 className="admin-navbar-section">{hasBlocks ? ['flatsResidents', 'announcements'].includes(adminNavigation.find((n) => n.label === section)?.navKey ?? '') ? section : adminNavigation.find((n) => n.label === section) ? t(`common:navigation.${adminNavigation.find((n) => n.label === section)!.navKey}`, section) : section : 'Apartment setup'}</h1>{data?.apartmentCode && <small className="admin-apartment-code">Apartment ID: {data.apartmentCode}</small>}</div>
         </header>
+        {blockInventory.loading && <LoadState loading error={null} onRetry={blockInventory.reload} />}
+        {blockInventory.error && <LoadState loading={false} error={blockInventory.error} onRetry={blockInventory.reload} />}
+        {needsInitialBlock && !firstBlockFlowOpen && <section className="card empty-state"><h2>Set up your apartment</h2><p>Add the first block to unlock the rest of the admin workspace.</p><button className="primary" type="button" onClick={() => setFirstBlockFlowOpen(true)}>＋ Add block</button></section>}
+        {needsInitialBlock && firstBlockFlowOpen && <AdminBuildings onBlocksChanged={blockInventory.reload} selectedBlockId={null} onSelectBlock={() => {}} setupOnly initialModalOpen onSetupCancel={() => setFirstBlockFlowOpen(false)} />}
+        {hasBlocks && <>
         {section === 'Overview' ? <>
           <div className="admin-overview-heading">
             <div>
@@ -162,12 +173,15 @@ function AdminContent() {
             : section === 'Collections' ? <AdminCollections />
               : section === 'Overdues' ? <AdminOverdue />
                   : section === 'Reports' ? <AdminReports /> : <AdminSettings />}
+        </>}
       </section>
     </main>
   )
 }
 
-type AdminAnnouncement = { id: string; title: string; body: string; isImportant: boolean; startsAt: string; endsAt: string | null; publishedAt: string; status: string }
+type AdminAnnouncement = { id: string; title: string; body: string; isImportant: boolean; isBanner: boolean; startsAt: string; endsAt: string | null; publishedAt: string; status: string }
+
+const localDateTimeInput = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
 
 function AdminAnnouncements() {
   const { data, loading, error, reload } = useApiQuery<AdminAnnouncement[]>('/v1/admin/announcements')
@@ -175,34 +189,51 @@ function AdminAnnouncements() {
   const { pushMessage } = useAppMessages()
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [startsAt, setStartsAt] = useState(() => {
-    const date = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000)
-    return date.toISOString().slice(0, 16)
-  })
-  const [endsAt, setEndsAt] = useState('')
+  const [startsAt, setStartsAt] = useState(() => localDateTimeInput(new Date()))
+  const [endsAt, setEndsAt] = useState(() => localDateTimeInput(new Date(Date.now() + 86_400_000)))
   const [isImportant, setIsImportant] = useState(false)
+  const [isBanner, setIsBanner] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [endingAnnouncementId, setEndingAnnouncementId] = useState<string | null>(null)
+  const [validationError, setValidationError] = useState<string | null>(null)
   const submit = async (event: FormEvent) => {
     event.preventDefault()
+    setValidationError(null)
     setSaving(true)
     try {
-      await post('/v1/admin/announcements', { title, body, startsAt: new Date(startsAt).toISOString(), endsAt: endsAt ? new Date(endsAt).toISOString() : null, isImportant })
+      await post('/v1/admin/announcements', { title, body, startsAt: new Date(startsAt).toISOString(), endsAt: new Date(endsAt).toISOString(), isImportant, isBanner })
       pushMessage('Announcement published.', 'success')
-      setTitle(''); setBody(''); setEndsAt(''); setIsImportant(false)
+      const now = new Date()
+      setTitle(''); setBody(''); setStartsAt(localDateTimeInput(now)); setEndsAt(localDateTimeInput(new Date(now.getTime() + 86_400_000))); setIsImportant(false); setIsBanner(false)
       reload()
     } catch (cause) {
       pushMessage(cause instanceof Error ? cause.message : 'Could not publish this announcement.', 'error')
     } finally { setSaving(false) }
   }
+  const endAnnouncement = async (announcementId: string) => {
+    if (endingAnnouncementId) return
+    setEndingAnnouncementId(announcementId)
+    try {
+      await post(`/v1/admin/announcements/${encodeURIComponent(announcementId)}/end`, {})
+      pushMessage('Announcement marked ended.', 'success')
+      reload()
+    } catch (cause) {
+      pushMessage(cause instanceof Error ? cause.message : 'Could not end this announcement.', 'error')
+    } finally {
+      setEndingAnnouncementId(null)
+    }
+  }
   const now = Date.now()
   return <section className="section-stack admin-announcements">
-    <div className="card card-title-row"><div><h2>Announcements</h2><p>Share updates with residents. Important announcements appear as a banner while active.</p></div><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button></div>
-    <form className="card apartment-form-grid" onSubmit={(event) => void submit(event)}>
+    <div className="card card-title-row"><div><h2>Announcements</h2><p>Share updates with residents. Important announcements are labeled clearly; banner announcements appear at the top of the resident app.</p></div><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button></div>
+    <form className="card apartment-form-grid" onSubmit={(event) => void submit(event)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}>
       <label className="admin-field full"><span>Title</span><input required minLength={3} maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Water supply maintenance" /></label>
       <label className="admin-field full"><span>Message</span><textarea required maxLength={5000} rows={5} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write the announcement for residents" /></label>
       <label className="admin-field"><span>Start time</span><input type="datetime-local" required value={startsAt} onChange={(event) => setStartsAt(event.target.value)} /></label>
-      <label className="admin-field"><span>End time <small>(optional)</small></span><input type="datetime-local" min={startsAt} value={endsAt} onChange={(event) => setEndsAt(event.target.value)} /></label>
-      <label className="admin-announcement-important"><input type="checkbox" checked={isImportant} onChange={(event) => setIsImportant(event.target.checked)} /><span><strong>Important announcement</strong><small>Show this as a dismissible banner in the resident app while active.</small></span></label>
+      <label className="admin-field"><span>End time</span><input type="datetime-local" min={startsAt} value={endsAt} onChange={(event) => setEndsAt(event.target.value)} required /></label>
+      <label className="admin-announcement-important"><input type="checkbox" checked={isImportant} onChange={(event) => setIsImportant(event.target.checked)} /><span><strong>Important announcement</strong><small>Add an Important tag and an IMPORTANT: prefix to the title.</small></span></label>
+      <label className="admin-announcement-important"><input type="checkbox" checked={isBanner} onChange={(event) => setIsBanner(event.target.checked)} /><span><strong>Banner announcement</strong><small>Show this announcement at the top of the resident app.</small></span></label>
+      {validationError && <p className="field-validation-error full" role="alert">{validationError}</p>}
       <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving}>{saving ? 'Publishing…' : 'Publish announcement'}</button></div>
     </form>
     <div className="card"><div className="admin-card-heading"><div><h2>All announcements</h2><p>Scheduled and past announcements stay here for reference.</p></div></div><LoadState loading={loading} error={error} onRetry={reload} />
@@ -210,57 +241,187 @@ function AdminAnnouncements() {
       <div className="admin-announcement-list">{data?.map((item) => {
         const start = new Date(item.startsAt).getTime()
         const end = item.endsAt ? new Date(item.endsAt).getTime() : null
-        const state = start > now ? 'Scheduled' : end !== null && end <= now ? 'Ended' : 'Live'
-        return <article className="admin-announcement-item" key={item.id}><div><div className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{item.isImportant && <span className="status-pill warning">Important</span>}</div><h3>{item.title}</h3><p>{item.body}</p><small>{new Date(item.startsAt).toLocaleString('en-IN')}{item.endsAt ? ` – ${new Date(item.endsAt).toLocaleString('en-IN')}` : ' · No end time'}</small></div></article>
+        const state = item.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live'
+        return <article className="admin-announcement-item" key={item.id}><div><div className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{item.isImportant && <span className="status-pill warning">Important</span>}{item.isBanner && <span className="status-pill">Banner</span>}</div><h3>{item.isImportant && !/^important:\s*/i.test(item.title) ? `IMPORTANT: ${item.title}` : item.title}</h3><p>{item.body}</p><small>{new Date(item.startsAt).toLocaleString('en-IN')}{item.endsAt ? ` – ${new Date(item.endsAt).toLocaleString('en-IN')}` : ' · No end time'}</small>{state !== 'Ended' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(item.id)}>{endingAnnouncementId === item.id ? 'Ending…' : 'Mark ended'}</button></div>}</div></article>
       })}</div>
     </div>
   </section>
 }
 
-function AdminBuildings({ onBlocksChanged, selectedBlockId, onSelectBlock }: { onBlocksChanged: () => void; selectedBlockId: string | null; onSelectBlock: (blockId: string) => void }) {
-  type Building = { id: string; name: string; apartment: string; city: string; unitCount: number }
-  type BuildingInventory = { allowedBlocks: number; buildings: Building[] }
-  const [modalOpen, setModalOpen] = useState(false)
+function AdminBuildings({ onBlocksChanged, selectedBlockId, onSelectBlock, setupOnly = false, initialModalOpen = false, onSetupCancel }: { onBlocksChanged: () => void; selectedBlockId: string | null; onSelectBlock: (blockId: string) => void; setupOnly?: boolean; initialModalOpen?: boolean; onSetupCancel?: () => void }) {
+  type Building = { id: string; name: string; apartment: string; city: string; unitCount: number; flatLimit: number | null }
+  type BuildingInventory = { allowedBlocks: number; nextFlatLimit: number | null; buildings: Building[] }
+  type DraftFlat = { id: number; floorNumber: number; number: string }
+  type Stage = 'details' | 'edit' | 'review'
+  const [modalOpen, setModalOpen] = useState(initialModalOpen)
+  const [stage, setStage] = useState<Stage>('details')
   const [blockValidationError, setBlockValidationError] = useState<string | null>(null)
-  const [blockForm, setBlockForm] = useState({ name: '', floors: '', unitsPerFloor: '', unitPrefix: '', applyRate: false, maintenanceRate: '' })
+  const [blockForm, setBlockForm] = useState({ name: '', floors: '', unitPrefix: '' })
+  const [draftFlats, setDraftFlats] = useState<DraftFlat[]>([])
+  const [editingFlatId, setEditingFlatId] = useState<number | null>(null)
+  const [editingFlatNumber, setEditingFlatNumber] = useState('')
+  const [creating, setCreating] = useState(false)
+  const nextDraftId = useRef(0)
   const post = useApiPost()
   const { pushMessage } = useAppMessages()
   const buildings = useApiQuery<BuildingInventory>('/v1/admin/buildings')
   const blocks = buildings.data?.buildings ?? []
   const atBlockLimit = Boolean(buildings.data && blocks.length >= buildings.data.allowedBlocks)
-  const createBlock = async (event: FormEvent) => {
+  const flatLimit = buildings.data?.nextFlatLimit ?? null
+  const prefixRequired = (buildings.data?.allowedBlocks ?? 1) > 1
+  const buildingNameForApi = blockForm.name.trim() || 'Block 1'
+  const closeModal = () => {
+    setModalOpen(false)
+    if (setupOnly) onSetupCancel?.()
+  }
+  const resetForm = () => {
+    setBlockForm({ name: '', floors: '', unitPrefix: '' })
+    setDraftFlats([])
+    setStage('details')
+    setBlockValidationError(null)
+    setEditingFlatId(null)
+  }
+  const openBlockFlow = () => {
+    resetForm()
+    setModalOpen(true)
+  }
+  const generatedFlatNumber = (floor: number, sequence: number) => {
+    const floorDigits = String(Math.max(1, Number(blockForm.floors))).length
+    const floorCode = String(floor).padStart(Math.max(2, floorDigits), '0')
+    const flatCode = String(sequence).padStart(2, '0')
+    return blockForm.unitPrefix.trim() ? `${blockForm.unitPrefix.trim()}-${floorCode}${flatCode}` : `${floorCode}-${flatCode}`
+  }
+  const showFlatPreview = (event: FormEvent) => {
     event.preventDefault()
+    const floors = Number(blockForm.floors)
+    if (!Number.isInteger(floors) || floors < 1 || floors > 200) {
+      setBlockValidationError('Number of floors must be a whole number between 1 and 200.')
+      return
+    }
+    if (prefixRequired && !blockForm.name.trim()) {
+      setBlockValidationError('A block name is required when this apartment has multiple blocks.')
+      return
+    }
+    if (prefixRequired && !blockForm.unitPrefix.trim()) {
+      setBlockValidationError('A flat prefix is required when this apartment has multiple blocks.')
+      return
+    }
+    setDraftFlats([])
+    setEditingFlatId(null)
+    setStage('edit')
+    setBlockValidationError(null)
+  }
+  const addFlat = (floorNumber: number) => {
+    if (flatLimit !== null && draftFlats.length >= flatLimit) {
+      setBlockValidationError(`This block allows at most ${flatLimit} flats. Delete a flat before adding another.`)
+      return
+    }
+    const existing = new Set(draftFlats.map((flat) => flat.number.toLocaleLowerCase('en')))
+    let sequence = 1
+    let number = generatedFlatNumber(floorNumber, sequence)
+    while (existing.has(number.toLocaleLowerCase('en'))) {
+      sequence += 1
+      number = generatedFlatNumber(floorNumber, sequence)
+    }
+    nextDraftId.current += 1
+    setDraftFlats((current) => [...current, { id: nextDraftId.current, floorNumber, number }])
+    setBlockValidationError(null)
+  }
+  const deleteFlat = (flatId: number) => {
+    setDraftFlats((current) => current.filter((flat) => flat.id !== flatId))
+    if (editingFlatId === flatId) setEditingFlatId(null)
+    setBlockValidationError(null)
+  }
+  const saveFlatNumber = (flatId: number) => {
+    const number = editingFlatNumber.trim()
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} ./_#-]{0,39}$/u.test(number)) {
+      setBlockValidationError('Flat numbers must start with a letter or number and use only letters, numbers, spaces, or . / _ # -.')
+      return
+    }
+    if (draftFlats.some((flat) => flat.id !== flatId && flat.number.toLocaleLowerCase('en') === number.toLocaleLowerCase('en'))) {
+      setBlockValidationError('Each flat number must be unique within this block.')
+      return
+    }
+    setDraftFlats((current) => current.map((flat) => flat.id === flatId ? { ...flat, number } : flat))
+    setEditingFlatId(null)
+    setBlockValidationError(null)
+  }
+  const savePreview = () => {
+    if (draftFlats.length < 1) {
+      setBlockValidationError('Add at least one flat before saving this preview.')
+      return
+    }
+    if (flatLimit !== null && draftFlats.length > flatLimit) {
+      setBlockValidationError(`This block allows at most ${flatLimit} flats. Delete ${draftFlats.length - flatLimit} flat${draftFlats.length - flatLimit === 1 ? '' : 's'} to continue.`)
+      return
+    }
+    const numbers = draftFlats.map((flat) => flat.number.toLocaleLowerCase('en'))
+    if (new Set(numbers).size !== numbers.length) {
+      setBlockValidationError('Each flat number must be unique within this block.')
+      return
+    }
+    if (editingFlatId !== null) {
+      setBlockValidationError('Save or cancel the current flat number edit before continuing.')
+      return
+    }
+    setBlockValidationError(null)
+    setStage('review')
+  }
+  const createBlock = async () => {
+    if (creating) return
+    if (flatLimit !== null && draftFlats.length > flatLimit) {
+      setBlockValidationError(`This block allows at most ${flatLimit} flats.`)
+      setStage('edit')
+      return
+    }
+    if (!globalThis.confirm('Once created, these flats cannot be edited or deleted from the admin app. Create them now?')) return
+    setCreating(true)
     try {
-      await post('/v1/admin/buildings', { buildingName: blockForm.name, floors: Number(blockForm.floors), unitsPerFloor: Number(blockForm.unitsPerFloor), unitPrefix: blockForm.unitPrefix, maintenanceRatePerSqft: blockForm.applyRate ? Number(blockForm.maintenanceRate) : null })
+      await post('/v1/admin/buildings', {
+        buildingName: buildingNameForApi,
+        floors: Number(blockForm.floors),
+        unitPrefix: blockForm.unitPrefix,
+        maintenanceRatePerSqft: null,
+        flats: draftFlats.map(({ floorNumber, number }) => ({ floorNumber, number })),
+      })
       buildings.reload()
       onBlocksChanged()
       setModalOpen(false)
-      setBlockForm({ name: '', floors: '', unitsPerFloor: '', unitPrefix: '', applyRate: false, maintenanceRate: '' })
+      resetForm()
     } catch (cause) {
       pushMessage(cause instanceof Error ? cause.message : 'Could not add this block. Please try again.', 'error')
       buildings.reload()
+    } finally {
+      setCreating(false)
     }
   }
-  const hasFlatFormatInputs = Number(blockForm.floors) > 0 && Number(blockForm.unitsPerFloor) > 0 && Boolean(blockForm.unitPrefix.trim())
-  const floorCode = String(1).padStart(Math.max(2, blockForm.floors.length), '0')
-  const firstFlatCode = String(1).padStart(Math.max(2, blockForm.unitsPerFloor.length), '0')
-  const secondFlatCode = String(2).padStart(Math.max(2, blockForm.unitsPerFloor.length), '0')
+  const hasFlatAllowanceError = flatLimit !== null && draftFlats.length > flatLimit
   return <section className="section-stack">
-    <div className="card card-title-row"><div><h2>Blocks</h2><p>Manage property structure, occupancy, and rates.</p>{buildings.data && <p>{blocks.length} of {buildings.data.allowedBlocks} allowed blocks added</p>}</div><div className="admin-action-row"><button className="secondary" type="button" onClick={buildings.reload}>Refresh</button><button className="primary" type="button" disabled={atBlockLimit || buildings.loading || Boolean(buildings.error)} title={atBlockLimit ? 'All allowed blocks have been added' : undefined} onClick={() => setModalOpen(true)}>＋ Add block</button></div></div>
-    {blocks.length > 0 && <div className="building-grid" aria-label="Select a block">{blocks.map((building) => <button type="button" className={`card building-summary building-summary-button${selectedBlockId === building.id ? ' is-selected' : ''}`} aria-pressed={selectedBlockId === building.id} onClick={() => onSelectBlock(building.id)} key={building.id}><span className="building-summary-icon" aria-hidden="true">▤</span><span><span className="eyebrow">{building.apartment} · {building.city}</span><strong className="building-summary-name">{building.name}</strong><span className="building-summary-count">{building.unitCount} {building.unitCount === 1 ? 'flat' : 'flats'}</span></span></button>)}</div>}
-    <LoadState loading={buildings.loading} error={buildings.error} onRetry={buildings.reload} />
-    {!buildings.loading && !buildings.error && blocks.length === 0 && <section className="card empty-state"><h2>No blocks configured</h2><p>Add a block to begin resident setup.</p></section>}
-    {modalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setModalOpen(false) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="create-block-title"><div className="admin-modal-header"><div><span className="eyebrow">PROPERTY SETUP</span><h2 id="create-block-title">Add block</h2><p>{blocks.length} of {buildings.data?.allowedBlocks ?? '—'} allowed blocks used.</p></div><button className="modal-close" type="button" aria-label="Close" onClick={() => setModalOpen(false)}>×</button></div>
-      <form onSubmit={createBlock} onInvalidCapture={(event) => formValidationMessage(event, setBlockValidationError)} onChangeCapture={() => setBlockValidationError(null)}><div className="unit-setup-panel"><div className="unit-setup-heading"><div><strong>{blockForm.name || 'New block'}</strong><span>{Number(blockForm.floors) * Number(blockForm.unitsPerFloor) || 0} flats will be created</span></div></div><div className="apartment-form-grid">
-        <label className="admin-field"><span>Block name</span><input autoFocus value={blockForm.name} onChange={(event) => setBlockForm((current) => ({ ...current, name: event.target.value }))} required maxLength={80} pattern="[\p{L}\p{N}][\p{L}\p{N}\p{M} .,'’()&amp;/#-]{0,79}" title="Use letters, numbers, spaces, or common punctuation (., ' ’ ( ) &amp; / # -)." placeholder="e.g. Block A" /></label>
-        <label className="admin-field"><span>Floors</span><input type="number" min="1" max="200" value={blockForm.floors} placeholder="e.g. 12" onChange={(event) => setBlockForm((current) => ({ ...current, floors: event.target.value }))} required /></label>
-        <label className="admin-field"><span>Flats per floor</span><input type="number" min="1" max="100" value={blockForm.unitsPerFloor} placeholder="e.g. 4" onChange={(event) => setBlockForm((current) => ({ ...current, unitsPerFloor: event.target.value }))} required /></label>
-        <label className="admin-field"><span>Flat prefix</span><input value={blockForm.unitPrefix} placeholder="e.g. A" onChange={(event) => setBlockForm((current) => ({ ...current, unitPrefix: event.target.value }))} required maxLength={8} pattern="[A-Za-z0-9]{1,8}" /></label>
-        <div className="admin-field"><span>Flat number format</span><output className="flat-number-format">{hasFlatFormatInputs ? `${blockForm.unitPrefix.trim()}-${floorCode}${firstFlatCode}${Number(blockForm.unitsPerFloor) > 1 ? `, ${blockForm.unitPrefix.trim()}-${floorCode}${secondFlatCode}…` : ''}` : ''}</output></div>
+    {!setupOnly && <>
+      <div className="card card-title-row"><div><h2>Blocks</h2><p>Manage property structure, occupancy, and rates.</p>{buildings.data && <p>{blocks.length} of {buildings.data.allowedBlocks} allowed blocks added</p>}</div><div className="admin-action-row"><button className="secondary" type="button" onClick={buildings.reload}>Refresh</button><button className="primary" type="button" disabled={atBlockLimit || buildings.loading || Boolean(buildings.error)} title={atBlockLimit ? 'All allowed blocks have been added' : undefined} onClick={openBlockFlow}>＋ Add block</button></div></div>
+      {blocks.length > 0 && <div className="building-grid" aria-label="Select a block">{blocks.map((building) => <button type="button" className={`card building-summary building-summary-button${selectedBlockId === building.id ? ' is-selected' : ''}`} aria-pressed={selectedBlockId === building.id} onClick={() => onSelectBlock(building.id)} key={building.id}><span className="building-summary-icon" aria-hidden="true">▤</span><span><span className="eyebrow">{building.apartment} · {building.city}</span><strong className="building-summary-name">{building.name}</strong><span className="building-summary-count">{building.unitCount} {building.unitCount === 1 ? 'Flat' : 'Flats'}</span></span></button>)}</div>}
+      <LoadState loading={buildings.loading} error={buildings.error} onRetry={buildings.reload} />
+    </>}
+    {modalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !creating) closeModal() }}><section className="admin-modal card block-setup-modal" role="dialog" aria-modal="true" aria-labelledby="create-block-title"><div className="admin-modal-header"><div><span className="eyebrow">PROPERTY SETUP</span><h2 id="create-block-title">{stage === 'details' ? 'Add block' : stage === 'edit' ? 'Preview and edit flats' : 'Review flats'}</h2><p>{blocks.length} of {buildings.data?.allowedBlocks ?? '—'} allowed blocks used. {flatLimit !== null && `This block allows up to ${flatLimit} flats.`}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={creating} onClick={closeModal}>×</button></div>
+      {stage === 'details' && <form onSubmit={showFlatPreview} onInvalidCapture={(event) => formValidationMessage(event, setBlockValidationError)} onChangeCapture={() => setBlockValidationError(null)}><div className="unit-setup-panel"><div className="unit-setup-heading"><div><strong>{prefixRequired ? blockForm.name || 'New block' : 'Apartment floors'}</strong><span>{flatLimit === null ? 'Add flats on the next screen' : `Up to ${flatLimit} flats can be added`}</span></div></div><div className="apartment-form-grid">
+        {prefixRequired && <label className="admin-field"><span>Block name</span><input autoFocus value={blockForm.name} onChange={(event) => setBlockForm((current) => ({ ...current, name: event.target.value }))} required maxLength={80} pattern="[\p{L}\p{N}][\p{L}\p{N}\p{M} .,'’()&amp;/#-]{0,79}" title="Use letters, numbers, spaces, or common punctuation (., ' ’ ( ) &amp; / # -)." placeholder="e.g. Block A" /></label>}
+        <label className="admin-field"><span>Number of floors</span><input autoFocus={!prefixRequired} type="number" min="1" max="200" value={blockForm.floors} placeholder="e.g. 12" onChange={(event) => setBlockForm((current) => ({ ...current, floors: event.target.value }))} required /></label>
+        {prefixRequired && <label className="admin-field"><span>Flat prefix (required)</span><input value={blockForm.unitPrefix} placeholder="e.g. A" onChange={(event) => setBlockForm((current) => ({ ...current, unitPrefix: event.target.value }))} required maxLength={8} pattern="[A-Za-z0-9]{1,8}" /></label>}
+        {prefixRequired && <div className="admin-field"><span>Flat number preview</span><output className="flat-number-format">{Number(blockForm.floors) > 0 ? generatedFlatNumber(1, 1) : ''}</output></div>}
       </div></div>
       {blockValidationError && <p className="field-validation-error" role="alert">{blockValidationError}</p>}
-      <label className="rate-option"><input type="checkbox" checked={blockForm.applyRate} onChange={(event) => setBlockForm((current) => ({ ...current, applyRate: event.target.checked }))} /><span>Apply standard maintenance rate</span><input aria-label="Maintenance rate in rupees per square foot" type="number" min="0" max="100000" step="1" value={blockForm.maintenanceRate} disabled={!blockForm.applyRate} onChange={(event) => setBlockForm((current) => ({ ...current, maintenanceRate: event.target.value }))} /><span>₹ / sq. ft.</span></label>
-      <p className="form-hint">Generated flats start vacant. No billing run or resident notification will be started.</p><div className="admin-modal-actions"><button className="secondary" type="button" onClick={() => setModalOpen(false)}>Cancel</button><button className="primary" type="submit">Create {Number(blockForm.floors) * Number(blockForm.unitsPerFloor) || 0} flats</button></div></form>
+      <p className="form-hint">{prefixRequired ? 'The flat prefix is required when your apartment has multiple blocks. You can add, edit, or remove flats on the next screen.' : 'You can add, edit, or remove flats on each floor on the next screen.'}</p><div className="admin-modal-actions"><button className="secondary" type="button" onClick={closeModal}>Cancel</button><button className="primary" type="submit">Next</button></div></form>}
+      {(stage === 'edit' || stage === 'review') && <>
+        <div className="unit-setup-heading"><div><strong>{prefixRequired ? blockForm.name : 'Flat setup'}</strong><span>{draftFlats.length} flats across {blockForm.floors} floors</span></div><span className="unit-setup-badge">{flatLimit === null ? `${draftFlats.length} flats` : `${draftFlats.length} / ${flatLimit} flats`}</span></div>
+        <div className="table-scroll block-preview-scroll"><table className="data-table block-preview-table"><thead><tr><th>Floor</th><th>Flat number</th><th>Actions</th></tr></thead><tbody>{Array.from({ length: Number(blockForm.floors) }, (_, floorIndex) => {
+          const floorNumber = floorIndex + 1
+          const floorFlats = draftFlats.filter((flat) => flat.floorNumber === floorNumber)
+          return <Fragment key={floorNumber}><tr className="block-preview-floor"><th colSpan={3}>Floor {floorNumber}{stage === 'edit' && <button type="button" className="secondary block-add-flat" disabled={editingFlatId !== null || (flatLimit !== null && draftFlats.length >= flatLimit)} onClick={() => addFlat(floorNumber)}>＋ Add flat</button>}</th></tr>{floorFlats.length === 0 ? <tr><td colSpan={3} className="block-empty-floor">No flats on this floor yet.</td></tr> : floorFlats.map((flat) => <tr key={flat.id}><td>{floorNumber}</td><td>{stage === 'edit' && editingFlatId === flat.id ? <div className="block-flat-edit"><input aria-label={`Flat number on floor ${floorNumber}`} autoFocus maxLength={40} value={editingFlatNumber} onChange={(event) => { setEditingFlatNumber(event.target.value); setBlockValidationError(null) }} /><button type="button" className="secondary" onClick={() => saveFlatNumber(flat.id)}>Save</button><button type="button" className="secondary" onClick={() => { setEditingFlatId(null); setBlockValidationError(null) }}>Cancel</button></div> : flat.number}</td><td>{stage === 'edit' && editingFlatId !== flat.id && <div className="block-flat-actions"><button type="button" className="secondary" disabled={editingFlatId !== null} onClick={() => { setEditingFlatId(flat.id); setEditingFlatNumber(flat.number); setBlockValidationError(null) }}>Edit</button><button type="button" className="secondary danger-button" disabled={editingFlatId !== null} onClick={() => deleteFlat(flat.id)}>Delete</button></div>}</td></tr>)}</Fragment>
+        })}</tbody></table></div>
+        {blockValidationError && <p className="field-validation-error" role="alert">{blockValidationError}</p>}
+        {hasFlatAllowanceError && <p className="field-validation-error" role="alert">This block allows at most {flatLimit} flats. Delete {draftFlats.length - (flatLimit ?? 0)} before saving.</p>}
+        {stage === 'edit' ? <div className="admin-modal-actions"><button className="secondary" type="button" disabled={editingFlatId !== null} onClick={() => { setStage('details'); setBlockValidationError(null) }}>Back to details</button><button className="primary" type="button" disabled={hasFlatAllowanceError || draftFlats.length === 0 || editingFlatId !== null} onClick={savePreview}>Save preview</button></div> : <div className="admin-modal-actions"><button className="secondary" type="button" disabled={creating} onClick={() => setStage('edit')}>Edit flats</button><button className="primary" type="button" disabled={creating || hasFlatAllowanceError || draftFlats.length === 0} onClick={() => void createBlock()}>{creating ? 'Creating flats…' : `Create ${draftFlats.length} flats`}</button></div>}
+      </>}
     </section></div>}
   </section>
 }
@@ -569,7 +730,7 @@ function AdminResidents() {
       </form>
     </section></div>}
     {inviteOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) setInviteOpen(false) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="resident-invitation-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT ACCESS</span><h2 id="resident-invitation-title">{sentInvitation ? 'Invitation sent' : isResendingInvitation ? 'Resend invitation' : quickAddResident ? 'Add resident' : 'Invite resident'}</h2><p>{sentInvitation ? 'The resident can accept after verifying their email.' : isResendingInvitation ? 'Resend the invitation to the same block and flat.' : quickAddResident ? 'Add a resident to this vacant flat. The invitation will be sent to their email.' : 'Invite a resident to join the selected block.'}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={submitting} onClick={() => setInviteOpen(false)}>×</button></div>
-      {sentInvitation ? <div className="completion-panel"><strong>{sentInvitation.fullName} has been invited</strong><p>An activation link was sent to {sentInvitation.email} for {sentInvitation.unit}. It expires {formatExpiry(sentInvitation.expiresAt)}.</p><p className="invitation-policy-note">Access is limited to this apartment and block. The resident must use Email OTP with the invited address.</p><div className="admin-modal-actions"><button className="primary" type="button" onClick={() => setInviteOpen(false)}>Done</button></div></div> : <form onSubmit={createInvitation} onInvalidCapture={(event) => formValidationMessage(event, setInviteValidationError)} onChangeCapture={() => setInviteValidationError(null)}><div className="apartment-form-grid"><label className="admin-field"><span>Full name</span><input autoFocus value={inviteForm.fullName} onChange={(event) => setInviteForm((current) => ({ ...current, fullName: event.target.value }))} required minLength={2} maxLength={120} autoComplete="name" placeholder="Resident name" /></label><label className="admin-field"><span>Mobile number <small>(optional)</small></span><input type="tel" value={inviteForm.phone} onChange={(event) => setInviteForm((current) => ({ ...current, phone: event.target.value }))} maxLength={24} autoComplete="tel" placeholder="+91 98765 43210" /></label><label className="admin-field full"><span>Email address</span><input type="email" value={inviteForm.email} onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))} required maxLength={254} autoComplete="email" placeholder="resident@example.com" /></label>{quickAddResident || isResendingInvitation ? <><div className="admin-field"><span>Block</span><strong>{buildings.data?.buildings.find((block) => block.id === inviteForm.blockId)?.name ?? '—'}</strong></div><div className="admin-field"><span>Flat</span><strong>{units.data?.find((flat) => flat.id === inviteForm.unitId)?.number ?? '—'}</strong></div><div className="admin-field"><span>Occupancy type</span><strong>{inviteForm.occupancyType === 'owner' ? 'Owner' : 'Tenant'}</strong></div></> : <><label className="admin-field"><span>Block</span><select value={inviteForm.blockId} onChange={(event) => setInviteForm((current) => ({ ...current, blockId: event.target.value, unitId: '' }))} required disabled={isResendingInvitation || buildings.loading || Boolean(buildings.error)}><option value="">{buildings.loading ? 'Loading blocks…' : buildings.error ? 'Could not load blocks' : buildings.data?.buildings.length ? 'Select a block' : 'No blocks available'}</option>{(buildings.data?.buildings ?? []).map((block) => <option value={block.id} key={block.id}>{block.name}</option>)}</select></label><label className="admin-field"><span>Flat</span><select value={inviteForm.unitId} onChange={(event) => setInviteForm((current) => ({ ...current, unitId: event.target.value }))} required disabled={isResendingInvitation || !inviteForm.blockId || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || availableFlats.length === 0}><option value="">{!inviteForm.blockId ? 'Select a block first' : units.loading || invitations.loading || loading ? 'Loading flats…' : units.error || invitations.error || error ? 'Could not load flats' : availableFlats.length ? 'Select a flat' : 'No available flats (occupied or already invited)'}</option>{availableFlats.map((flat) => <option value={flat.id} key={flat.id}>{flat.number}</option>)}</select></label><label className="admin-field"><span>Resident start date</span><input type="date" value={inviteForm.startDate} min={todayString} disabled={isResendingInvitation} onChange={(event) => setInviteForm((current) => ({ ...current, startDate: event.target.value }))} required /></label><label className="admin-field"><span>Occupancy type</span><select value={inviteForm.occupancyType} onChange={(event) => setInviteForm((current) => ({ ...current, occupancyType: event.target.value as 'owner' | 'tenant' }))}><option value="owner">Owner</option><option value="tenant">Tenant</option></select></label></>}</div>
+      {sentInvitation ? <div className="completion-panel"><strong>{sentInvitation.fullName} has been invited</strong><p>An activation link was sent to {sentInvitation.email} for {sentInvitation.unit}. It expires {formatExpiry(sentInvitation.expiresAt)}.</p><p className="invitation-policy-note">Access is limited to this apartment and block. The resident must use Email OTP with the invited address.</p><div className="admin-modal-actions"><button className="primary" type="button" onClick={() => setInviteOpen(false)}>Done</button></div></div> : <form onSubmit={createInvitation} onInvalidCapture={(event) => formValidationMessage(event, setInviteValidationError)} onChangeCapture={() => setInviteValidationError(null)}><div className="apartment-form-grid"><label className="admin-field invite-block-field"><span>Block</span>{quickAddResident || isResendingInvitation ? <strong>{buildings.data?.buildings.find((block) => block.id === inviteForm.blockId)?.name ?? '—'}</strong> : <select value={inviteForm.blockId} onChange={(event) => setInviteForm((current) => ({ ...current, blockId: event.target.value, unitId: '' }))} required disabled={buildings.loading || Boolean(buildings.error)}><option value="">{buildings.loading ? 'Loading blocks…' : buildings.error ? 'Could not load blocks' : buildings.data?.buildings.length ? 'Select a block' : 'No blocks available'}</option>{(buildings.data?.buildings ?? []).map((block) => <option value={block.id} key={block.id}>{block.name}</option>)}</select>}</label><label className="admin-field invite-flat-field"><span>Flat</span>{quickAddResident || isResendingInvitation ? <strong>{units.data?.find((flat) => flat.id === inviteForm.unitId)?.number ?? '—'}</strong> : <select value={inviteForm.unitId} onChange={(event) => setInviteForm((current) => ({ ...current, unitId: event.target.value }))} required disabled={!inviteForm.blockId || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || availableFlats.length === 0}><option value="">{!inviteForm.blockId ? 'Select a block first' : units.loading || invitations.loading || loading ? 'Loading flats…' : units.error || invitations.error || error ? 'Could not load flats' : availableFlats.length ? 'Select a flat' : 'No available flats (occupied or already invited)'}</option>{availableFlats.map((flat) => <option value={flat.id} key={flat.id}>{flat.number}</option>)}</select>}</label><label className="admin-field"><span>Full name</span><input autoFocus value={inviteForm.fullName} onChange={(event) => setInviteForm((current) => ({ ...current, fullName: event.target.value }))} required minLength={2} maxLength={120} autoComplete="name" placeholder="Resident name" /></label><label className="admin-field"><span>Mobile number <small>(optional)</small></span><input type="tel" value={inviteForm.phone} onChange={(event) => setInviteForm((current) => ({ ...current, phone: event.target.value }))} maxLength={24} autoComplete="tel" placeholder="+91 98765 43210" /></label><label className="admin-field full"><span>Email address</span><input type="email" value={inviteForm.email} onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))} required maxLength={254} autoComplete="email" placeholder="resident@example.com" /></label>{!quickAddResident && !isResendingInvitation && <label className="admin-field"><span>Resident start date</span><input type="date" value={inviteForm.startDate} min={todayString} onChange={(event) => setInviteForm((current) => ({ ...current, startDate: event.target.value }))} required /></label>}<label className="admin-field"><span>Occupancy type</span><select value={inviteForm.occupancyType} onChange={(event) => setInviteForm((current) => ({ ...current, occupancyType: event.target.value as 'owner' | 'tenant' }))}><option value="owner">Owner</option><option value="tenant">Tenant</option></select></label></div>
         {isResendingInvitation && <p className="form-hint">The original block and flat cannot be changed when resending this invitation.</p>}<div className="invitation-policy-note"><strong>Email invitation</strong><span>We’ll send a one-time link that expires in 7 days. The resident must verify this email with Email OTP. SMS and WhatsApp invitations are not enabled.</span></div>
         {inviteError && <p className="form-error" role="alert">{inviteError}</p>}{inviteValidationError && <p className="field-validation-error" role="alert">{inviteValidationError}</p>}<div className="admin-modal-actions"><button className="secondary" type="button" disabled={submitting} onClick={() => setInviteOpen(false)}>Cancel</button><button className="primary" type="submit" disabled={submitting || buildings.loading || Boolean(buildings.error) || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || !inviteForm.blockId || availableFlats.length === 0}>{submitting ? 'Sending…' : isResendingInvitation ? 'Resend invitation' : quickAddResident ? 'Add resident' : 'Send invitation'}</button></div></form>}
     </section></div>}

@@ -58,3 +58,25 @@ You can build a frontend without rebuilding Compose images. From the repo root, 
 
 Replace admin-web with `login-web`, `resident-web`, or `operator-web` for another app. This runs that app’s next build script. The repo-wide pnpm build runs the Turbo build for all packages and apps.
 One distinction: the Compose dev override runs next dev, which compiles as you work. If you’re using that setup, you usually don’t need a separate frontend build. If you want the running container to use a production build, you’ll need to rebuild that app’s Docker image and recreate its container; a local pnpm ... build does not update the image.
+
+
+
+### Delete local data 
+
+From the repository root, this resets the local Docker databases and Redis data, then initializes the stack from scratch:
+
+```sh
+docker compose down --volumes --remove-orphans
+docker compose up --build -d --wait
+docker compose ps
+```
+
+`down --volumes` deletes the Compose volumes, including PostgreSQL’s `postgres-data` and Redis’s `redis-data`. This permanently removes local platform data, tenant databases, and queued Redis data. It does not delete Docker images or Auth0 users.
+
+The fresh PostgreSQL volume initialization creates the platform database and `tenant_template`. If you want to check that they exist:
+
+```sh
+docker compose exec postgres psql -U postgres -d postgres -c '\l'
+```
+
+Run these commands with your local development Compose configuration. Don’t use them for production data.

@@ -7,3 +7,4 @@
 \i /migrations/platform_db/006_unique_organization_names.sql
 \i /migrations/platform_db/007_allowed_blocks.sql
 \i /migrations/platform_db/008_apartment_codes.sql
+\i /migrations/platform_db/009_per_block_flat_allowances.sql

@@ -8,6 +8,15 @@ import { formValidationMessage } from '../../lib/form-validation'
 import { getAppConfig } from '@nivasa/app-platform'
 import { useAppMessages } from '@nivasa/ui'
 
+const formatApartmentLimits = (organization: { allowedBlocks: number | null; allowedFlatsPerBlock: number[] | null }) => {
+  const blockLimit = organization.allowedBlocks ?? '—'
+  const flatLimits = organization.allowedFlatsPerBlock
+  const flats = flatLimits?.length
+    ? flatLimits.map((count, index) => `Block ${index + 1}: ${count}`).join(', ')
+    : 'Per-block flat limits not configured'
+  return `Max blocks: ${blockLimit} · Max flats: ${flats}`
+}
+
 type OperatorNavIconName = 'grid' | 'building' | 'settings' | 'chart' | 'megaphone' | 'wallet' | 'support' | 'audit'
 
 function OperatorNavIcon({ name }: { name: OperatorNavIconName }) {
@@ -67,7 +76,9 @@ function Overview() {
   const { pushMessage } = useAppMessages()
   const [organizationSearch, setOrganizationSearch] = useState('')
   const [organizationStatus, setOrganizationStatus] = useState('all')
+  const [allowedBlocksInput, setAllowedBlocksInput] = useState(1)
   const openOnboarding = () => {
+    setAllowedBlocksInput(1)
     setCreatedOrganization(null)
     setFormError(null)
     setFormValidationError(null)
@@ -88,6 +99,7 @@ function Overview() {
           city: form.get('city'),
           adminEmail: form.get('adminEmail'),
           allowedBlocks: Number(form.get('allowedBlocks')),
+          flatsPerBlock: form.getAll('flatsPerBlock').map(Number),
           plan: form.get('plan'),
         }),
       })
@@ -231,7 +243,7 @@ function Overview() {
                         <div className="organization-details">
                           <strong>{organization.name}</strong>
                           <small>Apartment ID: {organization.apartmentCode}</small>
-                          <small>{organization.city ?? 'City not set'} · {organization.allowedBlocks ?? '—'} allowed blocks · {organization.plan_name}</small>
+                          <small>{organization.city ?? 'City not set'} · {formatApartmentLimits(organization)} · {organization.plan_name}</small>
                           <small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.inviteAcceptedAt ? 'Invitation accepted' : organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small>
                           {organization.provisioningError && <small className="inline-error">{organization.provisioningError}</small>}
                         </div>
@@ -270,7 +282,7 @@ function Overview() {
             <section className="card panel-card">
               <div className="organization-tools"><label className="organization-search"><span aria-hidden="true">⌕</span><input aria-label="Search apartments" placeholder="Search apartments…" value={organizationSearch} onChange={(event) => setOrganizationSearch(event.target.value)} /></label><select aria-label="Filter apartments by status" value={organizationStatus} onChange={(event) => setOrganizationStatus(event.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="onboarding">Onboarding</option><option value="inactive">Inactive</option><option value="deleting">Deleting</option></select></div>
               <div className="card-header"><div><h2>Apartments</h2><span>{data.organizationCount} registered apartments</span></div></div>
-              {data.organizations.length === 0 ? <p>No apartments have been provisioned.</p> : <ul className="stack-list">{data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.apartmentCode} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).map((organization) => <li key={organization.id}><div className="organization-details"><strong>{organization.name}</strong><small>Apartment ID: {organization.apartmentCode}</small><small>{organization.city ?? 'City not set'} · {organization.allowedBlocks ?? '—'} allowed blocks · {organization.plan_name}</small><small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.inviteAcceptedAt ? 'Invitation accepted' : organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small></div><div className="organization-actions"><span className="status-pill">{organization.status}</span>{organization.status === 'inactive' ? <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'reactivate')}>Reactivate</button> : organization.status === 'active' && <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'deactivate')}>Deactivate</button>}<button type="button" className="secondary-button danger-button" disabled={retrying === organization.id || organization.status === 'deleting'} onClick={() => void changeOrganization(organization, 'delete')}>{retrying === organization.id ? 'Working…' : 'Delete permanently'}</button></div></li>)}</ul>}
+              {data.organizations.length === 0 ? <p>No apartments have been provisioned.</p> : <ul className="stack-list">{data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.apartmentCode} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).map((organization) => <li key={organization.id}><div className="organization-details"><strong>{organization.name}</strong><small>Apartment ID: {organization.apartmentCode}</small><small>{organization.city ?? 'City not set'} · {formatApartmentLimits(organization)} · {organization.plan_name}</small><small>Administrator: {organization.adminEmail ?? 'not set'} · {organization.inviteAcceptedAt ? 'Invitation accepted' : organization.invitedAt ? 'Invite sent' : 'Invite pending'}</small></div><div className="organization-actions"><span className="status-pill">{organization.status}</span>{organization.status === 'inactive' ? <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'reactivate')}>Reactivate</button> : organization.status === 'active' && <button type="button" className="secondary-button" disabled={retrying === organization.id} onClick={() => void changeOrganization(organization, 'deactivate')}>Deactivate</button>}<button type="button" className="secondary-button danger-button" disabled={retrying === organization.id || organization.status === 'deleting'} onClick={() => void changeOrganization(organization, 'delete')}>{retrying === organization.id ? 'Working…' : 'Delete permanently'}</button></div></li>)}</ul>}
               {data.organizations.length > 0 && data.organizations.filter((organization) => (organizationStatus === 'all' || organization.status === organizationStatus) && `${organization.name} ${organization.apartmentCode} ${organization.city ?? ''} ${organization.adminEmail ?? ''}`.toLowerCase().includes(organizationSearch.trim().toLowerCase())).length === 0 && <p>No apartments match these filters.</p>}
             </section>
           </>
@@ -313,7 +325,8 @@ function Overview() {
                     <label className="form-field"><span>Apartment Name</span><input name="name" required minLength={2} maxLength={120} autoFocus /><small>Apartment names can be reused. A unique Apartment ID is assigned automatically.</small></label>
                     <label className="form-field"><span>City</span><input name="city" required minLength={2} maxLength={100} /></label>
                     <label className="form-field"><span>Admin email</span><input name="adminEmail" type="email" required maxLength={254} /></label>
-                    <label className="form-field"><span>Number of blocks</span><input name="allowedBlocks" type="number" min={1} max={500} step={1} required /></label>
+                    <label className="form-field"><span>Number of blocks</span><input name="allowedBlocks" type="number" min={1} max={500} step={1} value={allowedBlocksInput} onChange={(event) => setAllowedBlocksInput(Math.max(1, Math.min(500, Number(event.target.value) || 1)))} required /></label>
+                    {Array.from({ length: allowedBlocksInput }, (_, index) => <label className="form-field" key={index}><span>Maximum flats · Block {index + 1}</span><input name="flatsPerBlock" type="number" min={1} max={20000} step={1} required /><small>Maximum number of flats the administrator can add to this block.</small></label>)}
                     <label className="form-field form-field-wide"><span>Plan</span>
                       <select name="plan" defaultValue="growth">
                         <option value="starter">Starter · ₹1,499/month</option>

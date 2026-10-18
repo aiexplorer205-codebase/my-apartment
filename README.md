@@ -62,7 +62,10 @@ docker compose exec -T postgres psql -U postgres -d platform_db \
   -f /migrations/platform_db/003_operator_onboarding.sql \
   -f /migrations/platform_db/004_email_otp_admin_invites.sql \
   -f /migrations/platform_db/005_operator_deletion.sql \
-  -f /migrations/platform_db/006_unique_organization_names.sql
+  -f /migrations/platform_db/006_unique_organization_names.sql \
+  -f /migrations/platform_db/007_allowed_blocks.sql \
+  -f /migrations/platform_db/008_apartment_codes.sql \
+  -f /migrations/platform_db/009_per_block_flat_allowances.sql
 docker compose exec -T postgres psql -U postgres -d tenant_template \
   -v ON_ERROR_STOP=1 -f /migrations/tenant_db/001_init_tenant.sql \
   -f /migrations/tenant_db/002_mvp_product.sql \
@@ -74,8 +77,14 @@ docker compose exec -T postgres psql -U postgres -d tenant_template \
   -f /migrations/tenant_db/008_invoice_rounding.sql \
   -f /migrations/tenant_db/009_billing_unit_exclusions.sql \
   -f /migrations/tenant_db/010_resident_lifecycle.sql \
-  -f /migrations/tenant_db/011_announcements_scheduling.sql
+  -f /migrations/tenant_db/011_announcements_scheduling.sql \
+  -f /migrations/tenant_db/012_apartment_building_flat_limit.sql \
+  -f /migrations/tenant_db/013_announcement_banners.sql
 ```
+
+Apply the tenant migration to each existing `tenant_*` database as well as
+`tenant_template` before deploying code that creates apartment blocks. Freshly
+provisioned tenant databases inherit the updated schema from `tenant_template`.
 
 The template migration only affects tenant databases created afterward. To
 upgrade an existing tenant with the apartment, resident-invitation, billing,
@@ -94,7 +103,9 @@ docker compose exec -T postgres psql -U postgres -d YOUR_TENANT_DATABASE \
   -f /migrations/tenant_db/008_invoice_rounding.sql \
   -f /migrations/tenant_db/009_billing_unit_exclusions.sql \
   -f /migrations/tenant_db/010_resident_lifecycle.sql \
-  -f /migrations/tenant_db/011_announcements_scheduling.sql
+  -f /migrations/tenant_db/011_announcements_scheduling.sql \
+  -f /migrations/tenant_db/012_apartment_building_flat_limit.sql \
+  -f /migrations/tenant_db/013_announcement_banners.sql
 ```
 
 Replace `YOUR_TENANT_DATABASE` with the `database_name` for the organization
