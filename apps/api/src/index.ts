@@ -508,6 +508,10 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/tenant/notices': {
       get: { tags: ['tenant'], summary: 'Resident notices', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped notices' }, '403': { description: 'An active resident profile is required' } } },
     },
+    '/v1/tenant/polls': { get: { tags: ['tenant'], summary: 'List active resident polls and permitted results', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident polls' }, '403': { description: 'An active resident profile is required' } } } },
+    '/v1/tenant/polls/{pollId}/vote': { post: { tags: ['tenant'], summary: 'Submit a resident poll vote', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Vote recorded' }, '409': { description: 'Poll closed or resident already voted' } } } },
+    '/v1/admin/polls': { get: { tags: ['tenant'], summary: 'List polls and results', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Polls and results' } } }, post: { tags: ['tenant'], summary: 'Create a poll', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Poll created' }, '400': { description: 'Invalid poll details' } } } },
+    '/v1/admin/polls/{pollId}/responses': { get: { tags: ['tenant'], summary: 'View a page of named poll responses', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Paginated poll responses' }, '403': { description: 'Administrator permission required' }, '404': { description: 'Poll not found' } } } },
     '/v1/tenant/notices/read-all': {
       post: { tags: ['tenant'], summary: 'Mark published notices read', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Updated read state' }, '403': { description: 'An active resident profile is required' } } },
     },
@@ -770,7 +774,42 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       if (item.category === 'fees') breakdown.feesMinor = amount
       if (item.category === 'round_off') breakdown.roundOffMinor = amount
     }
-    breakdown.totalMinor = minorUnits(invoice.total_minor)
+    const originalPreviousDuesMinor = breakdown.previousDuesMinor
+    // Invoice items are immutable snapshots, so a previous-dues line can be
+    // stale after an older invoice is paid. Recompute the live carry-forward
+    // using the same charge/payment model as the admin billing preview.
+    const livePreviousDuesResult = await pool.query<{ amount_minor: string }>(
+      `WITH prior_invoice_charges AS (
+         SELECT SUM(GREATEST(i.total_minor - COALESCE(carried.amount_minor, 0), 0)) AS charge_minor
+         FROM invoices i
+         LEFT JOIN LATERAL (
+           SELECT SUM(ii.amount_minor) AS amount_minor
+           FROM invoice_items ii
+           WHERE ii.invoice_id = i.id AND ii.category = 'previous_dues'
+         ) carried ON TRUE
+         WHERE i.resident_id = $1 AND i.billing_period < $2::date
+           AND i.status IN ('open', 'partially_paid')
+       ), prior_payments AS (
+         SELECT SUM(p.amount_minor) AS amount_minor
+         FROM invoices i
+         JOIN payments p ON p.invoice_id = i.id
+         WHERE i.resident_id = $1 AND i.billing_period < $2::date
+           AND i.status IN ('open', 'partially_paid')
+           AND p.status IN ('succeeded', 'reconciled', 'confirmed')
+       )
+       SELECT GREATEST(COALESCE(c.charge_minor, 0) - COALESCE(p.amount_minor, 0), 0)::text AS amount_minor
+       FROM prior_invoice_charges c CROSS JOIN prior_payments p`,
+      [resident.id, `${invoice.billing_period}-01`],
+    )
+    const livePreviousDuesMinor = Math.min(
+      originalPreviousDuesMinor,
+      minorUnits(livePreviousDuesResult.rows[0]?.amount_minor ?? '0'),
+    )
+    breakdown.previousDuesMinor = livePreviousDuesMinor
+    breakdown.totalMinor = minorUnits(invoice.total_minor) - originalPreviousDuesMinor + livePreviousDuesMinor
+    if (!Number.isSafeInteger(breakdown.totalMinor) || breakdown.totalMinor < 0) {
+      throw new ApiFault(500, 'data_integrity_error', 'Invoice total is outside the supported amount range')
+    }
     const currentBalance = invoiceBalances.find(({ invoiceId }) => invoiceId === invoice.id)
     currentDueMinor = currentBalance?.remainingDueMinor ?? 0
     pendingAmountMinor = currentBalance?.pendingPaymentMinor ?? 0
@@ -1095,6 +1134,136 @@ const getResidentNotices = async (access: TenantAccess, subject: string) => {
     startsAt: notice.starts_at,
     endsAt: notice.ends_at,
   }))
+}
+
+const pollResults = async (pool: ReturnType<typeof withTenantPool>, pollId: string) => {
+  const result = await pool.query(`SELECT o.id, o.label, o.position, COUNT(b.id)::int AS votes
+    FROM poll_options o LEFT JOIN poll_ballots b ON b.poll_id = o.poll_id AND b.option_id = o.id
+    WHERE o.poll_id = $1 GROUP BY o.id ORDER BY o.position`, [pollId])
+  return result.rows.map((row) => ({ id: row.id, label: row.label, votes: row.votes }))
+}
+
+const getResidentPolls = async (access: TenantAccess, subject: string) => {
+  requireRole(access, 'resident')
+  const pool = withTenantPool(access)
+  const residentResult = await pool.query(`SELECT r.id FROM residents r JOIN units u ON u.id = r.unit_id
+    WHERE r.auth_subject = $1 AND r.status = 'active' AND u.tenant_id = $2 LIMIT 1`, [subject, access.tenantId])
+  const residentId = residentResult.rows[0]?.id
+  if (!residentId) throw new ApiFault(404, 'not_found', 'No active resident profile is associated with this account')
+  const polls = await pool.query(`SELECT p.*, pp.resident_id IS NOT NULL AS has_voted,
+      COALESCE(named_ballot.option_id, anonymous_ballot.option_id) AS my_option_id,
+      (pp.ballot_id IS NOT NULL OR named_ballot.id IS NOT NULL) AS can_change_vote,
+      p.ends_at + make_interval(days => p.results_retention_days) AS results_visible_until
+    FROM polls p LEFT JOIN poll_participation pp ON pp.poll_id = p.id AND pp.resident_id = $1
+    LEFT JOIN poll_ballots named_ballot ON named_ballot.poll_id = p.id AND named_ballot.resident_id = $1
+    LEFT JOIN poll_ballots anonymous_ballot ON anonymous_ballot.id = pp.ballot_id
+    WHERE p.tenant_id = $2 AND (p.ends_at > NOW() OR p.ends_at + make_interval(days => p.results_retention_days) > NOW())
+    ORDER BY p.starts_at DESC LIMIT 50`, [residentId, access.tenantId])
+  return Promise.all(polls.rows.map(async (poll) => {
+    const options = await pool.query('SELECT id, label FROM poll_options WHERE poll_id = $1 ORDER BY position', [poll.id])
+    const live = poll.status === 'published' && new Date(poll.starts_at).getTime() <= Date.now() && new Date(poll.ends_at).getTime() > Date.now()
+    const ended = new Date(poll.ends_at).getTime() <= Date.now() || poll.status === 'archived'
+    const resultsVisible = poll.show_results_live && live || ended && new Date(poll.results_visible_until).getTime() > Date.now()
+    const voters = resultsVisible && !poll.anonymous ? await pool.query(`SELECT r.full_name, u.number AS unit, o.label AS option FROM poll_ballots b JOIN residents r ON r.id = b.resident_id JOIN units u ON u.id = r.unit_id JOIN poll_options o ON o.id = b.option_id WHERE b.poll_id = $1 ORDER BY u.number`, [poll.id]).then((r) => r.rows) : []
+    return { id: poll.id, question: poll.question, startsAt: poll.starts_at, endsAt: poll.ends_at, resultsVisibleUntil: poll.results_visible_until, resultsRetentionDays: poll.results_retention_days, status: poll.status, anonymous: poll.anonymous,
+      showResultsLive: poll.show_results_live, hasVoted: poll.has_voted, myOptionId: poll.my_option_id ?? null,
+      canChangeVote: poll.can_change_vote, isLive: live, options: options.rows,
+      results: resultsVisible ? await pollResults(pool, poll.id) : null, voters }
+  }))
+}
+
+const voteInPoll = async (access: TenantAccess, subject: string, pollId: string, input: unknown) => {
+  requireRole(access, 'resident')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pollId)) throw new ApiFault(404, 'not_found', 'Poll not found')
+  const optionId = input && typeof input === 'object' && typeof (input as Record<string, unknown>).optionId === 'string' ? (input as Record<string, unknown>).optionId as string : ''
+  const pool = withTenantPool(access)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const resident = await client.query(`SELECT r.id FROM residents r JOIN units u ON u.id = r.unit_id WHERE r.auth_subject = $1 AND r.status = 'active' AND u.tenant_id = $2 LIMIT 1`, [subject, access.tenantId])
+    const residentId = resident.rows[0]?.id
+    if (!residentId) throw new ApiFault(403, 'forbidden', 'An active resident profile is required')
+    const poll = await client.query(`SELECT id, anonymous FROM polls WHERE id = $1 AND tenant_id = $2 AND status = 'published' AND starts_at <= NOW() AND ends_at > NOW() FOR UPDATE`, [pollId, access.tenantId])
+    if (!poll.rows[0]) throw new ApiFault(409, 'invalid_request', 'This poll is not currently open')
+    const option = await client.query('SELECT id FROM poll_options WHERE poll_id = $1 AND id = $2', [pollId, optionId])
+    if (!option.rows[0]) throw new ApiFault(400, 'invalid_request', 'Choose an option in this poll')
+    const existing = await client.query('SELECT ballot_id FROM poll_participation WHERE poll_id = $1 AND resident_id = $2 FOR UPDATE', [pollId, residentId])
+    if (existing.rows[0]) {
+      if (poll.rows[0].anonymous) {
+        if (!existing.rows[0].ballot_id) throw new ApiFault(409, 'invalid_request', 'This earlier anonymous ballot cannot be changed')
+        await client.query('UPDATE poll_ballots SET option_id = $1 WHERE id = $2 AND poll_id = $3', [optionId, existing.rows[0].ballot_id, pollId])
+      } else {
+        await client.query('UPDATE poll_ballots SET option_id = $1 WHERE poll_id = $2 AND resident_id = $3', [optionId, pollId, residentId])
+      }
+    } else {
+      await client.query('INSERT INTO poll_participation (poll_id, resident_id) VALUES ($1, $2)', [pollId, residentId])
+      const ballot = await client.query('INSERT INTO poll_ballots (poll_id, option_id, resident_id) VALUES ($1, $2, $3) RETURNING id', [pollId, optionId, poll.rows[0].anonymous ? null : residentId])
+      await client.query('UPDATE poll_participation SET ballot_id = $1 WHERE poll_id = $2 AND resident_id = $3', [ballot.rows[0].id, pollId, residentId])
+    }
+    await client.query('COMMIT')
+    return { submitted: true, updated: existing.rows.length > 0 }
+  } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
+}
+
+const getAdminPolls = async (access: TenantAccess) => {
+  requireRole(access, 'admin')
+  const pool = withTenantPool(access)
+  const polls = await pool.query('SELECT * FROM polls WHERE tenant_id = $1 ORDER BY starts_at DESC LIMIT 100', [access.tenantId])
+  return Promise.all(polls.rows.map(async (poll) => ({ id: poll.id, question: poll.question, startsAt: poll.starts_at, endsAt: poll.ends_at,
+    anonymous: poll.anonymous, showResultsLive: poll.show_results_live, resultsRetentionDays: poll.results_retention_days, status: poll.status,
+    options: await pool.query('SELECT id, label FROM poll_options WHERE poll_id = $1 ORDER BY position', [poll.id]).then((r) => r.rows),
+    results: await pollResults(pool, poll.id),
+  })))
+}
+
+const getAdminPollResponses = async (access: TenantAccess, pollId: string, page: number, optionId: string | null) => {
+  requireRole(access, 'admin')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pollId)) throw new ApiFault(404, 'not_found', 'Poll not found')
+  const pool = withTenantPool(access)
+  const pollResult = await pool.query('SELECT id, anonymous FROM polls WHERE tenant_id = $1 AND id = $2', [access.tenantId, pollId])
+  const poll = pollResult.rows[0]
+  if (!poll) throw new ApiFault(404, 'not_found', 'Poll not found')
+  const pageSize = 20
+  if (poll.anonymous) return { items: [], page, pageSize, total: 0, pageCount: 0 }
+  if (optionId) {
+    const option = await pool.query('SELECT 1 FROM poll_options WHERE poll_id = $1 AND id = $2', [pollId, optionId])
+    if (!option.rows[0]) throw new ApiFault(400, 'invalid_request', 'Poll option not found')
+  }
+  const offset = (page - 1) * pageSize
+  const filter = optionId ? ' AND b.option_id = $2' : ''
+  const filterValues = optionId ? [pollId, optionId] : [pollId]
+  const count = await pool.query(`SELECT COUNT(*)::int AS total FROM poll_ballots b WHERE b.poll_id = $1${filter}`, filterValues)
+  const pageValues = optionId ? [pollId, optionId, pageSize, offset] : [pollId, pageSize, offset]
+  const limitPosition = optionId ? '$3' : '$2'
+  const offsetPosition = optionId ? '$4' : '$3'
+  const items = await pool.query(`SELECT r.full_name, u.number AS unit, o.label AS option
+    FROM poll_ballots b JOIN residents r ON r.id = b.resident_id JOIN units u ON u.id = r.unit_id JOIN poll_options o ON o.id = b.option_id
+    WHERE b.poll_id = $1${filter} ORDER BY u.number, r.full_name, r.id LIMIT ${limitPosition} OFFSET ${offsetPosition}`, pageValues)
+  const total = Number(count.rows[0]?.total ?? 0)
+  return { items: items.rows, page, pageSize, total, pageCount: Math.ceil(total / pageSize) }
+}
+
+const createAdminPoll = async (access: TenantAccess, input: unknown) => {
+  requireRole(access, 'admin')
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault(400, 'invalid_request', 'Poll details are required')
+  const v = input as Record<string, unknown>, question = typeof v.question === 'string' ? v.question.trim() : ''
+  const starts = typeof v.startsAt === 'string' ? new Date(v.startsAt) : new Date(Number.NaN), ends = typeof v.endsAt === 'string' ? new Date(v.endsAt) : new Date(Number.NaN)
+  const options = Array.isArray(v.options) ? v.options.map((x) => typeof x === 'string' ? x.trim() : '') : []
+  if (question.length < 3 || question.length > 500) throw new ApiFault(400, 'invalid_request', 'Question must be between 3 and 500 characters')
+  if (options.length < 2 || options.length > 10 || options.some((x) => !x || x.length > 200) || new Set(options.map((x) => x.toLowerCase())).size !== options.length) throw new ApiFault(400, 'invalid_request', 'Add 2 to 10 unique options, each no longer than 200 characters')
+  if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime()) || ends <= starts) throw new ApiFault(400, 'invalid_request', 'Choose a valid end time after the start time')
+  if (typeof v.anonymous !== 'boolean' || typeof v.showResultsLive !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Choose poll privacy and result visibility settings')
+  if (v.resultsRetentionDays !== 7 && v.resultsRetentionDays !== 30 && v.resultsRetentionDays !== 90) throw new ApiFault(400, 'invalid_request', 'Choose a resident results retention period of 7, 30, or 90 days')
+  const pool = withTenantPool(access), client = await pool.connect()
+  try { await client.query('BEGIN'); const created = await client.query(`INSERT INTO polls (tenant_id, question, starts_at, ends_at, anonymous, show_results_live, results_retention_days, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [access.tenantId, question, starts.toISOString(), ends.toISOString(), v.anonymous, v.showResultsLive, v.resultsRetentionDays, access.subject]); const id = created.rows[0].id; for (let i=0;i<options.length;i++) await client.query('INSERT INTO poll_options (poll_id,label,position) VALUES ($1,$2,$3)', [id,options[i],i]); await client.query('COMMIT'); return { id } }
+  catch (e) { await client.query('ROLLBACK'); throw e } finally { client.release() }
+}
+
+const endAdminPoll = async (access: TenantAccess, pollId: string) => {
+  requireRole(access, 'admin')
+  const result = await withTenantPool(access).query("UPDATE polls SET status = 'archived', ends_at = LEAST(ends_at, NOW()) WHERE tenant_id = $1 AND id = $2 RETURNING id", [access.tenantId, pollId])
+  if (!result.rows[0]) throw new ApiFault(404, 'not_found', 'Poll not found')
+  return { id: result.rows[0].id, status: 'ended' }
 }
 
 const markResidentNoticesRead = async (access: TenantAccess, subject: string) => {
@@ -2149,14 +2318,14 @@ const getBillingResidents = async (db: BillingDatabase, tenantId: string, period
          FROM invoice_items ii
          WHERE ii.invoice_id = i.id AND ii.category = 'previous_dues'
        ) carried ON TRUE
-       WHERE i.billing_period < $2::date AND i.status <> 'void'
+       WHERE i.billing_period < $2::date AND i.status IN ('open', 'partially_paid')
        GROUP BY i.resident_id
      ), prior_payments AS (
        SELECT i.resident_id, SUM(p.amount_minor) AS amount_minor
        FROM invoices i
        JOIN payments p ON p.invoice_id = i.id
        WHERE i.billing_period < $2::date
-         AND i.status <> 'void'
+         AND i.status IN ('open', 'partially_paid')
          AND p.status IN ('succeeded', 'reconciled', 'confirmed')
        GROUP BY i.resident_id
      ), previous_dues AS (
@@ -3404,6 +3573,22 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, await getResidentNotices(access, access.subject), requestId)
         return
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/polls') { const access = await resolveTenantAccess(request, 'resident'); respond(response, 200, await getResidentPolls(access, access.subject), requestId); return }
+      const residentPollVoteMatch = requestUrl.pathname.match(/^\/v1\/tenant\/polls\/([^/]+)\/vote$/)
+      if (request.method === 'POST' && residentPollVoteMatch) { const access = await resolveTenantAccess(request, 'resident'); respond(response, 200, await voteInPoll(access, access.subject, decodeURIComponent(residentPollVoteMatch[1] ?? ''), await readJsonBody(request)), requestId); return }
+      if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/polls') { const access = await resolveTenantAccess(request); respond(response, 200, await getAdminPolls(access), requestId); return }
+      const adminPollResponsesMatch = requestUrl.pathname.match(/^\/v1\/admin\/polls\/([^/]+)\/responses$/)
+      if (request.method === 'GET' && adminPollResponsesMatch) {
+        const access = await resolveTenantAccess(request)
+        const requestedPage = Number.parseInt(requestUrl.searchParams.get('page') ?? '1', 10)
+        const page = Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1
+        const optionId = requestUrl.searchParams.get('optionId') || null
+        respond(response, 200, await getAdminPollResponses(access, decodeURIComponent(adminPollResponsesMatch[1] ?? ''), page, optionId), requestId)
+        return
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/polls') { const access = await resolveTenantAccess(request); respond(response, 201, await createAdminPoll(access, await readJsonBody(request)), requestId); return }
+      const adminPollEndMatch = requestUrl.pathname.match(/^\/v1\/admin\/polls\/([^/]+)\/end$/)
+      if (request.method === 'POST' && adminPollEndMatch) { const access = await resolveTenantAccess(request); respond(response, 200, await endAdminPoll(access, decodeURIComponent(adminPollEndMatch[1] ?? '')), requestId); return }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/tenant/notices/read-all') {
         const access = await resolveTenantAccess(request, 'resident')
         respond(response, 200, await markResidentNoticesRead(access, access.subject), requestId)

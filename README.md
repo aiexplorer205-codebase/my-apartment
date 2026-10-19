@@ -52,67 +52,31 @@ The repo keeps local settings in the ignored `.env` file at the repository
 root. `.env.example` contains placeholders; never commit real credentials or
 use production values. PostgreSQL init scripts apply the platform and
 `tenant_template` migrations only when creating a fresh volume. Existing
-volumes are never reset automatically. For an existing local volume, apply
-forward migrations explicitly:
+volumes are never reset automatically. Use the migration runner to apply
+specific forward migrations to the platform database, a tenant database, or
+every current tenant database plus `tenant_template`:
 
 ```sh
-docker compose exec -T postgres psql -U postgres -d platform_db \
-  -v ON_ERROR_STOP=1 -f /migrations/platform_db/001_init_platform.sql \
-  -f /migrations/platform_db/002_mvp_access.sql \
-  -f /migrations/platform_db/003_operator_onboarding.sql \
-  -f /migrations/platform_db/004_email_otp_admin_invites.sql \
-  -f /migrations/platform_db/005_operator_deletion.sql \
-  -f /migrations/platform_db/006_unique_organization_names.sql \
-  -f /migrations/platform_db/007_allowed_blocks.sql \
-  -f /migrations/platform_db/008_apartment_codes.sql \
-  -f /migrations/platform_db/009_per_block_flat_allowances.sql
-docker compose exec -T postgres psql -U postgres -d tenant_template \
-  -v ON_ERROR_STOP=1 -f /migrations/tenant_db/001_init_tenant.sql \
-  -f /migrations/tenant_db/002_mvp_product.sql \
-  -f /migrations/tenant_db/003_apartments.sql \
-  -f /migrations/tenant_db/004_resident_invitations.sql \
-  -f /migrations/tenant_db/005_billing_runs.sql \
-  -f /migrations/tenant_db/006_billing_templates.sql \
-  -f /migrations/tenant_db/007_manual_payment_confirmation.sql \
-  -f /migrations/tenant_db/008_invoice_rounding.sql \
-  -f /migrations/tenant_db/009_billing_unit_exclusions.sql \
-  -f /migrations/tenant_db/010_resident_lifecycle.sql \
-  -f /migrations/tenant_db/011_announcements_scheduling.sql \
-  -f /migrations/tenant_db/012_apartment_building_flat_limit.sql \
-  -f /migrations/tenant_db/013_announcement_banners.sql
+scripts/run-migrations.sh platform platform_db 009_per_block_flat_allowances.sql
+scripts/run-migrations.sh tenant all-tenants 014_polls.sql
+scripts/run-migrations.sh tenant all-tenants 015_poll_vote_changes.sql
+scripts/run-migrations.sh tenant all-tenants 016_poll_result_retention.sql
+scripts/run-migrations.sh tenant tenant_local 014_polls.sql
 ```
 
-Apply the tenant migration to each existing `tenant_*` database as well as
-`tenant_template` before deploying code that creates apartment blocks. Freshly
-provisioned tenant databases inherit the updated schema from `tenant_template`.
+The runner requires the postgres Compose service to be running and accepts
+migration filenames from `migrations/platform_db` or `migrations/tenant_db`.
+Pass migrations in order; it stops at the first SQL error. `all-tenants`
+applies tenant migrations to `tenant_template` and every database listed in
+`platform_db.tenant_records`, so new tenant databases inherit the schema and
+existing tenants are upgraded too. Apply only migrations that have not yet
+run on each target because the repository does not track migration history.
+For a fresh volume, Compose applies all migrations during database
+initialization; use the runner for existing volumes and subsequent migrations.
 
-The template migration only affects tenant databases created afterward. To
-upgrade an existing tenant with the apartment, resident-invitation, billing,
-resident move-in/move-out, and announcement features, first identify its
-database name in `platform_db`, then apply the migrations to that database:
-
-```sh
-docker compose exec -T postgres psql -U postgres -d platform_db \
-  -c 'SELECT tenant_id, org_name, database_name FROM tenant_records ORDER BY org_name'
-docker compose exec -T postgres psql -U postgres -d YOUR_TENANT_DATABASE \
-  -v ON_ERROR_STOP=1 -f /migrations/tenant_db/003_apartments.sql \
-  -f /migrations/tenant_db/004_resident_invitations.sql \
-  -f /migrations/tenant_db/005_billing_runs.sql \
-  -f /migrations/tenant_db/006_billing_templates.sql \
-  -f /migrations/tenant_db/007_manual_payment_confirmation.sql \
-  -f /migrations/tenant_db/008_invoice_rounding.sql \
-  -f /migrations/tenant_db/009_billing_unit_exclusions.sql \
-  -f /migrations/tenant_db/010_resident_lifecycle.sql \
-  -f /migrations/tenant_db/011_announcements_scheduling.sql \
-  -f /migrations/tenant_db/012_apartment_building_flat_limit.sql \
-  -f /migrations/tenant_db/013_announcement_banners.sql
-```
-
-Replace `YOUR_TENANT_DATABASE` with the `database_name` for the organization
-you selected in the admin app. The migrations are idempotent and preserve
-existing tenant data. Rebuild and restart both apps after changing billing or
-payment workflows with `docker compose up --build -d api admin-web`; rebuilding
-only the web image does not update the API running on port 4101.
+After applying an API migration, rebuild/restart the API with
+`docker compose up --build -d api`; rebuild web services as needed for UI
+changes.
 
 ### Auth0 local setup
 

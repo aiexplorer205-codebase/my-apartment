@@ -12,3 +12,6 @@
 \i /migrations/tenant_db/011_announcements_scheduling.sql
 \i /migrations/tenant_db/012_apartment_building_flat_limit.sql
 \i /migrations/tenant_db/013_announcement_banners.sql
+\i /migrations/tenant_db/014_polls.sql
+\i /migrations/tenant_db/015_poll_vote_changes.sql
+\i /migrations/tenant_db/016_poll_result_retention.sql

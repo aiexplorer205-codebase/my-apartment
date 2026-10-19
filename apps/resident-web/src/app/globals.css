@@ -696,8 +696,11 @@ button.payment-month-card:not(:disabled):hover { border-color: var(--primary); }
   .resident-heading h1 { font-size: 22px; }
 }
 .resident-mobile-home-header,
-.resident-home-mobile,
-.resident-mobile-profile-actions { display: none; }
+.resident-home-mobile { display: none; }
+.resident-profile-account-actions { display: grid; gap: 10px; width: min(100%, 420px); margin: 16px 0 0; }
+.resident-profile-account-actions .tenant-picker-label { display: block; }
+.resident-profile-account-actions .tenant-picker-label select { width: 100%; max-width: none; min-height: 42px; border-color: #e0e1e8; border-radius: 9px; background-color: #fff; color: #454650; font-size: 11px; }
+.resident-profile-account-actions > .secondary { min-height: 42px; }
 @media (max-width: 640px) {
   .resident-shell { min-height: 100dvh; padding: 0 0 calc(75px + env(safe-area-inset-bottom)); background: #f7f7f9; }
   .resident-shell > .resident-sidebar { display: contents; }
@@ -758,10 +761,7 @@ button.payment-month-card:not(:disabled):hover { border-color: var(--primary); }
   .resident-mobile-announcement strong { color: #292a34; font-size: 12px; }
   .resident-mobile-announcement small { display: -webkit-box; overflow: hidden; color: #737583; font-size: 9px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .resident-mobile-empty { padding: 18px; border: 1px solid #e1e2e9; border-radius: 14px; background: #fff; color: #777987; font-size: 11px; }
-  .resident-mobile-profile-actions { display: grid; gap: 10px; margin: 14px 16px 0; }
-  .resident-mobile-profile-actions .tenant-picker-label { display: block; }
-  .resident-mobile-profile-actions .tenant-picker-label select { width: 100%; max-width: none; min-height: 42px; border-color: #e0e1e8; border-radius: 9px; background-color: #fff; color: #454650; font-size: 11px; }
-  .resident-mobile-profile-actions > .secondary { min-height: 42px; }
+  .resident-profile-account-actions { width: auto; margin: 14px 16px 0; }
 }
 @media (max-width: 380px) {
   .resident-home-mobile { padding-right: 15px; padding-left: 15px; }
@@ -1876,4 +1876,113 @@ body:has([role="dialog"][aria-modal="true"]) { overflow: hidden; overscroll-beha
 .resident-announcement-detail-page > p { margin: 0; color: #50515e; font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
 .resident-announcement-banner-tag { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 99px; background: #f0efff; color: #5c50cc; font-size: 10px; font-weight: 700; }
 .resident-announcement-important-label { display: inline-flex; margin-left: 8px; padding: 3px 7px; border-radius: 99px; background: #fff2ce; color: #8a5b00; font-size: 9px; vertical-align: middle; }
+.resident-poll-banner { display: grid; gap: 5px; width: 100%; padding: 14px 16px; text-align: left; border: 1px solid #c8c4ff; border-radius: 12px; background: #f4f2ff; color: #39316f; }
+.resident-poll-banner span, .resident-poll-banner small { font-size: 11px; color: #69619c; }
+.resident-poll-banner strong { font-size: 15px; }
+.resident-poll-card { display: grid; gap: 12px; padding: 20px; border: 1px solid #e4e5ec; border-radius: 14px; background: #fff; }
+.resident-poll-card h2 { margin: 0; }
+.resident-poll-options { display: grid; gap: 10px; }
+.resident-poll-options label { display: flex; gap: 10px; align-items: center; padding: 12px; border: 1px solid #e4e5ec; border-radius: 9px; }
+.resident-poll-options input { accent-color: var(--resident-purple); }
+.resident-poll-results { display: grid; gap: 6px; }
+.resident-poll-results p { display: flex; justify-content: space-between; margin: 0; padding: 8px 0; border-bottom: 1px solid #ececf1; }
+.resident-poll-status { display: inline-flex; margin-left: 8px; padding: 3px 7px; border-radius: 99px; background: #f0efff; color: #5c50cc; font-size: 9px; font-weight: 700; vertical-align: middle; }
+.resident-poll-status.ended { background: #f0f1f4; color: #696b76; }
+.resident-poll-status.scheduled { background: #fff2ce; color: #8a5b00; }
 @media (max-width: 640px) { .resident-announcement-banners { padding: 8px 14px 0; } .resident-announcement-banner { padding: 12px; } }
+
+/* Web layouts keep the resident sidebar fixed and scroll the selected page. */
+@media (min-width: 901px) {
+  .resident-shell {
+    grid-template-columns: 248px minmax(0, 1fr);
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .resident-shell > .resident-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: 248px;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .resident-shell > .content-panel {
+    grid-column: 2;
+    width: auto;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    margin: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+@media (max-width: 900px) {
+  .resident-shell { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
+  .resident-shell > .resident-sidebar { position: static; width: auto; height: auto; min-height: 0; overflow: visible; }
+  .resident-shell > .content-panel { grid-column: auto; width: 100%; height: auto; min-height: 0; margin: 0; overflow: visible; }
+}
+@media (max-width: 640px) {
+  .resident-shell > .resident-sidebar { display: contents; }
+}
+
+html,
+body { max-width: 100%; overflow-x: clip; }
+.resident-shell { min-width: 0; max-width: 100%; overflow-x: clip; }
+.resident-announcement-detail-close { justify-self: end; }
+.resident-poll-voted-label { display: inline-flex; align-items: center; margin-left: 8px; padding: 3px 8px; border-radius: 99px; background: #e8f5ee; color: #27764b; font-size: 10px; font-weight: 700; vertical-align: middle; }
+.resident-poll-edit { justify-self: end; padding: 8px 14px; border: 1px solid #dedfe6; border-radius: 8px; color: #5147c9; font-size: 12px; font-weight: 650; }
+.resident-poll-options.locked label { border-color: #e6e7eb; background: #f4f5f7; color: #858792; }
+.resident-poll-options.locked input { opacity: .5; }
+.resident-poll-options label small { margin-left: auto; color: #626474; font-size: 10px; }
+.resident-poll-results { display: grid; gap: 12px; margin-top: 4px; padding: 16px; border: 1px solid #e7e6f4; border-radius: 12px; background: #fafaff; }
+.resident-poll-results > strong { color: #34344b; font-size: 14px; }
+.resident-poll-result-row { display: grid; gap: 7px; }
+.resident-poll-result-row > div:first-child { display: flex; justify-content: space-between; gap: 12px; color: #555665; font-size: 12px; }
+.resident-poll-result-row > div:first-child strong { color: #36364d; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.resident-poll-result-track { height: 9px; overflow: hidden; border-radius: 99px; background: #e9e8f1; }
+.resident-poll-result-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6a5cf5, #948bff); transition: width .25s ease; }
+.resident-poll-results > small { color: #858694; font-size: 11px; }
+@media (max-width: 640px) {
+  .resident-sidebar-language { display: none; }
+  .resident-mobile-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+  .resident-mobile-header-actions > button,
+  .resident-mobile-header-actions > .nivasa-language-switcher.icon-only {
+    position: relative;
+    display: grid;
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 1px solid var(--resident-line);
+    border-radius: 12px;
+    background: #fff;
+    color: #555765;
+  }
+  .resident-mobile-header-actions > button svg,
+  .resident-mobile-header-actions .nivasa-language-switcher-icon { width: 22px; height: 22px; }
+  .resident-mobile-header-actions .nivasa-language-switcher.icon-only { padding: 0; }
+  .resident-mobile-header-actions .nivasa-language-switcher.icon-only select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: inherit !important;
+    background: transparent !important;
+    color: transparent !important;
+    font-size: 16px !important;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .resident-mobile-header-actions .nivasa-language-switcher.icon-only:focus-within { outline: 2px solid #6357ff; outline-offset: 2px; }
+}

@@ -71,6 +71,7 @@ type ResidentProfile = {
 }
 
 type ResidentNotice = Omit<Notice, 'publishedAt'> & { createdAt: string; channel: string; startsAt: string; endsAt: string | null }
+type ResidentPoll = { id:string; question:string; startsAt:string; endsAt:string; resultsVisibleUntil:string; resultsRetentionDays:number; status:string; anonymous:boolean; showResultsLive:boolean; hasVoted:boolean; myOptionId:string|null; canChangeVote:boolean; isLive:boolean; options:Array<{id:string;label:string}>; results:Array<{id:string;label:string;votes:number}>|null; voters:Array<{full_name:string;unit:string;option:string}> }
 type ActiveTab = 'home' | 'payments' | 'history' | 'notices' | 'profile'
 type HistoryFilter = 'All' | 'Paid' | 'Pending'
 
@@ -154,14 +155,46 @@ function ResidentContent() {
   const [refreshing, setRefreshing] = useState(false)
   const [dismissedAnnouncementIds, setDismissedAnnouncementIds] = useState<string[]>([])
   const [openAnnouncementId, setOpenAnnouncementId] = useState<string | null>(null)
+  const [selectedPollId, setSelectedPollId] = useState<string | null>(null)
+  const [selectedPollOption, setSelectedPollOption] = useState<Record<string,string>>({})
+  const [editingPollId, setEditingPollId] = useState<string | null>(null)
+  const [votingPollId, setVotingPollId] = useState<string | null>(null)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const pullDistanceRef = useRef(0)
   const refreshStartedAtRef = useRef(0)
-  const home = useApiQuery<ResidentHome>('/v1/tenant/home')
+  const home = useApiQuery<ResidentHome>('/v1/tenant/home', { retainDataOnReload: true })
   const profile = useApiQuery<ResidentProfile>('/v1/tenant/profile')
   const notices = useApiQuery<ResidentNotice[]>('/v1/tenant/notices')
+  const polls = useApiQuery<ResidentPoll[]>('/v1/tenant/polls', { retainDataOnReload: true })
   const post = useApiPost()
   const patch = useApiPatch()
+  useEffect(() => {
+    const refreshBilling = () => {
+      if (document.visibilityState === 'visible') home.reload()
+    }
+    window.addEventListener('focus', refreshBilling)
+    document.addEventListener('visibilitychange', refreshBilling)
+    return () => {
+      window.removeEventListener('focus', refreshBilling)
+      document.removeEventListener('visibilitychange', refreshBilling)
+    }
+  }, [home.reload])
+  useEffect(() => {
+    if (activeTab === 'notices') polls.reload()
+  }, [activeTab, polls.reload])
+  useEffect(() => {
+    const refreshPolls = () => {
+      if (document.visibilityState === 'visible') polls.reload()
+    }
+    const timer = window.setInterval(refreshPolls, 30_000)
+    window.addEventListener('focus', refreshPolls)
+    document.addEventListener('visibilitychange', refreshPolls)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshPolls)
+      document.removeEventListener('visibilitychange', refreshPolls)
+    }
+  }, [polls.reload])
   const isTotalSelected = selectedInvoiceId === 'total'
   const selectedInvoice = isTotalSelected ? undefined : home.data?.invoiceBalances.find(({ invoiceId, availableToReportMinor }) => invoiceId === selectedInvoiceId && availableToReportMinor > 0)
     ?? home.data?.invoiceBalances.find(({ availableToReportMinor }) => availableToReportMinor > 0)
@@ -172,6 +205,7 @@ function ResidentContent() {
   const unreadNotificationCount = notices.data?.filter(({ isRead }) => !isRead).length ?? unreadNoticeCount
   const bannerAnnouncements = (notices.data ?? []).filter((item) => item.isBanner && !dismissedAnnouncementIds.includes(item.id))
   const openNotice = notices.data?.find((notice) => notice.id === openAnnouncementId)
+  const bannerPolls = polls.data?.filter((poll) => poll.isLive && !poll.hasVoted) ?? []
   const openInvoiceCount = home.data?.invoiceBalances.filter(({ remainingDueMinor }) => remainingDueMinor > 0).length ?? 0
   const historyPayments = home.data?.recentPayments.filter((payment) => {
     if (historyFilter === 'All') return true
@@ -345,7 +379,7 @@ function ResidentContent() {
     <main className="dashboard-shell resident-shell" data-active-tab={activeTab} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={finishPull} onTouchCancel={cancelPull}>
       <aside className="sidebar resident-sidebar">
         <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></div>
-        <div style={{ padding: '0 12px 8px 12px' }}>
+        <div className="resident-sidebar-language" style={{ padding: '0 12px 8px 12px' }}>
           <LanguageSwitcher />
         </div>
         <div className="resident-workspace">
@@ -366,16 +400,19 @@ function ResidentContent() {
             )
           })}
         </nav>
-        <button className="resident-signout" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>{t('common:actions.signOut', 'Sign out')}</button>
       </aside>
       <section className="content-panel">
         <div className={`resident-pull-indicator${refreshing ? ' refreshing' : ''}`} style={{ height: refreshing ? 46 : pullDistance }} role="status" aria-live="polite" aria-hidden={!refreshing && pullDistance === 0}>
           {(refreshing || pullDistance > 0) && <><span className="resident-pull-spinner" />{refreshing ? t('common:messages.refreshing', 'Refreshing…') : pullDistance >= 58 ? t('common:messages.releaseToRefresh', 'Release to refresh') : t('common:messages.pullToRefresh', 'Pull to refresh')}</>}
         </div>
         {bannerAnnouncements.length > 0 && <aside className="resident-announcement-banners" aria-label="Banner announcements">{bannerAnnouncements.map((announcement) => <div className="resident-announcement-banner" key={announcement.id}><button type="button" className="resident-announcement-banner-copy" onClick={() => { setActiveTab('notices'); setOpenAnnouncementId(announcement.id); void openAnnouncement(announcement.id) }}><span className="resident-announcement-banner-label">{announcement.isImportant ? 'Important announcement' : 'Announcement'}</span><strong>{announcement.isImportant && !/^important:\s*/i.test(announcement.title) ? `IMPORTANT: ${announcement.title}` : announcement.title}</strong><span>{announcement.body}</span></button><button className="resident-announcement-banner-close" type="button" aria-label="Dismiss announcement" onClick={() => dismissAnnouncement(announcement.id)}>×</button></div>)}</aside>}
+        {bannerPolls.length > 0 && <aside className="resident-announcement-banners" aria-label="Open polls">{bannerPolls.map((poll)=><button className="resident-poll-banner" key={poll.id} type="button" onClick={()=>{setActiveTab('notices');setOpenAnnouncementId(null);setSelectedPollId(poll.id)}}><span>Community poll · Ends {new Date(poll.endsAt).toLocaleDateString('en-IN')}</span><strong>{poll.question}</strong><small>Tap to cast your vote →</small></button>)}</aside>}
         {activeTab === 'home' && home.data && <header className="resident-mobile-home-header">
           <div><h1>{greeting}, {firstName}</h1><p>{home.data.brand.name} · {home.data.profile.unit.split('·').at(-1)?.trim() ?? home.data.profile.unit}</p><small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small></div>
-          <button type="button" aria-label={`Announcements${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
+          <div className="resident-mobile-header-actions">
+            <LanguageSwitcher className="resident-mobile-language-switcher" iconOnly />
+            <button type="button" aria-label={`Announcements${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
+          </div>
         </header>}
         {activeTab === 'history' && <header className="resident-mobile-history-header">
           <div><h1>Payment history</h1><p>Invoices and receipts</p></div>
@@ -601,27 +638,74 @@ function ResidentContent() {
 
         {activeTab === 'notices' && (
           <section className="resident-notifications-page">
-            <div className="resident-notifications-toolbar">
-              <span className="resident-notification-new-count">{unreadNotificationCount > 0 && <i />}{unreadNotificationCount} new</span>
-              <button type="button" onClick={() => void markAllRead()} disabled={notices.loading || notices.error !== null || unreadNotificationCount === 0}>Mark all as read</button>
-            </div>
-            <LoadState loading={notices.loading} error={notices.error} onRetry={notices.reload} />
-            {openNotice ? <article className="resident-announcement-detail-page">
-                <button type="button" className="resident-announcement-detail-close" onClick={() => setOpenAnnouncementId(null)}>Close announcement</button>
+            {selectedPollId && polls.data?.find((poll) => poll.id === selectedPollId) ? (() => {
+              const poll = polls.data!.find((item) => item.id === selectedPollId)!
+              const chosen = selectedPollOption[poll.id] ?? poll.myOptionId ?? ''
+              const status = poll.status === 'archived' || new Date(poll.endsAt) <= new Date() ? 'Ended' : new Date(poll.startsAt) > new Date() ? 'Scheduled' : 'Active'
+              const editing = editingPollId === poll.id && status === 'Active'
+              const canEditVote = status === 'Active' && poll.isLive && poll.hasVoted && poll.canChangeVote
+              const totalVotes = poll.results?.reduce((total, option) => total + option.votes, 0) ?? 0
+              return <article className="resident-poll-card">
+                <button type="button" className="resident-announcement-detail-close" onClick={() => { setSelectedPollId(null); setEditingPollId(null) }}>Close</button>
+                <span className="eyebrow">{poll.anonymous ? 'ANONYMOUS POLL' : 'COMMUNITY POLL'} · {status.toUpperCase()}</span>
+                <h2>{poll.question}</h2>
+                <p>{status === 'Active' ? 'Ends' : status === 'Scheduled' ? 'Starts' : 'Ended'} {new Date(status === 'Scheduled' ? poll.startsAt : poll.endsAt).toLocaleString('en-IN')}</p>
+                {poll.hasVoted && <span className="resident-poll-voted-label">Voted</span>}
+                {canEditVote && !editing && <button type="button" className="secondary resident-poll-edit" onClick={() => { setSelectedPollOption({ ...selectedPollOption, [poll.id]: poll.myOptionId ?? '' }); setEditingPollId(poll.id) }}>Edit vote</button>}
+                {status === 'Active' && poll.isLive ? <div className={`resident-poll-options${poll.hasVoted && !editing ? ' locked' : ''}`}>
+                  {poll.options.map((option) => <label className={poll.hasVoted && !editing ? 'locked' : ''} key={option.id}>
+                    <input type="radio" name={`poll-${poll.id}`} checked={chosen === option.id} disabled={poll.hasVoted && !editing} onChange={() => setSelectedPollOption({ ...selectedPollOption, [poll.id]: option.id })} />
+                    {option.label}{poll.hasVoted && option.id === poll.myOptionId && <small>Your vote</small>}
+                  </label>)}
+                  {(!poll.hasVoted || editing) && <button type="button" className="primary" disabled={!chosen || chosen === poll.myOptionId || votingPollId === poll.id} onClick={async () => {
+                    setVotingPollId(poll.id)
+                    try {
+                      await post(`/v1/tenant/polls/${encodeURIComponent(poll.id)}/vote`, { optionId: chosen })
+                      setEditingPollId(null)
+                      await polls.reload()
+                    } catch (error) {
+                      pushMessage(error instanceof Error ? error.message : 'Could not save vote.', 'error')
+                    } finally {
+                      setVotingPollId(null)
+                    }
+                  }}>{votingPollId === poll.id ? 'Saving…' : poll.hasVoted ? 'Save vote' : 'Submit vote'}</button>}
+                </div> : poll.hasVoted ? <p role="status">Your vote has been recorded{poll.canChangeVote ? '.' : '; this vote can’t be changed.'}</p> : null}
+                {poll.results && <section className="resident-poll-results" aria-label="Poll results">
+                  <strong>Results · {totalVotes} {totalVotes === 1 ? 'vote' : 'votes'}</strong>
+                  {poll.results.map((option) => {
+                    const percentage = totalVotes > 0 ? Math.round(option.votes / totalVotes * 100) : 0
+                    return <div className="resident-poll-result-row" key={option.id}>
+                      <div><span>{option.label}</span><strong>{option.votes} · {percentage}%</strong></div>
+                      <div className="resident-poll-result-track" role="progressbar" aria-label={`${option.label}: ${percentage}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}><span style={{ width: `${percentage}%` }} /></div>
+                    </div>
+                  })}
+                  <small>Results available until {new Date(poll.resultsVisibleUntil).toLocaleDateString('en-IN')}</small>
+                </section>}
+                {poll.voters.length > 0 && <details><summary>Who selected each option</summary>{poll.voters.map((voter, index) => <p key={index}>{voter.full_name} · {voter.unit}: {voter.option}</p>)}</details>}
+              </article>
+            })() : openNotice ? <article className="resident-announcement-detail-page">
+                <button type="button" className="resident-announcement-detail-close" onClick={() => setOpenAnnouncementId(null)}>Close</button>
                 <div className="resident-announcement-detail-tags">{openNotice.isImportant && <span className="resident-announcement-important-label">Important</span>}{openNotice.isBanner && <span className="resident-announcement-banner-tag">Banner announcement</span>}</div>
                 <h2>{openNotice.isImportant && !/^important:\s*/i.test(openNotice.title) ? `IMPORTANT: ${openNotice.title}` : openNotice.title}</h2>
                 <time dateTime={openNotice.createdAt}>{formatRelativeTime(openNotice.createdAt)}</time>
                 <p>{openNotice.body}</p>
               </article> : <>
-              {!notices.loading && !notices.error && notices.data?.length === 0 && <div className="resident-notification-empty">There are no active announcements right now.</div>}
+              <div className="resident-notifications-toolbar">
+                <span className="resident-notification-new-count">{unreadNotificationCount > 0 && <i />}{unreadNotificationCount} new</span>
+                <button type="button" onClick={() => void markAllRead()} disabled={notices.loading || notices.error !== null || unreadNotificationCount === 0}>Mark all as read</button>
+              </div>
+              <LoadState loading={notices.loading} error={notices.error} onRetry={notices.reload} />
+              {!notices.loading && !notices.error && notices.data?.length === 0 && (polls.data?.length??0) === 0 && <div className="resident-notification-empty">There are no active announcements or polls right now.</div>}
+              <LoadState loading={polls.loading} error={polls.error} onRetry={polls.reload} />
               <div className="resident-notification-list">
+                {polls.data?.map((poll) => { const status=poll.status==='archived'||new Date(poll.endsAt)<=new Date()?'Ended':new Date(poll.startsAt)>new Date()?'Scheduled':'Active';return <article className="resident-notification-item unread community" key={poll.id}><span className="resident-notification-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18M7 14l4-4 4 4 6-7"/></svg></span><button type="button" className="resident-notification-copy resident-notification-open" onClick={()=>{setOpenAnnouncementId(null);setSelectedPollId(poll.id)}}><strong>{poll.question}<span className={`resident-poll-status ${status.toLowerCase()}`}>{status}</span>{poll.hasVoted&&<span className="resident-poll-voted-label">Voted</span>}</strong><small>{poll.anonymous?'Anonymous poll':'Open poll'} · {poll.hasVoted?'You voted':'Your vote is pending'} · {status==='Ended'?'Ended':'Ends'} {new Date(poll.endsAt).toLocaleString('en-IN')}{poll.results?` · ${poll.results.reduce((total,option)=>total+option.votes,0)} votes`:' · Results hidden'}</small></button></article>})}
                 {notices.data?.map((notice) => {
                   const category = /payment|paid|receipt|confirm/i.test(`${notice.title} ${notice.body}`) ? 'payment' : /bill|invoice|due/i.test(`${notice.title} ${notice.body}`) ? 'billing' : 'community'
                   return <article className={`resident-notification-item ${notice.isRead ? 'read' : 'unread'} ${category}`} key={notice.id}>
                     <span className="resident-notification-icon" aria-hidden="true">
                       {category === 'payment' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 4 4L19 6" /></svg> : category === 'billing' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 18-5-5 17-3-7-7-5Z" /><path d="m13 16 5-6" /></svg>}
                     </span>
-                    <button type="button" className="resident-notification-copy resident-notification-open" onClick={() => { setOpenAnnouncementId(notice.id); void openAnnouncement(notice.id) }}>
+                    <button type="button" className="resident-notification-copy resident-notification-open" onClick={() => { setSelectedPollId(null); setOpenAnnouncementId(notice.id); void openAnnouncement(notice.id) }}>
                       <strong>{notice.isImportant && !/^important:\s*/i.test(notice.title) ? `IMPORTANT: ${notice.title}` : notice.title}{notice.isImportant && <span className="resident-announcement-important-label">Important</span>}</strong>
                       <small>{formatRelativeTime(notice.createdAt)} · {notice.isRead ? 'Read' : 'Unread'}{notice.isBanner ? ' · Banner' : ''}</small>
                     </button>
@@ -666,7 +750,7 @@ function ResidentContent() {
                 <div className="resident-profile-privacy-note"><ProfileOptionIcon name="shield" /><span>Your data is visible only to {profile.data?.organizationName ?? home.data.brand.name} administrators.</span></div>
               </>}
             </section>
-            <div className="resident-mobile-profile-actions"><TenantWorkspacePicker /><button type="button" className="secondary" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>Sign out</button></div>
+            <div className="resident-profile-account-actions"><TenantWorkspacePicker /><button type="button" className="secondary" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>{t('common:actions.signOut', 'Sign out')}</button></div>
           </>
         )}
       </section>

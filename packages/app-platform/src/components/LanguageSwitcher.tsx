@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useId } from 'react'
 import { useLocale } from '../i18n/client'
 import { getLocales } from '../locales'
 import type { SupportedLocale } from '../types'
@@ -8,22 +8,26 @@ import type { SupportedLocale } from '../types'
 export interface LanguageSwitcherProps {
   className?: string
   showNativeName?: boolean
+  iconOnly?: boolean
 }
 
 export function LanguageSwitcher({
   className = '',
   showNativeName = true,
+  iconOnly = false,
 }: LanguageSwitcherProps) {
   const { locale, setLocale } = useLocale()
   const locales = getLocales()
+  const selectId = `nivasa-locale-select-${useId().replace(/:/g, '')}`
 
   return (
-    <div className={`nivasa-language-switcher ${className}`.trim()}>
-      <label htmlFor="nivasa-locale-select" className="sr-only" style={{ display: 'none' }}>
+    <div className={`nivasa-language-switcher ${iconOnly ? 'icon-only' : ''} ${className}`.trim()}>
+      {iconOnly && <svg className="nivasa-language-switcher-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18m0-18a14 14 0 0 0 0 18"/></svg>}
+      <label htmlFor={selectId} className="sr-only" style={{ display: 'none' }}>
         Select Language
       </label>
       <select
-        id="nivasa-locale-select"
+        id={selectId}
         value={locale}
         onChange={(e) => setLocale(e.target.value as SupportedLocale)}
         aria-label="Language selection"

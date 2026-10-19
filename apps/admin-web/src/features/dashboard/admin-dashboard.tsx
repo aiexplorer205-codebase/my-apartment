@@ -45,6 +45,7 @@ const adminNavigation = [
   { label: 'Collections', navKey: 'collections', icon: 'wallet' },
   { label: 'Overdues', navKey: 'overdues', icon: 'alert' },
   { label: 'Announcements', navKey: 'announcements', icon: 'megaphone' },
+  { label: 'Polls', navKey: 'polls', icon: 'chart' },
   { label: 'Reports', navKey: 'reports', icon: 'chart' },
   { label: 'Settings', navKey: 'settings', icon: 'settings' },
 ] as const
@@ -67,7 +68,7 @@ function AdminNavIcon({ name }: { name: AdminIconName }) {
 }
 
 function AdminContent() {
-  type Section = 'Overview' | 'Flats & Residents' | 'Announcements' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
+  type Section = 'Overview' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
   const [section, setSection] = useState<Section>('Overview')
   const [firstBlockFlowOpen, setFirstBlockFlowOpen] = useState(false)
   const { data, loading, error, reload } = useApiQuery<AdminOverview>('/v1/admin/overview')
@@ -98,7 +99,7 @@ function AdminContent() {
         </div>}
         {hasBlocks && <nav className="nav-list admin-nav" aria-label="Administrator navigation">
           {adminNavigation.map(({ label, navKey, icon }) => {
-            const translatedLabel = navKey === 'flatsResidents' || navKey === 'announcements' ? label : t(`common:navigation.${navKey}`, label)
+            const translatedLabel = navKey === 'flatsResidents' || navKey === 'announcements' || navKey === 'polls' ? label : t(`common:navigation.${navKey}`, label)
             return (
               <button key={label} className={`nav-item${section === label ? ' active' : ''}`} type="button" aria-label={translatedLabel} title={translatedLabel} aria-current={section === label ? 'page' : undefined} onClick={() => setSection(label)}>
                 <AdminNavIcon name={icon} />
@@ -118,6 +119,7 @@ function AdminContent() {
         <header className="topbar">
           <div><h1 className="admin-navbar-section">{hasBlocks ? ['flatsResidents', 'announcements'].includes(adminNavigation.find((n) => n.label === section)?.navKey ?? '') ? section : adminNavigation.find((n) => n.label === section) ? t(`common:navigation.${adminNavigation.find((n) => n.label === section)!.navKey}`, section) : section : 'Apartment setup'}</h1>{data?.apartmentCode && <small className="admin-apartment-code">Apartment ID: {data.apartmentCode}</small>}</div>
         </header>
+        <div className="admin-content-body">
         {blockInventory.loading && <LoadState loading error={null} onRetry={blockInventory.reload} />}
         {blockInventory.error && <LoadState loading={false} error={blockInventory.error} onRetry={blockInventory.reload} />}
         {needsInitialBlock && !firstBlockFlowOpen && <section className="card empty-state"><h2>Set up your apartment</h2><p>Add the first block to unlock the rest of the admin workspace.</p><button className="primary" type="button" onClick={() => setFirstBlockFlowOpen(true)}>＋ Add block</button></section>}
@@ -169,11 +171,13 @@ function AdminContent() {
           )}
         </> : section === 'Flats & Residents' ? <AdminResidents />
           : section === 'Announcements' ? <AdminAnnouncements />
+          : section === 'Polls' ? <AdminPolls />
           : section === 'Billing' ? <AdminBilling />
             : section === 'Collections' ? <AdminCollections />
               : section === 'Overdues' ? <AdminOverdue />
                   : section === 'Reports' ? <AdminReports /> : <AdminSettings />}
         </>}
+        </div>
       </section>
     </main>
   )
@@ -196,6 +200,9 @@ function AdminAnnouncements() {
   const [saving, setSaving] = useState(false)
   const [endingAnnouncementId, setEndingAnnouncementId] = useState<string | null>(null)
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<string | null>(null)
+  const [creatingAnnouncement, setCreatingAnnouncement] = useState(false)
+  const selectedAnnouncement = data?.find((announcement) => announcement.id === selectedAnnouncementId)
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setValidationError(null)
@@ -205,6 +212,7 @@ function AdminAnnouncements() {
       pushMessage('Announcement published.', 'success')
       const now = new Date()
       setTitle(''); setBody(''); setStartsAt(localDateTimeInput(now)); setEndsAt(localDateTimeInput(new Date(now.getTime() + 86_400_000))); setIsImportant(false); setIsBanner(false)
+      setCreatingAnnouncement(false)
       reload()
     } catch (cause) {
       pushMessage(cause instanceof Error ? cause.message : 'Could not publish this announcement.', 'error')
@@ -224,8 +232,23 @@ function AdminAnnouncements() {
     }
   }
   const now = Date.now()
-  return <section className="section-stack admin-announcements">
-    <div className="card card-title-row"><div><h2>Announcements</h2><p>Share updates with residents. Important announcements are labeled clearly; banner announcements appear at the top of the resident app.</p></div><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button></div>
+  if (selectedAnnouncement) {
+    const start = new Date(selectedAnnouncement.startsAt).getTime()
+    const end = selectedAnnouncement.endsAt ? new Date(selectedAnnouncement.endsAt).getTime() : null
+    const state = selectedAnnouncement.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live'
+    return <section className="section-stack admin-announcements">
+      <div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => setSelectedAnnouncementId(null)}>← Back to announcements</button><span>Announcement details</span></div>
+      <article className="card admin-full-detail">
+        <div className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{selectedAnnouncement.isImportant && <span className="status-pill warning">Important</span>}{selectedAnnouncement.isBanner && <span className="status-pill">Banner</span>}</div>
+        <h2>{selectedAnnouncement.isImportant && !/^important:\s*/i.test(selectedAnnouncement.title) ? `IMPORTANT: ${selectedAnnouncement.title}` : selectedAnnouncement.title}</h2>
+        <div className="admin-detail-meta"><span>Starts <strong>{new Date(selectedAnnouncement.startsAt).toLocaleString('en-IN')}</strong></span><span>{selectedAnnouncement.endsAt ? <>Ends <strong>{new Date(selectedAnnouncement.endsAt).toLocaleString('en-IN')}</strong></> : 'No end time'}</span><span>Published <strong>{new Date(selectedAnnouncement.publishedAt).toLocaleString('en-IN')}</strong></span></div>
+        <div className="admin-full-detail-body">{selectedAnnouncement.body}</div>
+        {state !== 'Ended' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(selectedAnnouncement.id)}>{endingAnnouncementId === selectedAnnouncement.id ? 'Ending…' : 'Mark ended'}</button></div>}
+      </article>
+    </section>
+  }
+  if (creatingAnnouncement) return <section className="section-stack admin-announcements">
+    <div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => { setValidationError(null); setCreatingAnnouncement(false) }}>← Back to announcements</button><span>Create announcement</span></div>
     <form className="card apartment-form-grid" onSubmit={(event) => void submit(event)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}>
       <label className="admin-field full"><span>Title</span><input required minLength={3} maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Water supply maintenance" /></label>
       <label className="admin-field full"><span>Message</span><textarea required maxLength={5000} rows={5} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write the announcement for residents" /></label>
@@ -236,15 +259,137 @@ function AdminAnnouncements() {
       {validationError && <p className="field-validation-error full" role="alert">{validationError}</p>}
       <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving}>{saving ? 'Publishing…' : 'Publish announcement'}</button></div>
     </form>
+  </section>
+  return <section className="section-stack admin-announcements">
+    <div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" onClick={() => { setValidationError(null); setCreatingAnnouncement(true) }}>＋ Create announcement</button></div></div>
     <div className="card"><div className="admin-card-heading"><div><h2>All announcements</h2><p>Scheduled and past announcements stay here for reference.</p></div></div><LoadState loading={loading} error={error} onRetry={reload} />
       {!loading && !error && data?.length === 0 && <p>No announcements yet.</p>}
       <div className="admin-announcement-list">{data?.map((item) => {
         const start = new Date(item.startsAt).getTime()
         const end = item.endsAt ? new Date(item.endsAt).getTime() : null
         const state = item.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live'
-        return <article className="admin-announcement-item" key={item.id}><div><div className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{item.isImportant && <span className="status-pill warning">Important</span>}{item.isBanner && <span className="status-pill">Banner</span>}</div><h3>{item.isImportant && !/^important:\s*/i.test(item.title) ? `IMPORTANT: ${item.title}` : item.title}</h3><p>{item.body}</p><small>{new Date(item.startsAt).toLocaleString('en-IN')}{item.endsAt ? ` – ${new Date(item.endsAt).toLocaleString('en-IN')}` : ' · No end time'}</small>{state !== 'Ended' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(item.id)}>{endingAnnouncementId === item.id ? 'Ending…' : 'Mark ended'}</button></div>}</div></article>
+        return <article className="admin-announcement-item" key={item.id}><div><button type="button" className="admin-announcement-open" onClick={() => setSelectedAnnouncementId(item.id)}><span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{item.isImportant && <span className="status-pill warning">Important</span>}{item.isBanner && <span className="status-pill">Banner</span>}</span><h3>{item.isImportant && !/^important:\s*/i.test(item.title) ? `IMPORTANT: ${item.title}` : item.title}</h3><p>{item.body}</p><small>{new Date(item.startsAt).toLocaleString('en-IN')}{item.endsAt ? ` – ${new Date(item.endsAt).toLocaleString('en-IN')}` : ' · No end time'} · Click to view details</small></button>{state !== 'Ended' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(item.id)}>{endingAnnouncementId === item.id ? 'Ending…' : 'Mark ended'}</button></div>}</div></article>
       })}</div>
     </div>
+  </section>
+}
+
+type AdminPoll = { id: string; question: string; startsAt: string; endsAt: string; anonymous: boolean; showResultsLive: boolean; resultsRetentionDays: number; status: string; options: Array<{id:string;label:string}>; results: Array<{id:string;label:string;votes:number}> }
+function AdminPolls() {
+  const { data, loading, error, reload } = useApiQuery<AdminPoll[]>('/v1/admin/polls')
+  const post = useApiPost(); const { pushMessage } = useAppMessages()
+  const [selectedPollId, setSelectedPollId] = useState<string | null>(null)
+  const [creatingPoll, setCreatingPoll] = useState(false)
+  const selectedPoll = data?.find((poll) => poll.id === selectedPollId)
+  const [question,setQuestion] = useState(''); const [options,setOptions] = useState(['',''])
+  const [startsAt,setStartsAt] = useState(() => localDateTimeInput(new Date()))
+  const [endsAt,setEndsAt] = useState(() => localDateTimeInput(new Date(Date.now()+7*86_400_000)))
+  const [anonymous,setAnonymous] = useState(true); const [showResultsLive,setShowResultsLive] = useState(false); const [resultsRetentionDays,setResultsRetentionDays] = useState(30); const [saving,setSaving] = useState(false)
+  const [validationError, setValidationError] = useState<string | null>(null)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setValidationError(null)
+    const form = event.currentTarget
+    const normalizedOptions = options.map((option) => option.trim())
+    // Compare option labels case-insensitively, matching the API's uniqueness rule.
+    const optionKeys = normalizedOptions.map((option) => option.toLocaleLowerCase())
+    const firstDuplicateIndex = optionKeys.findIndex((option, index) => option && optionKeys.indexOf(option) !== index)
+    if (firstDuplicateIndex !== -1) {
+      setValidationError(`Option ${firstDuplicateIndex + 1} duplicates another option. Enter a unique option.`)
+      form.querySelectorAll<HTMLInputElement>('input[data-poll-option]')[firstDuplicateIndex]?.focus()
+      return
+    }
+    if (new Date(endsAt).getTime() <= new Date(startsAt).getTime()) {
+      setValidationError('End time must be after the start time.')
+      form.querySelector<HTMLInputElement>('input[name="poll-ends-at"]')?.focus()
+      return
+    }
+    setSaving(true)
+    try {
+      await post('/v1/admin/polls', { question, options: normalizedOptions, startsAt: new Date(startsAt).toISOString(), endsAt: new Date(endsAt).toISOString(), anonymous, showResultsLive, resultsRetentionDays })
+      setQuestion(''); setOptions(['', '']); setValidationError(null)
+      setCreatingPoll(false)
+      pushMessage('Poll created.', 'success')
+      reload()
+    } catch (cause) {
+      setValidationError(cause instanceof Error ? cause.message : 'Could not create poll.')
+    } finally { setSaving(false) }
+  }
+  const end = async (id:string) => { try { await post(`/v1/admin/polls/${encodeURIComponent(id)}/end`,{});pushMessage('Poll ended.','success');reload() } catch(e) { pushMessage(e instanceof Error?e.message:'Could not end poll.','error') } }
+  const createForm = <form className="card apartment-form-grid" onSubmit={(e)=>void submit(e)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}><label className="admin-field full"><span>Question</span><input required minLength={3} maxLength={500} value={question} onChange={e=>setQuestion(e.target.value)} placeholder="What should we improve next?"/></label>
+      {options.map((value,i)=><label className="admin-field full" key={i}><span>Option {i+1}</span><input data-poll-option required maxLength={200} value={value} onChange={e=>setOptions(options.map((x,j)=>j===i?e.target.value:x))}/></label>)}
+      {options.length<10&&<button className="secondary" type="button" onClick={()=>setOptions([...options,''])}>＋ Add option</button>}{options.length>2&&<button className="secondary" type="button" onClick={()=>setOptions(options.slice(0,-1))}>Remove last option</button>}
+      <div className="admin-poll-date-row full"><label className="admin-field"><span>Starts</span><input type="datetime-local" name="poll-starts-at" required value={startsAt} onChange={e=>setStartsAt(e.target.value)}/></label><label className="admin-field"><span>Ends</span><input type="datetime-local" name="poll-ends-at" required min={startsAt} value={endsAt} onChange={e=>setEndsAt(e.target.value)}/></label></div>
+      <label className="admin-announcement-important"><input type="checkbox" checked={anonymous} onChange={e=>setAnonymous(e.target.checked)}/><span><strong>Anonymous poll</strong><small>Admins see totals only; individual choices are not linked to residents.</small></span></label>
+      <label className="admin-announcement-important"><input type="checkbox" checked={showResultsLive} onChange={e=>setShowResultsLive(e.target.checked)}/><span><strong>Show results while live</strong><small>Residents can see totals before voting closes.</small></span></label>
+      <label className="admin-field full"><span>Show results to residents after the poll ends</span><select value={resultsRetentionDays} onChange={e=>setResultsRetentionDays(Number(e.target.value))}><option value={7}>7 days</option><option value={30}>30 days (recommended)</option><option value={90}>90 days</option></select><small>Results are removed from the resident app after this period. Admins retain poll results.</small></label>
+      {validationError && <p className="field-validation-error full" role="alert">{validationError}</p>}
+      <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving}>{saving?'Creating…':'Create poll'}</button></div>
+    </form>
+  if (selectedPoll) return <section className="section-stack admin-announcements"><AdminPollDetails poll={selectedPoll} onBack={() => setSelectedPollId(null)} onEnd={end}/></section>
+  if (creatingPoll) return <section className="section-stack admin-announcements"><div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => { setValidationError(null); setCreatingPoll(false) }}>← Back to polls</button><span>Create poll</span></div>{createForm}</section>
+  return <section className="section-stack admin-announcements"><div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" onClick={() => { setValidationError(null); setCreatingPoll(true) }}>＋ Create poll</button></div></div><div className="card">
+      <div className="admin-card-heading"><div><h2>All polls</h2><p>Live, scheduled and completed polls. Select a poll to view full results.</p></div></div>
+      <LoadState loading={loading} error={error} onRetry={reload}/>
+      {!loading && !error && data?.length === 0 && <p>No polls have been created yet.</p>}
+      <div className="admin-poll-list">{data?.map((poll) => {
+        const state = poll.status === 'archived' || new Date(poll.endsAt).getTime() <= Date.now() ? 'Ended' : new Date(poll.startsAt).getTime() > Date.now() ? 'Scheduled' : 'Live'
+        const total = poll.results.reduce((sum, option) => sum + option.votes, 0)
+        return <article className="admin-poll-list-item" key={poll.id}>
+          <button type="button" className="admin-poll-list-open" onClick={() => setSelectedPollId(poll.id)}>
+            <span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span><span className="status-pill">{poll.anonymous ? 'Anonymous' : 'Open'}</span></span>
+            <strong>{poll.question}</strong>
+            <small>{new Date(poll.startsAt).toLocaleString('en-IN')} – {new Date(poll.endsAt).toLocaleString('en-IN')} · {total} {total === 1 ? 'vote' : 'votes'} · View full results →</small>
+          </button>
+          {state !== 'Ended' && <button className="secondary" type="button" onClick={() => void end(poll.id)}>End poll</button>}
+        </article>
+      })}</div>
+    </div></section>
+}
+
+type AdminPollResponses = { items: Array<{ full_name: string; unit: string; option: string }>; page: number; pageSize: number; total: number; pageCount: number }
+
+function AdminPollDetails({ poll, onBack, onEnd }: { poll: AdminPoll; onBack: () => void; onEnd: (id: string) => Promise<void> }) {
+  const [page, setPage] = useState(1)
+  const [optionId, setOptionId] = useState('')
+  const responsesPath = `/v1/admin/polls/${encodeURIComponent(poll.id)}/responses?page=${page}${optionId ? `&optionId=${encodeURIComponent(optionId)}` : ''}`
+  const responses = useApiQuery<AdminPollResponses>(responsesPath)
+  const ended = poll.status === 'archived' || new Date(poll.endsAt).getTime() <= Date.now()
+  const status = ended ? 'Ended' : new Date(poll.startsAt).getTime() > Date.now() ? 'Scheduled' : 'Live'
+  const totalVotes = poll.results.reduce((sum, option) => sum + option.votes, 0)
+
+  return <section className="section-stack admin-poll-detail-page">
+    <div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={onBack}>← Back to polls</button><span>Poll results</span></div>
+    <article className="card admin-full-detail admin-poll-detail-heading">
+      <div className="admin-announcement-badges"><span className={`status-pill ${status === 'Live' ? 'success' : status === 'Scheduled' ? 'warning' : ''}`}>{status}</span><span className="status-pill">{poll.anonymous ? 'Anonymous poll' : 'Open poll'}</span></div>
+      <h2>{poll.question}</h2>
+      <div className="admin-detail-meta"><span>Starts <strong>{new Date(poll.startsAt).toLocaleString('en-IN')}</strong></span><span>Ends <strong>{new Date(poll.endsAt).toLocaleString('en-IN')}</strong></span><span>Resident results <strong>{poll.resultsRetentionDays} days after close</strong></span></div>
+      {!ended && <div className="admin-announcement-actions"><button className="secondary" type="button" onClick={() => void onEnd(poll.id)}>End poll</button></div>}
+    </article>
+    <section className="admin-poll-summary-grid" aria-label="Poll summary">
+      <article className="admin-poll-summary-card"><span>Total votes</span><strong>{totalVotes.toLocaleString('en-IN')}</strong><small>Recorded responses</small></article>
+      <article className="admin-poll-summary-card"><span>Choices</span><strong>{poll.options.length}</strong><small>Available options</small></article>
+      <article className="admin-poll-summary-card"><span>Privacy</span><strong>{poll.anonymous ? 'Anonymous' : 'Open'}</strong><small>{poll.anonymous ? 'Resident identities are hidden' : 'Resident choices are visible'}</small></article>
+    </section>
+    <section className="card admin-poll-results-panel">
+      <div className="admin-card-heading"><div><h2>Results by option</h2><p>{totalVotes.toLocaleString('en-IN')} total {totalVotes === 1 ? 'vote' : 'votes'}</p></div></div>
+      {poll.results.map((result, index) => {
+        const percentage = totalVotes ? Math.round(result.votes / totalVotes * 100) : 0
+        return <div className="admin-poll-result" key={result.id}>
+          <div className="admin-poll-result-label"><span><i className={`admin-poll-result-dot color-${index % 6}`} />{result.label}</span><strong>{result.votes.toLocaleString('en-IN')} <small>({percentage}%)</small></strong></div>
+          <div className="admin-poll-result-track" role="progressbar" aria-label={`${result.label}: ${percentage}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}><span className={`color-${index % 6}`} style={{ width: `${percentage}%` }} /></div>
+        </div>
+      })}
+      {poll.showResultsLive && <p className="admin-poll-live-results-note">Results are visible to residents while the poll is live.</p>}
+    </section>
+    {poll.anonymous ? <section className="card admin-poll-responses-panel"><h2>Resident responses</h2><p>This poll is anonymous. Individual residents and their choices are not available.</p></section> : <section className="card admin-poll-responses-panel">
+      <div className="admin-card-heading"><div><h2>Resident responses</h2><p>{responses.data?.total.toLocaleString('en-IN') ?? '—'} responses · 20 per page</p></div><label className="admin-field admin-poll-response-filter"><span>Filter by option</span><select value={optionId} onChange={(event) => { setOptionId(event.target.value); setPage(1) }}><option value="">All options</option>{poll.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label></div>
+      <LoadState loading={responses.loading} error={responses.error} onRetry={responses.reload}/>
+      {responses.data && responses.data.items.length > 0 ? <>
+        <div className="admin-poll-response-table-wrap"><table className="admin-poll-response-table"><thead><tr><th>Resident</th><th>Flat</th><th>Selected option</th></tr></thead><tbody>{responses.data.items.map((item, index) => <tr key={`${item.unit}-${item.full_name}-${index}`}><td>{item.full_name}</td><td>{item.unit}</td><td><span className="admin-poll-response-choice">{item.option}</span></td></tr>)}</tbody></table></div>
+        <div className="admin-poll-pagination"><span>Page {responses.data.page} of {Math.max(1, responses.data.pageCount)} · {responses.data.total.toLocaleString('en-IN')} residents</span><div><button className="secondary" type="button" disabled={page <= 1 || responses.loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button><button className="secondary" type="button" disabled={page >= responses.data.pageCount || responses.loading} onClick={() => setPage((current) => current + 1)}>Next</button></div></div>
+      </> : !responses.loading && !responses.error ? <p>No resident responses match this filter.</p> : null}
+    </section>}
   </section>
 }
 
@@ -517,12 +662,11 @@ function AdminResidents() {
   const [residentPage, setResidentPage] = useState(0)
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [isResendingInvitation, setIsResendingInvitation] = useState(false)
   const [quickAddResident, setQuickAddResident] = useState(false)
-  const [resendingInvitationId, setResendingInvitationId] = useState<string | null>(null)
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [inviteValidationError, setInviteValidationError] = useState<string | null>(null)
   const [invitationActionError, setInvitationActionError] = useState<string | null>(null)
+  const [invitationActionMessage, setInvitationActionMessage] = useState<string | null>(null)
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [sentInvitation, setSentInvitation] = useState<{ fullName: string; email: string; unit: string; expiresAt: string } | null>(null)
@@ -544,7 +688,7 @@ function AdminResidents() {
   const billing = useApiQuery<{ rules: { template: BillingTemplate } }>('/v1/admin/billing')
   const occupiedUnitIds = new Set((data ?? []).filter((resident) => resident.status === 'active' || resident.status === 'scheduled').map((resident) => resident.unitId))
   const pendingInvitationUnitIds = new Set((invitations.data ?? [])
-    .filter((invitation) => invitation.displayStatus === 'pending' && invitation.id !== resendingInvitationId)
+    .filter((invitation) => invitation.displayStatus === 'pending')
     .map((invitation) => invitation.unitId))
   const availableUnits = loading || error || units.loading || units.error || invitations.loading || invitations.error
     ? []
@@ -570,19 +714,35 @@ function AdminResidents() {
   const residentPageCount = Math.max(1, Math.ceil(flatRows.length / residentPageSize))
   const currentResidentPage = Math.min(residentPage, residentPageCount - 1)
   const pageFlats = flatRows.slice(currentResidentPage * residentPageSize, (currentResidentPage + 1) * residentPageSize)
-  const startInvite = (invitation?: PendingResidentInvitation, targetUnit?: ResidentUnit) => {
-    setIsResendingInvitation(Boolean(invitation))
-    setQuickAddResident(!invitation && Boolean(targetUnit))
-    setResendingInvitationId(invitation?.id ?? null)
+  const startInvite = (targetUnit?: ResidentUnit) => {
+    setQuickAddResident(Boolean(targetUnit))
     setInviteError(null)
     setInviteValidationError(null)
     setSentInvitation(null)
-    const invitedUnit = invitation ? units.data?.find((unit) => unit.id === invitation.unitId) : targetUnit
-    const invitedBlockId = invitedUnit?.buildingId ?? buildings.data?.buildings.find((building) => building.name === (invitedUnit?.building ?? invitation?.building))?.id ?? ''
-    setInviteForm(invitation
-      ? { fullName: invitation.fullName, email: invitation.email, phone: invitation.phone ?? '', blockId: invitedBlockId, unitId: invitation.unitId, startDate: invitation.startDate, occupancyType: invitation.occupancyType }
-      : { fullName: '', email: '', phone: '', blockId: targetUnit ? invitedBlockId : '', unitId: targetUnit?.id ?? '', startDate: todayString, occupancyType: 'owner' })
+    const invitedBlockId = targetUnit?.buildingId ?? buildings.data?.buildings.find((building) => building.name === targetUnit?.building)?.id ?? ''
+    setInviteForm({ fullName: '', email: '', phone: '', blockId: targetUnit ? invitedBlockId : '', unitId: targetUnit?.id ?? '', startDate: todayString, occupancyType: 'owner' })
     setInviteOpen(true)
+  }
+  const resendInvitation = async (invitation: PendingResidentInvitation) => {
+    setInvitationActionError(null)
+    setInvitationActionMessage(null)
+    setInvitationActionId(invitation.id)
+    try {
+      await post('/v1/admin/resident-invitations', {
+        fullName: invitation.fullName,
+        email: invitation.email,
+        phone: invitation.phone ?? '',
+        unitId: invitation.unitId,
+        occupancyType: invitation.occupancyType,
+        startDate: invitation.startDate,
+      })
+      setInvitationActionMessage(`Invitation resent to ${invitation.email}.`)
+      invitations.reload()
+    } catch (cause) {
+      setInvitationActionError(cause instanceof Error ? cause.message : 'Could not resend this invitation. Refresh and try again.')
+    } finally {
+      setInvitationActionId(null)
+    }
   }
   const revokeInvitation = async (invitation: PendingResidentInvitation) => {
     if (!globalThis.confirm(`Cancel the invitation for ${invitation.email}? Their link will stop working.`)) return
@@ -693,7 +853,7 @@ function AdminResidents() {
     {!loading && !error && !units.loading && !units.error && !invitations.loading && !invitations.error && selectedBlockId && flatRows.length === 0 && <p role="status">{search ? 'No flats or residents match this search in the selected block.' : 'No flats are configured in this block.'}</p>}
     {selectedBlockId && pageFlats.length > 0 && <div className="table-scroll"><table className="data-table"><thead><tr><th>Flat</th><th>Residents</th><th>Invoice</th><th>Actions</th></tr></thead><tbody>{pageFlats.map((flat) => {
       const flatResidents = (data ?? []).filter((resident) => resident.unitId === flat.id)
-      const flatInvitations = (invitations.data ?? []).filter((invitation) => invitation.unitId === flat.id)
+      const flatInvitations = (invitations.data ?? []).filter((invitation) => invitation.unitId === flat.id && invitation.displayStatus !== 'revoked')
       const canAddResident = flatResidents.every((resident) => resident.status !== 'active' && resident.status !== 'scheduled')
         && !flatInvitations.some((invitation) => invitation.displayStatus === 'pending')
         && availableUnits.some((unit) => unit.id === flat.id)
@@ -710,14 +870,15 @@ function AdminResidents() {
         <td><span className={`status-pill ${flat.paymentStatus === 'overdue' ? 'warning' : flat.paymentStatus === 'paid' ? 'success' : ''}`}>{flat.paymentStatus.replaceAll('_', ' ')}</span></td>
         <td><div className="flat-resident-actions">
           {flatResidents.map((resident) => resident.status === 'active' ? (resident.moveOutDate && pendingInvitationUnitIds.has(resident.unitId) ? <small key={resident.id}>Invitation pending</small> : <button type="button" className="secondary" key={resident.id} onClick={() => startNewResidentTransition(resident)}>{resident.moveOutDate ? 'Continue new resident' : '＋ New resident'}</button>) : resident.outstandingMinor > 0 && <button type="button" className="secondary" key={resident.id} disabled={settlingResidentId === resident.id} onClick={() => void settleFormerDues(resident)}>{settlingResidentId === resident.id ? 'Recording…' : 'Mark dues paid'}</button>)}
-          {flatInvitations.map((invitation) => <span className="invitation-row-actions" key={invitation.id}>{invitation.canManage && invitation.displayStatus !== 'revoked' && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => startInvite(invitation)}>{invitation.displayStatus === 'expired' ? 'Send again' : 'Resend'}</button>}{invitation.canManage && invitation.displayStatus === 'pending' && <button className="secondary danger-button" type="button" disabled={invitationActionId === invitation.id} onClick={() => void revokeInvitation(invitation)}>{invitationActionId === invitation.id ? 'Canceling…' : 'Cancel'}</button>}</span>)}
-          {canAddResident && <button type="button" className="secondary" onClick={() => startInvite(undefined, flat)}>＋ Add resident</button>}
+          {flatInvitations.map((invitation) => <span className="invitation-row-actions" key={invitation.id}>{invitation.canManage && invitation.displayStatus !== 'revoked' && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => void resendInvitation(invitation)}>{invitationActionId === invitation.id ? 'Sending…' : invitation.displayStatus === 'expired' ? 'Send again' : 'Resend'}</button>}{invitation.canManage && invitation.displayStatus === 'pending' && <button className="secondary danger-button" type="button" disabled={invitationActionId === invitation.id} onClick={() => void revokeInvitation(invitation)}>{invitationActionId === invitation.id ? 'Working…' : 'Cancel'}</button>}</span>)}
+          {canAddResident && <button type="button" className="secondary" onClick={() => startInvite(flat)}>＋ Add resident</button>}
         </div></td>
       </tr>
     })}</tbody></table></div>}
     {selectedBlockId && flatRows.length > residentPageSize && <footer className="collections-pagination"><span>Showing {currentResidentPage * residentPageSize + 1}–{Math.min((currentResidentPage + 1) * residentPageSize, flatRows.length)} of {flatRows.length} flats</span><div><button type="button" className="secondary" disabled={currentResidentPage === 0} onClick={() => setResidentPage((current) => Math.max(0, current - 1))}>Previous</button><span>Page {currentResidentPage + 1} of {residentPageCount}</span><button type="button" className="secondary" disabled={currentResidentPage >= residentPageCount - 1} onClick={() => setResidentPage((current) => Math.min(residentPageCount - 1, current + 1))}>Next</button></div></footer>}
     </section>
     {invitationActionError && <p className="form-error" role="alert">{invitationActionError}</p>}
+    {invitationActionMessage && <p className="billing-success" role="status">{invitationActionMessage}</p>}
     {transitionResident && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !transitionBusy) setTransitionResident(null) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="new-resident-transition-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT CHANGE · {transitionResident.building} · {transitionResident.unit}</span><h2 id="new-resident-transition-title">Move out and invite new resident</h2><p>Current resident: {transitionResident.name} · {transitionResident.email}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={transitionBusy} onClick={() => setTransitionResident(null)}>×</button></div>
       <form onSubmit={submitNewResidentTransition} onInvalidCapture={(event) => formValidationMessage(event, setTransitionError)}>
         <div className="unit-setup-panel"><strong>Current resident move-out</strong><div className="apartment-form-grid"><label className="admin-field"><span>Move-out date</span><input type="date" value={transitionForm.moveOutDate} disabled={transitionMoveOutRecorded} onChange={(event) => setTransitionForm((current) => ({ ...current, moveOutDate: event.target.value, startDate: current.startDate <= event.target.value ? dayAfter(event.target.value) : current.startDate }))} required /></label><div className="admin-field"><span>Outstanding dues</span><strong>{formatMoney(transitionResident.outstandingMinor, 'INR')}</strong><small>Unpaid invoices stay with {transitionResident.name} unless you record a settlement.</small></div>
@@ -729,10 +890,10 @@ function AdminResidents() {
         <div className="admin-modal-actions"><button className="secondary" type="button" disabled={transitionBusy} onClick={() => setTransitionResident(null)}>Cancel</button><button className="primary" type="submit" disabled={transitionBusy || billing.loading || Boolean(billing.error) || (billing.data?.rules.template === 'metered_water' && !transitionForm.finalMeterReading.trim()) || !transitionForm.moveOutDate || !transitionForm.startDate || transitionForm.startDate <= transitionForm.moveOutDate}>{transitionBusy ? 'Saving…' : transitionMoveOutRecorded ? 'Send new resident invitation' : 'Record move-out and invite'}</button></div>
       </form>
     </section></div>}
-    {inviteOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) setInviteOpen(false) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="resident-invitation-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT ACCESS</span><h2 id="resident-invitation-title">{sentInvitation ? 'Invitation sent' : isResendingInvitation ? 'Resend invitation' : quickAddResident ? 'Add resident' : 'Invite resident'}</h2><p>{sentInvitation ? 'The resident can accept after verifying their email.' : isResendingInvitation ? 'Resend the invitation to the same block and flat.' : quickAddResident ? 'Add a resident to this vacant flat. The invitation will be sent to their email.' : 'Invite a resident to join the selected block.'}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={submitting} onClick={() => setInviteOpen(false)}>×</button></div>
-      {sentInvitation ? <div className="completion-panel"><strong>{sentInvitation.fullName} has been invited</strong><p>An activation link was sent to {sentInvitation.email} for {sentInvitation.unit}. It expires {formatExpiry(sentInvitation.expiresAt)}.</p><p className="invitation-policy-note">Access is limited to this apartment and block. The resident must use Email OTP with the invited address.</p><div className="admin-modal-actions"><button className="primary" type="button" onClick={() => setInviteOpen(false)}>Done</button></div></div> : <form onSubmit={createInvitation} onInvalidCapture={(event) => formValidationMessage(event, setInviteValidationError)} onChangeCapture={() => setInviteValidationError(null)}><div className="apartment-form-grid"><label className="admin-field invite-block-field"><span>Block</span>{quickAddResident || isResendingInvitation ? <strong>{buildings.data?.buildings.find((block) => block.id === inviteForm.blockId)?.name ?? '—'}</strong> : <select value={inviteForm.blockId} onChange={(event) => setInviteForm((current) => ({ ...current, blockId: event.target.value, unitId: '' }))} required disabled={buildings.loading || Boolean(buildings.error)}><option value="">{buildings.loading ? 'Loading blocks…' : buildings.error ? 'Could not load blocks' : buildings.data?.buildings.length ? 'Select a block' : 'No blocks available'}</option>{(buildings.data?.buildings ?? []).map((block) => <option value={block.id} key={block.id}>{block.name}</option>)}</select>}</label><label className="admin-field invite-flat-field"><span>Flat</span>{quickAddResident || isResendingInvitation ? <strong>{units.data?.find((flat) => flat.id === inviteForm.unitId)?.number ?? '—'}</strong> : <select value={inviteForm.unitId} onChange={(event) => setInviteForm((current) => ({ ...current, unitId: event.target.value }))} required disabled={!inviteForm.blockId || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || availableFlats.length === 0}><option value="">{!inviteForm.blockId ? 'Select a block first' : units.loading || invitations.loading || loading ? 'Loading flats…' : units.error || invitations.error || error ? 'Could not load flats' : availableFlats.length ? 'Select a flat' : 'No available flats (occupied or already invited)'}</option>{availableFlats.map((flat) => <option value={flat.id} key={flat.id}>{flat.number}</option>)}</select>}</label><label className="admin-field"><span>Full name</span><input autoFocus value={inviteForm.fullName} onChange={(event) => setInviteForm((current) => ({ ...current, fullName: event.target.value }))} required minLength={2} maxLength={120} autoComplete="name" placeholder="Resident name" /></label><label className="admin-field"><span>Mobile number <small>(optional)</small></span><input type="tel" value={inviteForm.phone} onChange={(event) => setInviteForm((current) => ({ ...current, phone: event.target.value }))} maxLength={24} autoComplete="tel" placeholder="+91 98765 43210" /></label><label className="admin-field full"><span>Email address</span><input type="email" value={inviteForm.email} onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))} required maxLength={254} autoComplete="email" placeholder="resident@example.com" /></label>{!quickAddResident && !isResendingInvitation && <label className="admin-field"><span>Resident start date</span><input type="date" value={inviteForm.startDate} min={todayString} onChange={(event) => setInviteForm((current) => ({ ...current, startDate: event.target.value }))} required /></label>}<label className="admin-field"><span>Occupancy type</span><select value={inviteForm.occupancyType} onChange={(event) => setInviteForm((current) => ({ ...current, occupancyType: event.target.value as 'owner' | 'tenant' }))}><option value="owner">Owner</option><option value="tenant">Tenant</option></select></label></div>
-        {isResendingInvitation && <p className="form-hint">The original block and flat cannot be changed when resending this invitation.</p>}<div className="invitation-policy-note"><strong>Email invitation</strong><span>We’ll send a one-time link that expires in 7 days. The resident must verify this email with Email OTP. SMS and WhatsApp invitations are not enabled.</span></div>
-        {inviteError && <p className="form-error" role="alert">{inviteError}</p>}{inviteValidationError && <p className="field-validation-error" role="alert">{inviteValidationError}</p>}<div className="admin-modal-actions"><button className="secondary" type="button" disabled={submitting} onClick={() => setInviteOpen(false)}>Cancel</button><button className="primary" type="submit" disabled={submitting || buildings.loading || Boolean(buildings.error) || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || !inviteForm.blockId || availableFlats.length === 0}>{submitting ? 'Sending…' : isResendingInvitation ? 'Resend invitation' : quickAddResident ? 'Add resident' : 'Send invitation'}</button></div></form>}
+    {inviteOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) setInviteOpen(false) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="resident-invitation-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT ACCESS</span><h2 id="resident-invitation-title">{sentInvitation ? 'Invitation sent' : quickAddResident ? 'Add resident' : 'Invite resident'}</h2><p>{sentInvitation ? 'The resident can accept after verifying their email.' : quickAddResident ? 'Add a resident to this vacant flat. The invitation will be sent to their email.' : 'Invite a resident to join the selected block.'}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={submitting} onClick={() => setInviteOpen(false)}>×</button></div>
+      {sentInvitation ? <div className="completion-panel"><strong>{sentInvitation.fullName} has been invited</strong><p>An activation link was sent to {sentInvitation.email} for {sentInvitation.unit}. It expires {formatExpiry(sentInvitation.expiresAt)}.</p><p className="invitation-policy-note">Access is limited to this apartment and block. The resident must use Email OTP with the invited address.</p><div className="admin-modal-actions"><button className="primary" type="button" onClick={() => setInviteOpen(false)}>Done</button></div></div> : <form onSubmit={createInvitation} onInvalidCapture={(event) => formValidationMessage(event, setInviteValidationError)} onChangeCapture={() => setInviteValidationError(null)}><div className="apartment-form-grid"><label className="admin-field invite-block-field"><span>Block</span>{quickAddResident ? <strong>{buildings.data?.buildings.find((block) => block.id === inviteForm.blockId)?.name ?? '—'}</strong> : <select value={inviteForm.blockId} onChange={(event) => setInviteForm((current) => ({ ...current, blockId: event.target.value, unitId: '' }))} required disabled={buildings.loading || Boolean(buildings.error)}><option value="">{buildings.loading ? 'Loading blocks…' : buildings.error ? 'Could not load blocks' : buildings.data?.buildings.length ? 'Select a block' : 'No blocks available'}</option>{(buildings.data?.buildings ?? []).map((block) => <option value={block.id} key={block.id}>{block.name}</option>)}</select>}</label><label className="admin-field invite-flat-field"><span>Flat</span>{quickAddResident ? <strong>{units.data?.find((flat) => flat.id === inviteForm.unitId)?.number ?? '—'}</strong> : <select value={inviteForm.unitId} onChange={(event) => setInviteForm((current) => ({ ...current, unitId: event.target.value }))} required disabled={!inviteForm.blockId || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || availableFlats.length === 0}><option value="">{!inviteForm.blockId ? 'Select a block first' : units.loading || invitations.loading || loading ? 'Loading flats…' : units.error || invitations.error || error ? 'Could not load flats' : availableFlats.length ? 'Select a flat' : 'No available flats (occupied or already invited)'}</option>{availableFlats.map((flat) => <option value={flat.id} key={flat.id}>{flat.number}</option>)}</select>}</label><label className="admin-field"><span>Full name</span><input autoFocus value={inviteForm.fullName} onChange={(event) => setInviteForm((current) => ({ ...current, fullName: event.target.value }))} required minLength={2} maxLength={120} autoComplete="name" placeholder="Resident name" /></label><label className="admin-field"><span>Mobile number <small>(optional)</small></span><input type="tel" value={inviteForm.phone} onChange={(event) => setInviteForm((current) => ({ ...current, phone: event.target.value }))} maxLength={24} autoComplete="tel" placeholder="+91 98765 43210" /></label><label className="admin-field full"><span>Email address</span><input type="email" value={inviteForm.email} onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))} required maxLength={254} autoComplete="email" placeholder="resident@example.com" /></label>{!quickAddResident && <label className="admin-field"><span>Resident start date</span><input type="date" value={inviteForm.startDate} min={todayString} onChange={(event) => setInviteForm((current) => ({ ...current, startDate: event.target.value }))} required /></label>}<label className="admin-field"><span>Occupancy type</span><select value={inviteForm.occupancyType} onChange={(event) => setInviteForm((current) => ({ ...current, occupancyType: event.target.value as 'owner' | 'tenant' }))}><option value="owner">Owner</option><option value="tenant">Tenant</option></select></label></div>
+        <div className="invitation-policy-note"><strong>Email invitation</strong><span>We’ll send a one-time link that expires in 7 days. The resident must verify this email with Email OTP. SMS and WhatsApp invitations are not enabled.</span></div>
+        {inviteError && <p className="form-error" role="alert">{inviteError}</p>}{inviteValidationError && <p className="field-validation-error" role="alert">{inviteValidationError}</p>}<div className="admin-modal-actions"><button className="secondary" type="button" disabled={submitting} onClick={() => setInviteOpen(false)}>Cancel</button><button className="primary" type="submit" disabled={submitting || buildings.loading || Boolean(buildings.error) || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || !inviteForm.blockId || availableFlats.length === 0}>{submitting ? 'Sending…' : quickAddResident ? 'Add resident' : 'Send invitation'}</button></div></form>}
     </section></div>}
   </section>
 }

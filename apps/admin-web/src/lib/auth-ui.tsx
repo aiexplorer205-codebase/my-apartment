@@ -10,7 +10,7 @@ import { getAppConfig, getFormattedCopyright } from '@nivasa/app-platform'
 
 
 export function AuthBoundary({ children }: { children: ReactNode }) {
-  const { isLoading, isAuthenticated, logout, user } = useAuth0()
+  const { isLoading, isAuthenticated } = useAuth0()
   const pathname = usePathname()
   const experienceName = pathname.startsWith('/dashboard') ? 'Tenant Admin' : 'Resident'
 
@@ -39,20 +39,7 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
     )
   }
 
-  if (pathname.startsWith('/admin') || pathname.startsWith('/resident')) return <>{children}</>
-
-  return (
-    <>
-      <div className="session-bar">
-        <div className="session-brand"><span className="brand-mark">{getAppConfig().application.monogram}</span><strong>{getAppConfig().application.productName}</strong></div>
-        <TenantWorkspacePicker />
-        <div className="session-account"><span>{user?.email ?? 'Authenticated account'}</span>
-        <button className="secondary" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>Sign out</button>
-        </div>
-      </div>
-      {children}
-    </>
-  )
+  return <>{children}</>
 }
 
 export function TenantWorkspacePicker() {
