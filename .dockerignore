@@ -15,4 +15,4 @@ docker-data
 *.log
 .DS_Store
 figma-prototype
-doscs/design
+docs/design
