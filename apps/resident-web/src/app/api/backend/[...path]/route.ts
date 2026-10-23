@@ -25,10 +25,25 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     }
   }
 
-  const body = ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer()
+  let body:ArrayBuffer|undefined
+  if(!['GET','HEAD'].includes(request.method)){
+    const maximumBytes=22*1024*1024
+    if(Number(request.headers.get('content-length')??0)>maximumBytes)return NextResponse.json({message:'The request body is too large'},{status:413,headers:{'cache-control':'no-store'}})
+    const reader=request.body?.getReader(),chunks:Uint8Array[]=[]
+    let size=0
+    if(reader)while(true){
+      const chunk=await reader.read();if(chunk.done)break
+      size+=chunk.value.length
+      if(size>maximumBytes){await reader.cancel();return NextResponse.json({message:'The request body is too large'},{status:413,headers:{'cache-control':'no-store'}})}
+      chunks.push(chunk.value)
+    }
+    const bytes=new Uint8Array(size);let offset=0
+    for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length}
+    body=bytes.buffer
+  }
   const upstream = await globalThis.fetch(targetUrl, { method: request.method, headers, body, cache: 'no-store' })
   const responseHeaders = new globalThis.Headers()
-  for (const name of ['content-type', 'retry-after']) {
+  for (const name of ['content-type', 'retry-after','content-disposition','x-content-type-options','content-security-policy']) {
     const value = upstream.headers.get(name)
     if (value) responseHeaders.set(name, value)
   }

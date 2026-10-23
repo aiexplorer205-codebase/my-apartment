@@ -24,6 +24,12 @@ via `.env` and are never silently replaced with fake runtime adapters.
 | [Phase 4: local Docker Compose](./PHASE-4-LOCAL-DOCKER-COMPOSE.md) | Run resident, admin, operator, API, worker, PostgreSQL, and Redis locally; use external provider credentials from `.env` |
 | [Phase 5: production readiness](./PHASE-5-PRODUCTION-READINESS.md) | OCI deployment, tests, backup/recovery, monitoring and release gates |
 
+Additional implementation plans:
+
+- [Auth0 passkeys and email OTP](./AUTH0-PASSKEY-IMPLEMENTATION-PLAN.md): proposed
+  resident/admin authentication changes for the initial release, including
+  hosted login, provisioning, recovery, and verification criteria.
+
 Run Phase 5 against a real cloud account or apply Terraform only with
 explicit human authorization. Provider selection, external accounts, DNS,
 secrets, and payment activation are human-owned gates.

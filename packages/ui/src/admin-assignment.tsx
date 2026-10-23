@@ -1,0 +1,10 @@
+'use client'
+import { useEffect,useState } from 'react'
+import type { ComplaintClient } from './complaints'
+
+export function AdminAssignmentControl({request,value,onChange,disabled=false,subject,label='Assigned admin'}:{request:ComplaintClient;value:string|null;onChange:(value:string|null)=>void;disabled?:boolean;subject?:string;label?:string}){
+  const[admins,setAdmins]=useState<Array<{subject:string;label:string}>>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[revision,setRevision]=useState(0)
+  useEffect(()=>{let cancelled=false;setLoading(true);setError('');void request('/v1/admin/assignees').then((result)=>{if(!cancelled)setAdmins((result as {admins:Array<{subject:string;label:string}>}).admins)}).catch((cause:unknown)=>{if(!cancelled)setError(cause instanceof Error?cause.message:'Could not load authorized admins')}).finally(()=>{if(!cancelled)setLoading(false)});return()=>{cancelled=true}},[request,revision])
+  const unavailable=value&&!admins.some((admin)=>admin.subject===value)
+  return <div className="section-stack"><label>{label}<select value={value??''} disabled={disabled||loading||Boolean(error)} onChange={(event)=>onChange(event.target.value||null)}><option value="">Unassigned</option>{unavailable&&<option value={value} disabled>Previously assigned administrator (unavailable)</option>}{admins.map((admin)=><option key={admin.subject} value={admin.subject}>{admin.label}{admin.subject===subject?' (you)':''}</option>)}</select></label>{loading&&<small role="status">Loading authorized admins…</small>}{!loading&&unavailable&&!error&&<small>The previous assignee is unavailable. Keep the historical assignment or choose an active admin.</small>}{error&&<div role="alert"><p>{error}. Assignment changes are unavailable.</p><button type="button" className="secondary" disabled={disabled} onClick={()=>setRevision((value)=>value+1)}>Retry admin list</button>{value&&<button type="button" className="secondary" disabled={disabled} onClick={()=>onChange(null)}>Unassign</button>}</div>}</div>
+}

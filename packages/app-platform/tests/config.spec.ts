@@ -1,3 +1,4 @@
+import configuredBrand from '../config/app-config.json'
 import { describe, it, expect } from 'vitest'
 import {
   getAppConfig,
@@ -12,10 +13,10 @@ describe('Application Configuration', () => {
   it('loads valid configuration object', () => {
     const config = getAppConfig()
     expect(config).toBeDefined()
-    expect(config.application.productName).toBe('Nivasa')
-    expect(config.application.monogram).toBe('N')
-    expect(config.company.name).toBe('Nivasa Technologies Pvt. Ltd.')
-    expect(config.copyright.owner).toBe('Nivasa Technologies Pvt. Ltd.')
+    expect(config.application.productName).toBe(configuredBrand.application.productName)
+    expect(config.application.monogram).toBe(configuredBrand.application.monogram)
+    expect(config.company.name).toBe(configuredBrand.company.name)
+    expect(config.copyright.owner).toBe(configuredBrand.copyright.owner)
     expect(config.support.email).toMatch(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)
     expect(config.branding.defaultBrand).toBe('default')
     expect(config.localization.defaultLocale).toBe('en')
@@ -44,20 +45,21 @@ describe('Application Configuration', () => {
   })
 
   it('calculates copyright year ranges correctly', () => {
-    expect(getCopyrightYearRange(2024)).toBe('2024')
-    expect(getCopyrightYearRange(2026)).toBe('2024–2026')
-    expect(getCopyrightYearRange(2023)).toBe('2024')
+    const start = configuredBrand.copyright.startYear
+    expect(getCopyrightYearRange(start)).toBe(String(start))
+    expect(getCopyrightYearRange(start + 2)).toBe(`${start}–${start + 2}`)
+    expect(getCopyrightYearRange(start - 1)).toBe(String(start))
 
-    const copyrightStr = getFormattedCopyright(2026)
-    expect(copyrightStr).toContain('© 2024–2026 Nivasa Technologies Pvt. Ltd.')
+    const copyrightStr = getFormattedCopyright(start + 2)
+    expect(copyrightStr).toContain(`© ${start}–${start + 2} ${configuredBrand.copyright.owner}`)
   })
 
   it('provides support and application information', () => {
     const support = getSupportInfo()
-    expect(support.email).toBe('support@nivasa.local')
+    expect(support.email).toBe(configuredBrand.support.email)
 
     const app = getApplicationInfo()
-    expect(app.productName).toBe('Nivasa')
+    expect(app.productName).toBe(configuredBrand.application.productName)
     expect(app.adminName).toBe('Apartment Admin')
     expect(app.residentName).toBe('Resident')
   })

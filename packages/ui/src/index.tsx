@@ -42,3 +42,9 @@ export function useAppMessages() {
   if (!context) throw new Error('useAppMessages must be used within AppMessagesProvider')
   return context
 }
+
+export { PwaControls } from './pwa-controls'
+export { ComplaintHomeShortcut, Complaints, type ComplaintClient } from './complaints'
+export { ReceiptReview } from './receipt-review'
+
+export { AdminAssignmentControl } from './admin-assignment'

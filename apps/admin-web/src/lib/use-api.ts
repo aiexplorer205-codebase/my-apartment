@@ -5,9 +5,10 @@ import { apiFetch } from '@nivasa/api-client'
 import { useCallback, useEffect, useState } from 'react'
 
 
-export function useApiQuery<T extends object>(path: string, options: { tenantScoped?: boolean } = {}) {
+export function useApiQuery<T extends object>(path: string, options: { tenantScoped?: boolean; enabled?: boolean } = {}) {
   const { isAuthenticated, activeTenantId } = useAuth0()
   const tenantScoped = options.tenantScoped ?? true
+  const enabled = options.enabled ?? true
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -17,7 +18,7 @@ export function useApiQuery<T extends object>(path: string, options: { tenantSco
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      if (!isAuthenticated) { setLoading(false); return }
+      if (!isAuthenticated || !enabled) { setLoading(false); setData(null); setError(null); return }
       setLoading(true)
       setError(null)
       setData(null)
@@ -34,7 +35,7 @@ export function useApiQuery<T extends object>(path: string, options: { tenantSco
     }
     void load()
     return () => { cancelled = true }
-  }, [activeTenantId, isAuthenticated, path, revision, tenantScoped])
+  }, [activeTenantId, isAuthenticated, path, revision, tenantScoped, enabled])
 
   return { data, loading, error, reload }
 }

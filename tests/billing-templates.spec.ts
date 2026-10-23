@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateInvoiceBalanceMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from '../apps/api/src/billing-calculations.ts'
 
 describe('monthly billing template calculations', () => {
-  it('calculates water charges from the meter delta and rate per kilolitre', () => {
+  it('rounds metered water charges to whole rupees after calculating consumption', () => {
     expect(calculateMeteredWaterCharge(18.25, 23.75, 12500)).toEqual({
       consumptionKl: 5.5,
-      amountMinor: 68750,
+      amountMinor: 68800,
     })
-    expect(calculateMeteredWaterCharge(0, 0.001, 500).amountMinor).toBe(1)
+    expect(calculateMeteredWaterCharge(0, 0.001, 500).amountMinor).toBe(0)
   })
 
   it('calculates area-based maintenance from flat area and the per-square-foot rate', () => {

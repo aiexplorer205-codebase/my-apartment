@@ -1,9 +1,8 @@
 import './globals.css'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
-import { PwaRegistration } from './pwa-registration'
 import { I18nProvider, getAppConfig } from '@nivasa/app-platform'
-import { AppMessagesProvider } from '@nivasa/ui'
+import { AppMessagesProvider, PwaControls } from '@nivasa/ui'
 
 const config = getAppConfig()
 
@@ -21,7 +20,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <I18nProvider namespaces={['common', 'resident', 'validation']}>
           <AuthProvider>
             <AppMessagesProvider>
-              <PwaRegistration />
+              <PwaControls appName={config.application.productName} />
               {children}
             </AppMessagesProvider>
           </AuthProvider>

@@ -42,12 +42,14 @@ describe('MVP API runtime', () => {
       city: 'Pune',
       adminEmail: 'ADMIN@lakeview.in',
       allowedBlocks: 12,
+      flatsPerBlock: Array(12).fill(20),
       plan: 'growth',
     })).toEqual({
       name: 'Lakeview Residency',
       city: 'Pune',
       adminEmail: 'admin@lakeview.in',
       allowedBlocks: 12,
+      flatsPerBlock: Array(12).fill(20),
       plan: 'growth',
     })
     expect(() => parseOrganizationOnboardingInput({

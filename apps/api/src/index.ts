@@ -1,3 +1,18 @@
+import { overdueQueue } from './overdues.js'
+import { ledgerSource } from './ledger-sources.js'
+import { residentPaymentHistory, residentPaymentRecord, residentRecentPayments } from './resident-payments.js'
+import { openingRead, openingPreview, openingPost, openingCreditRead, openingCreditApply } from './opening-balances.js'
+import { reconciliationRead, reconciliationWrite } from './reconciliation.js'
+import { accountRead, accountWrite } from './accounts.js'
+import { submitPaymentReport, listPaymentReports, confirmPaymentReport, settleFormerBalance, financialOverview } from './collections.js'
+import { maintenanceRequest } from './maintenance.js'
+import { ApiFault } from './api-fault.js'
+import { adminAssignees } from './admin-assignment.js'
+import { adminCommunications } from './admin-communications.js'
+import { publishCommunication } from './communication-publications.js'
+import { residentUpdates } from './resident-updates.js'
+import { complaintPhoto, complaintPhotoLimits } from './complaint-photos.js'
+import { complaintRequest } from './complaints.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createHash, randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
@@ -7,24 +22,11 @@ import type { PoolClient } from 'pg'
 
 import type { HealthResponse, ApiErrorResponse, OpenApiBootstrap } from '@nivasa/contracts'
 import { AuthorizationError, ValidationError } from '@nivasa/shared'
-import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateInvoiceBalanceMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from './billing-calculations.js'
-import { allocateManualPayment, parseManualPaymentAmount } from './manual-payments.js'
+import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from './billing-calculations.js'
 import { createAdminInvitationToken, hashAdminInvitationToken, sendAdminInvitationEmail } from './admin-invitations.js'
 import { createResidentInvitationToken, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
 import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
 import { checkDatabaseReadiness, dropTenantDatabase, getPlatformPool, getTenantPool, provisionTenantDatabase } from './persistence.js'
-
-type ApiFaultCode = 'unauthorized' | 'forbidden' | 'not_found' | 'configuration_error' | 'dependency_unavailable' | 'tenant_selection_required' | 'data_integrity_error' | 'invalid_request' | 'block_limit_reached' | 'flat_limit_reached'
-
-class ApiFault extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: ApiFaultCode,
-    message: string,
-  ) {
-    super(message)
-  }
-}
 
 interface AuthenticatedSubject {
   subject: string
@@ -327,13 +329,14 @@ export const parseOrganizationOnboardingInput = (value: unknown): OrganizationOn
   return { name, city, adminEmail, allowedBlocks, flatsPerBlock, plan }
 }
 
-const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
+const readJsonBody = async (request: IncomingMessage, maximumBytes = 16_384): Promise<unknown> => {
+  if(Number(request.headers['content-length']??0)>maximumBytes){request.resume();throw new ApiFault(413,'invalid_request','The request body is too large')}
   const chunks: Buffer[] = []
   let size = 0
-  for await (const chunk of request) {
+  for await (const chunk of request.iterator({destroyOnReturn:false})) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.length
-    if (size > 16_384) throw new ApiFault(413, 'invalid_request', 'The request body is too large')
+    if (size > maximumBytes) {request.resume();throw new ApiFault(413, 'invalid_request', 'The request body is too large')}
     chunks.push(buffer)
   }
 
@@ -426,6 +429,7 @@ const acceptAdminInvitation = async (request: IncomingMessage, requestId: string
          ON CONFLICT (subject, tenant_id) DO UPDATE SET role = 'admin', status = 'active', updated_at = NOW()`,
         [identity.subject, invitation.tenant_id],
       )
+      await client.query(`INSERT INTO identity_subjects(id,subject,email) VALUES(gen_random_uuid(),$1,$2) ON CONFLICT(subject) DO UPDATE SET email=EXCLUDED.email,updated_at=NOW()`,[identity.subject,profile.email])
       await client.query(
         `UPDATE tenant_records
          SET admin_invite_token_hash = NULL, admin_invite_expires_at = NULL,
@@ -489,6 +493,43 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     { name: 'platform', description: 'Approved platform operator endpoints' },
   ],
   paths: {
+    '/v1/tenant/payments/history': {
+      get: { tags: ['tenant'], summary: 'Read full paginated own payment/credit history and complete financial-year cash totals', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident-scoped report and credit action records' }, '400': { description: 'Invalid filter or page' }, '403': { description: 'Active resident access required' } } },
+    },
+    '/v1/tenant/payments/records/{kind}/{recordId}': {
+      get: { tags: ['tenant'], summary: 'Read an own report or opening-credit record with invoice allocations', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized record details' }, '404': { description: 'Record unavailable in this resident account' } } },
+    },
+
+    '/v1/admin/accounts/opening': {
+      get: { tags: ['tenant'], summary: 'Read opening cutover, resident source balances and correction history', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized opening source records' } } },
+      post: { tags: ['tenant'], summary: 'Create an expiring opening review or post it exactly once', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Opening review or posted batch' }, '409': { description: 'Stale review, changed cutover, duplicate debt, used balance or closed period' } } },
+    },
+    '/v1/admin/accounts/opening/credit/{residentId}': {
+      get: { tags: ['tenant'], summary: 'Review explicit non-cash opening credit allocation to oldest available invoices', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Available credit and current allocation fingerprint' } } },
+      post: { tags: ['tenant'], summary: 'Apply the reviewed opening credit without creating a cash receipt', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Credit allocated once' }, '409': { description: 'Stale allocation or no reportable charges' } } },
+    },
+
+    '/v1/admin/accounts/reconciliation': {
+      get: { tags: ['tenant'], summary: 'Read manual statement matching and a current ledger snapshot', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Scoped source entries, matches and audit history' } } },
+      post: { tags: ['tenant'], summary: 'Save, finalize or reopen reconciliation with version and snapshot checks', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Reconciliation persisted' }, '409': { description: 'Stale snapshot, period still open, unmatched entries or discrepancy' } } },
+    },
+
+    '/v1/admin/accounts': { get: { tags: ['tenant'], summary: 'Cash/Bank period balances and account register', description: 'period YYYY-MM sets full-month fund totals. Activity uses page (20 per page), literal search (160 characters), status All/draft/posted/posted_with_reversals/reversed, account All/Cash/Bank, type All/expense/other_income/collection/opening/reversal and optional inclusive from/to dates (default month bounds). Posted excludes reversed originals; posted_with_reversals includes all posted audit entries; reversed includes only originals with an appended reversal. Filtered activity never changes monthly fund totals or monthly posted category totals. Current invoice outstanding, overdue and pending report totals are separate from month activity. Count, rows and totals share one repeatable-read snapshot.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/admin/accounts/entries': { get: { tags: ['tenant'], summary: 'Page and filter account entries', description: 'period YYYY-MM sets full-month fund totals. Activity uses page (20 per page), literal search (160 characters), status All/draft/posted/posted_with_reversals/reversed, account All/Cash/Bank, type All/expense/other_income/collection/opening/reversal and optional inclusive from/to dates (default month bounds). Posted excludes reversed originals; posted_with_reversals includes all posted audit entries; reversed includes only originals with an appended reversal. Filtered activity never changes monthly fund totals or monthly posted category totals. Current invoice outstanding, overdue and pending report totals are separate from month activity. Count, rows and totals share one repeatable-read snapshot.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Create an expense or other-income draft', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/admin/accounts/entries/{entryId}': { get: { tags: ['tenant'], summary: 'Inspect a scoped account entry and correction sources', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Save a versioned draft, post once, or append reversal/replacement', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/admin/accounts/ledgers': { get: { tags: ['tenant'], summary: 'Page resident ledgers with search, residency, block and date filters', description: 'page is 20 residents; search is literal (160 characters); status All/active/inactive/suspended; block All/unassigned/UUID. Optional inclusive from/to dates derive opening, net charges, confirmed credits and closing. Current pending reports and available opening credit are separate from historical period totals. Uses current authoritative block names.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/admin/accounts/ledgers/{residentId}/sources/{kind}/{sourceId}': { get: { tags: ['tenant'], summary: 'Read an authorized resident ledger source', description: 'kind invoice/payment/opening_credit/opening_reversal. Returns invoice lines and net debit excluding carried dues, one report with all invoice allocations and account receipt identity, or a resident-specific opening source/correction note. Never returns the whole multi-resident import payload. Revalidates admin role, community and resident ownership.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Ledger source detail' }, '403': { description: 'Administrator required' }, '404': { description: 'Source not in this resident ledger' } } } },
+    '/v1/admin/accounts/ledgers/{residentId}': { get: { tags: ['tenant'], summary: 'Page resident ledger activity with carried running balances', description: 'Optional inclusive from/to dates; page is 20 events. Running balances include earlier entries before date filtering and pagination. Opening corrections offset their original debit/credit category. Pending reports are current informational values, never confirmed credits.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/admin/assignees': { get: { tags: ['tenant'], summary: 'List current authorized community administrators for assignment', description: 'Active admin membership and accepted invitation required. Resident and other-community identities are excluded. Assignment writes revalidate eligibility.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Admin subjects and verified email labels when available' }, '403': { description: 'Administrator permission required' } } } },
+    '/v1/admin/maintenance': { get: { tags: ['tenant'], summary: 'Page and filter scoped maintenance tasks', description: 'Query page (20 per page), search (literal text), status All/Planned/Completed/Overdue. Overdue uses Asia/Kolkata dates.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Create a maintenance task with optional checklist and complaint link', description: 'ownerSubject is an authorized community admin or null. Up to 30 distinct checklist labels; valid same-community complaintId; requestKey retries must retain the same task details.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/admin/maintenance/{taskId}': { get: { tags: ['tenant'], summary: 'Read a scoped task, checklist and related account entries', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Task and expense source navigation' }, '404': { description: 'Task not found' } } }, post: { tags: ['tenant'], summary: 'Save checklist progress or complete a task', description: 'action checklist/complete/assign, current version and requestKey required. Assignment accepts ownerSubject (authorized community admin or null) and can atomically save checklist progress. Completion requires all checks done and a note; it never posts expenses.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/tenant/complaints/{complaintId}/photos/{photoId}': {get:{tags:['tenant'],summary:'Read one private, normalized complaint photo owned by the active resident',security:[{bearerAuth:[]}],responses:{'200':{description:'Uncached JPEG binary; nosniff and sandbox headers'},'404':{description:'Photo not found or not owned'}}}},
+    '/v1/admin/complaints/{complaintId}/photos/{photoId}': {get:{tags:['tenant'],summary:'Read one private complaint photo in the authorized community',security:[{bearerAuth:[]}],responses:{'200':{description:'Uncached JPEG binary'},'403':{description:'Administrator permission required'},'404':{description:'Photo not found'}}}},
+    '/v1/admin/complaints': { get: { tags: ['tenant'], summary: 'Page and filter community complaints with scoped counts', description: 'Query: page (20 per page), search (literal text), status (All/Active or exact status), category, priority, block (UUID/unassigned/All), summary=true (counts only). Counts cover all authorized complaints independently of filters.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/admin/complaints/{complaintId}': { get: { tags: ['tenant'], summary: 'Read a complaint including internal notes', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Update versioned assignment, priority, status or conversation', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/tenant/complaints': { get: { tags: ['tenant'], summary: 'Page and filter the active resident’s own complaints', description: 'Query: page (20 per page), search, status (All/Active or exact status), category, priority, block, summary=true (own counts only). Internal notes are never returned.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Create a private complaint with optional photos', description: 'requestKey UUID required; identical retries return the same record, changed details conflict. photos: at most 3 {name,type,data} values; base64 JPEG/PNG/WebP input up to 5 MiB and 20 megapixels each. No animation. Server normalizes to metadata-free JPEG, maximum 1600 pixels per side and 1 MiB stored per photo. Complaint/photos commit atomically; JSON body maximum 22 MiB.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/tenant/complaints/{complaintId}': { get: { tags: ['tenant'], summary: 'Read own complaint with public replies only', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Reply, accept a resolution or reopen with a reason', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+
     '/v1/health': {
       get: { tags: ['health'], summary: 'Service liveness', responses: { '200': { description: 'Service is running' } } },
     },
@@ -505,12 +546,19 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/tenant/payments/manual': {
       post: { tags: ['tenant'], summary: 'Submit a resident-reported offline payment for administrator confirmation', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Offline payment recorded as pending confirmation' }, '400': { description: 'Invalid invoice or payment amount' }, '403': { description: 'An active resident profile is required' }, '409': { description: 'Invoice no longer accepts payments or amount exceeds available balance' } } },
     },
+    '/v1/tenant/updates': {get:{tags:['tenant'],summary:'Page the complete resident announcement and poll feed',description:'Query page (20 records), search (literal text up to 160 characters), status All/Live/Scheduled/Ended, kind All/announcement/poll, summary=true. Counts cover all live items independently of filters. Polls follow result retention; drafts are excluded.',security:[{bearerAuth:[]}],responses:{'200':{description:'Scoped feed and complete live summary'},'400':{description:'Invalid filters'},'403':{description:'Active resident required'}}}},
+    '/v1/tenant/notices/{noticeId}': {get:{tags:['tenant'],summary:'Read an authorized published or archived announcement independently of feed paging',security:[{bearerAuth:[]}],responses:{'200':{description:'Announcement and own read state'},'404':{description:'Not found or unavailable'}}}},
+    '/v1/tenant/polls/{pollId}': {get:{tags:['tenant'],summary:'Read one authorized poll with permitted results within retention',security:[{bearerAuth:[]}],responses:{'200':{description:'Poll, own vote and permitted results'},'404':{description:'Not found or expired'}}}},
     '/v1/tenant/notices': {
-      get: { tags: ['tenant'], summary: 'Resident notices', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped notices' }, '403': { description: 'An active resident profile is required' } } },
+      get: { tags: ['tenant'], summary: 'Live announcement preview, limited to 100; use updates for the complete feed', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped notices' }, '403': { description: 'An active resident profile is required' } } },
     },
     '/v1/tenant/polls': { get: { tags: ['tenant'], summary: 'List active resident polls and permitted results', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident polls' }, '403': { description: 'An active resident profile is required' } } } },
     '/v1/tenant/polls/{pollId}/vote': { post: { tags: ['tenant'], summary: 'Submit a resident poll vote', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Vote recorded' }, '409': { description: 'Poll closed or resident already voted' } } } },
-    '/v1/admin/polls': { get: { tags: ['tenant'], summary: 'List polls and results', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Polls and results' } } }, post: { tags: ['tenant'], summary: 'Create a poll', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Poll created' }, '400': { description: 'Invalid poll details' } } } },
+    '/v1/admin/communications/context': {get:{tags:['tenant'],summary:'Read community scheduling name and timezone',security:[{bearerAuth:[]}],responses:{'200':{description:'Community context'},'403':{description:'Administrator permission required'}}}},
+    '/v1/admin/announcements/{announcementId}': {get:{tags:['tenant'],summary:'Read one scoped announcement independently of list preview',security:[{bearerAuth:[]}],responses:{'200':{description:'Announcement'},'404':{description:'Not found'}}}},
+    '/v1/admin/polls/{pollId}': {get:{tags:['tenant'],summary:'Read one scoped poll and admin results independently of list preview',security:[{bearerAuth:[]}],responses:{'200':{description:'Poll and results'},'404':{description:'Not found'}}}},
+    '/v1/admin/polls': { get: { tags: ['tenant'], summary: 'Page and filter all admin polls and results', description: 'Query page (20 per page), search (literal text up to 160 characters), status All/Live/Scheduled/Ended. Returns items,total,page,pageSize; admin history is not limited by resident retention.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Polls and results' } } }, post: { tags: ['tenant'], summary: 'Publish a reviewed poll', description: 'Requires requestKey UUID. Repeated identical requests return the same record; changed payload or kind conflicts. Poll and options commit atomically.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Poll created' }, '400': { description: 'Invalid poll details' } } } },
+    '/v1/admin/polls/{pollId}/end': {post:{tags:['tenant'],summary:'End or cancel a poll without changing its planned schedule',description:'Records closure time and actor once. Repeated/concurrent requests preserve the first closure. Resident retention uses the earlier of scheduled end and actual closure.',security:[{bearerAuth:[]}],responses:{'200':{description:'Ended poll with original schedule and closure time'},'403':{description:'Administrator permission required'},'404':{description:'Poll not found'}}}},
     '/v1/admin/polls/{pollId}/responses': { get: { tags: ['tenant'], summary: 'View a page of named poll responses', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Paginated poll responses' }, '403': { description: 'Administrator permission required' }, '404': { description: 'Poll not found' } } } },
     '/v1/tenant/notices/read-all': {
       post: { tags: ['tenant'], summary: 'Mark published notices read', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Updated read state' }, '403': { description: 'An active resident profile is required' } } },
@@ -525,7 +573,7 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
       get: { tags: ['tenant'], summary: 'Apartment administrator overview', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped collection overview' }, '403': { description: 'Administrator permission required' } } },
     },
     '/v1/admin/announcements': {
-      get: { tags: ['tenant'], summary: 'List apartment announcements', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant announcements' }, '403': { description: 'Administrator permission required' } } },
+      get: { tags: ['tenant'], summary: 'Page and filter all admin announcements', description: 'Query page (20 per page), search (literal text), status All/Live/Scheduled/Ended/Draft. Returns items,total,page,pageSize. Drafts remain admin-only and cannot be ended into published history.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant announcements' }, '403': { description: 'Administrator permission required' } } },
       post: { tags: ['tenant'], summary: 'Publish an announcement immediately or on a schedule', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['title', 'body', 'startsAt', 'endsAt', 'isImportant', 'isBanner'], properties: { title: { type: 'string', minLength: 3, maxLength: 120 }, body: { type: 'string', minLength: 1, maxLength: 5000 }, startsAt: { type: 'string', format: 'date-time' }, endsAt: { type: 'string', format: 'date-time' }, isImportant: { type: 'boolean' }, isBanner: { type: 'boolean' } } } } } }, responses: { '201': { description: 'Announcement created' }, '400': { description: 'Invalid announcement details' }, '403': { description: 'Administrator permission required' } } },
     },
     '/v1/admin/announcements/{announcementId}/end': {
@@ -574,7 +622,7 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
       post: { tags: ['tenant'], summary: 'Publish invoices after confirming a current preview', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Invoices published atomically' }, '400': { description: 'Invalid billing period or preview' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Preview is stale or billing period was already published' } } },
     },
     '/v1/admin/collections': {
-      get: { tags: ['tenant'], summary: 'List tenant payment records and offline payments awaiting confirmation', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped payment collection records' }, '403': { description: 'Administrator permission required' } } },
+      get: { tags: ['tenant'], summary: 'Page and filter community offline payment reports', description: 'Returns payments, total, page, pageSize (10) and full-community summary. Query literal search (160 characters), status all/pending/confirmed, period YYYY-MM by reported date in Asia/Kolkata, and page. Current-month confirmed summary uses confirmed_at, not report creation; pending totals cover all months. All reads share one repeatable-read snapshot.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped payment collection records' }, '403': { description: 'Administrator permission required' } } },
     },
     '/v1/admin/collections/{paymentId}/confirm': {
       post: { tags: ['tenant'], summary: 'Confirm a resident-reported offline payment and update the invoice balance', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Payment confirmed; repeated confirmation is idempotent' }, '403': { description: 'Administrator permission required' }, '404': { description: 'Payment not found in this tenant' }, '409': { description: 'Payment cannot be confirmed in its current state' } } },
@@ -661,11 +709,12 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     currency: string
     timezone: string
   }>(
-    `SELECT r.id, r.full_name, r.email, r.phone, u.number AS unit_number, u.building_name,
+    `SELECT r.id, r.full_name, r.email, r.phone, u.number AS unit_number, COALESCE(b.name,NULLIF(u.building_name,''),'No block') AS building_name,
             o.name AS organization_name, o.accent_color, o.locale, o.currency, o.timezone
      FROM residents r
      JOIN units u ON u.id = r.unit_id
      JOIN organizations o ON o.tenant_id = $2
+     LEFT JOIN apartment_buildings b ON b.id=u.apartment_building_id AND b.tenant_id=$2
      WHERE r.auth_subject = $1 AND r.status = 'active' AND u.tenant_id = $2
      LIMIT 1`,
     [subject, access.tenantId],
@@ -682,9 +731,10 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     due_date: string
     total_minor: string
     previous_dues_minor: string
+    status: string
   }>(
     `SELECT i.id, i.invoice_number, to_char(i.billing_period, 'YYYY-MM') AS billing_period, i.due_date::text,
-            i.total_minor::text,
+            i.total_minor::text, i.status,
             COALESCE(carried.previous_dues_minor, 0)::text AS previous_dues_minor
      FROM invoices i
      LEFT JOIN LATERAL (
@@ -692,23 +742,25 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
        FROM invoice_items ii
        WHERE ii.invoice_id = i.id AND ii.category = 'previous_dues'
      ) carried ON TRUE
-     WHERE i.resident_id = $1 AND i.status IN ('open', 'partially_paid')
-     ORDER BY i.billing_period DESC
+     WHERE i.resident_id = $1 AND i.status IN ('open', 'partially_paid', 'paid')
+     ORDER BY i.billing_period DESC, i.is_opening_balance ASC, i.created_at DESC
     `,
     [resident.id],
   )
-  const invoices = invoiceResult.rows
-  const invoice = invoices[0]
+  const invoices = invoiceResult.rows.filter((row) => row.status === 'open' || row.status === 'partially_paid')
+  const invoice = invoices[0] ?? invoiceResult.rows[0]
   const invoicePaymentTotals = invoices.length > 0
     ? await pool.query<{
       invoice_id: string
       confirmed_minor: string
       pending_minor: string
+      opening_credit_minor: string
     }>(
       `SELECT invoice_id,
               COALESCE(SUM(amount_minor) FILTER (WHERE status IN ('succeeded', 'reconciled', 'confirmed')), 0)::text AS confirmed_minor,
-              COALESCE(SUM(amount_minor) FILTER (WHERE status = 'pending'), 0)::text AS pending_minor
-       FROM payments
+              COALESCE(SUM(amount_minor) FILTER (WHERE status = 'pending'), 0)::text AS pending_minor,
+              COALESCE(SUM(amount_minor) FILTER (WHERE method = 'opening_credit'), 0)::text AS opening_credit_minor
+       FROM invoice_payment_credits
        WHERE invoice_id = ANY($1::uuid[])
        GROUP BY invoice_id`,
       [invoices.map(({ id }) => id)],
@@ -738,6 +790,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       totalMinor,
       remainingDueMinor,
       pendingPaymentMinor,
+      openingCreditAppliedMinor: minorUnits(payments?.opening_credit_minor ?? '0'),
       availableToReportMinor: Math.max(remainingDueMinor - pendingPaymentMinor, 0),
     }
   })
@@ -754,6 +807,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     previousDuesMinor: 0,
     feesMinor: 0,
     roundOffMinor: 0,
+    openingBalanceMinor: 0,
     totalMinor: 0,
   }
   let currentDueMinor = 0
@@ -773,6 +827,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       if (item.category === 'previous_dues') breakdown.previousDuesMinor = amount
       if (item.category === 'fees') breakdown.feesMinor = amount
       if (item.category === 'round_off') breakdown.roundOffMinor = amount
+      if (item.category === 'opening_balance') breakdown.openingBalanceMinor = amount
     }
     const originalPreviousDuesMinor = breakdown.previousDuesMinor
     // Invoice items are immutable snapshots, so a previous-dues line can be
@@ -792,7 +847,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
        ), prior_payments AS (
          SELECT SUM(p.amount_minor) AS amount_minor
          FROM invoices i
-         JOIN payments p ON p.invoice_id = i.id
+         JOIN invoice_payment_credits p ON p.invoice_id = i.id
          WHERE i.resident_id = $1 AND i.billing_period < $2::date
            AND i.status IN ('open', 'partially_paid')
            AND p.status IN ('succeeded', 'reconciled', 'confirmed')
@@ -816,17 +871,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
   }
 
   const [payments, notices] = await Promise.all([
-    pool.query(
-      `SELECT p.id, i.invoice_number, to_char(i.billing_period, 'YYYY-MM') AS billing_period,
-              p.amount_minor, p.currency, p.method, p.status,
-              p.created_at, p.reference
-       FROM payments p
-       JOIN invoices i ON i.id = p.invoice_id
-       WHERE i.resident_id = $1
-       ORDER BY p.created_at DESC
-       LIMIT 5`,
-      [resident.id],
-    ),
+    residentRecentPayments(pool, access, resident.id),
     pool.query(
       `SELECT n.id, n.title, n.body, n.published_at, n.is_important, n.is_banner, n.starts_at, n.ends_at,
               (nr.resident_id IS NOT NULL) AS is_read
@@ -843,8 +888,13 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     'SELECT apartment_code FROM tenant_records WHERE tenant_id = $1', [access.tenantId],
   )
 
+  const openingCreditResult = await pool.query<{ amount: string }>(
+    `SELECT COALESCE(SUM(-o.amount_minor-COALESCE((SELECT SUM(amount_minor) FROM opening_credit_allocations WHERE opening_id=o.id),0)),0)::text AS amount FROM resident_opening_balances o WHERE o.resident_id=$1 AND o.tenant_id=$2 AND o.amount_minor<0 AND o.superseded_by IS NULL`,
+    [resident.id, access.tenantId],
+  )
   return {
     tenantId: access.tenantId,
+    availableOpeningCreditMinor: minorUnits(openingCreditResult.rows[0]?.amount ?? '0'),
     residentId: resident.id,
     billingPeriod: invoice?.billing_period ?? null,
     dueDate: invoice?.due_date ?? null,
@@ -859,17 +909,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     totalMinor: breakdown.totalMinor,
     currency: resident.currency,
     breakdown,
-    recentPayments: payments.rows.map((payment) => ({
-      id: payment.id,
-      invoiceId: payment.invoice_number,
-      billingPeriod: payment.billing_period,
-      amountMinor: minorUnits(payment.amount_minor),
-      currency: payment.currency,
-      method: payment.method,
-      status: payment.status,
-      createdAt: payment.created_at,
-      reference: payment.reference,
-    })),
+    recentPayments: payments,
     announcements: notices.rows.map((notice) => ({
       id: notice.id,
       title: notice.title,
@@ -910,17 +950,22 @@ const getResidentProfile = async (access: TenantAccess, subject: string) => {
     timezone: string
   }>(
     `SELECT r.full_name, r.email::text, r.phone, u.number AS unit_number,
-            u.building_name, o.name AS organization_name, o.timezone
+            COALESCE(b.name,NULLIF(u.building_name,''),'No block') AS building_name, o.name AS organization_name, o.timezone
      FROM residents r
      JOIN units u ON u.id = r.unit_id AND u.tenant_id = $2
      JOIN organizations o ON o.tenant_id = $2
+     LEFT JOIN apartment_buildings b ON b.id=u.apartment_building_id AND b.tenant_id=$2
      WHERE r.auth_subject = $1 AND r.status = 'active'
      LIMIT 1`,
     [subject, access.tenantId],
   )
   const profile = result.rows[0]
   if (!profile) throw new ApiFault(404, 'not_found', 'No active resident profile is associated with this account')
+  const tenant=(await getPlatformPool().query<{apartment_code:string}>('SELECT apartment_code FROM tenant_records WHERE tenant_id=$1',[access.tenantId])).rows[0]
   return {
+    apartmentCode: tenant?.apartment_code ?? '',
+    unitNumber: profile.unit_number,
+    buildingName: profile.building_name,
     fullName: profile.full_name,
     email: profile.email,
     phone: profile.phone,
@@ -971,132 +1016,7 @@ const updateResidentProfile = async (access: TenantAccess, subject: string, rawI
   return getResidentProfile(access, subject)
 }
 
-const submitResidentManualPayment = async (access: TenantAccess, subject: string, rawInput: unknown) => {
-  requireRole(access, 'resident')
-  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
-    throw new ApiFault(400, 'invalid_request', 'Invoice and payment amount are required')
-  }
-  const input = rawInput as Record<string, unknown>
-  const invoiceIds = input.invoiceIds ?? (typeof input.invoiceId === 'string' ? [input.invoiceId] : null)
-  const invoiceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-  if (
-    !Array.isArray(invoiceIds)
-    || invoiceIds.length === 0
-    || invoiceIds.length > 500
-    || !invoiceIds.every((id) => typeof id === 'string' && invoiceIdPattern.test(id))
-    || new Set(invoiceIds).size !== invoiceIds.length
-  ) {
-    throw new ApiFault(400, 'invalid_request', 'Select one or more valid invoices')
-  }
-  let amountMinor: number
-  try {
-    amountMinor = parseManualPaymentAmount(input.amount)
-  } catch (error) {
-    if (!(error instanceof RangeError)) throw error
-    throw new ApiFault(400, 'invalid_request', error.message)
-  }
-
-  const client = await withTenantPool(access).connect()
-  try {
-    await client.query('BEGIN')
-    const invoiceResult = await client.query<{
-      id: string
-      billing_period: string
-      total_minor: string
-      previous_dues_minor: string
-      currency: string
-      status: string
-      confirmed_minor: string
-      pending_minor: string
-    }>(
-      `SELECT i.id, to_char(i.billing_period, 'YYYY-MM') AS billing_period,
-              i.total_minor::text,
-              COALESCE(carried.previous_dues_minor, 0)::text AS previous_dues_minor,
-              i.currency, i.status,
-              COALESCE(payment_totals.confirmed_minor, 0)::text AS confirmed_minor,
-              COALESCE(payment_totals.pending_minor, 0)::text AS pending_minor
-       FROM invoices i
-       JOIN residents r ON r.id = i.resident_id
-       JOIN units u ON u.id = r.unit_id
-       LEFT JOIN LATERAL (
-         SELECT SUM(p.amount_minor) FILTER (WHERE p.status IN ('succeeded', 'reconciled', 'confirmed')) AS confirmed_minor,
-                SUM(p.amount_minor) FILTER (WHERE p.status = 'pending') AS pending_minor
-         FROM payments p WHERE p.invoice_id = i.id
-       ) payment_totals ON TRUE
-       LEFT JOIN LATERAL (
-         SELECT SUM(ii.amount_minor) AS previous_dues_minor
-         FROM invoice_items ii
-         WHERE ii.invoice_id = i.id AND ii.category = 'previous_dues'
-       ) carried ON TRUE
-       WHERE i.id = ANY($1::uuid[]) AND r.auth_subject = $2 AND r.status = 'active'
-         AND u.tenant_id = $3 AND i.status IN ('open', 'partially_paid')
-       ORDER BY i.billing_period ASC
-       FOR UPDATE OF i`,
-      [invoiceIds, subject, access.tenantId],
-    )
-    if (invoiceResult.rows.length === 0) {
-      throw new ApiFault(404, 'not_found', 'No active invoice is available for this account')
-    }
-    if (invoiceResult.rows.length !== invoiceIds.length) {
-      throw new ApiFault(409, 'invalid_request', 'One or more selected invoices are no longer accepting payments')
-    }
-
-    const allocations = allocateManualPayment(amountMinor, invoiceResult.rows.map((invoice) => {
-      const totalMinor = BigInt(invoice.total_minor)
-      const previousDuesMinor = BigInt(invoice.previous_dues_minor)
-      const confirmedMinor = BigInt(invoice.confirmed_minor)
-      const pendingMinor = BigInt(invoice.pending_minor)
-      if (previousDuesMinor > totalMinor) {
-        throw new ApiFault(500, 'data_integrity_error', 'Invoice carry-forward exceeds its total')
-      }
-      const availableMinor = totalMinor - previousDuesMinor - confirmedMinor - pendingMinor
-      return {
-        invoiceId: invoice.id,
-        billingPeriod: invoice.billing_period,
-        availableMinor: Number(availableMinor > 0n ? availableMinor : 0n),
-      }
-    }))
-    const payments: Array<{ id: string; invoiceId: string; amountMinor: number; billingPeriod: string }> = []
-    for (const allocation of allocations) {
-      const invoice = invoiceResult.rows.find(({ id }) => id === allocation.invoiceId)
-      if (!invoice) throw new ApiFault(500, 'data_integrity_error', 'An invoice allocation could not be matched')
-      const payment = await client.query<{ id: string }>(
-        `INSERT INTO payments (invoice_id, amount_minor, currency, method, status)
-         VALUES ($1, $2, $3, 'offline_manual', 'pending')
-         RETURNING id`,
-        [invoice.id, allocation.amountMinor, invoice.currency],
-      )
-      const createdPayment = payment.rows[0]
-      if (!createdPayment) throw new ApiFault(500, 'data_integrity_error', 'The offline payment could not be recorded')
-      payments.push({
-        id: createdPayment.id,
-        invoiceId: invoice.id,
-        amountMinor: allocation.amountMinor,
-        billingPeriod: invoice.billing_period,
-      })
-    }
-    const firstPayment = payments[0]
-    if (!firstPayment) throw new ApiFault(500, 'data_integrity_error', 'The offline payment could not be allocated')
-    await client.query('COMMIT')
-    return {
-      id: firstPayment.id,
-      invoiceId: firstPayment.invoiceId,
-      invoiceIds: [...new Set(payments.map(({ invoiceId }) => invoiceId))],
-      allocations: payments,
-      amountMinor,
-      currency: invoiceResult.rows[0]?.currency ?? 'INR',
-      status: 'pending' as const,
-    }
-  } catch (error) {
-    await client.query('ROLLBACK')
-    if (error instanceof RangeError) {
-      throw new ApiFault(409, 'invalid_request', error.message)
-    }
-    throw error
-  } finally {
-    client.release()
-  }
-}
+const submitResidentManualPayment = (access: TenantAccess, _subject: string, rawInput: unknown) => submitPaymentReport(withTenantPool(access), access, rawInput)
 
 const getResidentNotices = async (access: TenantAccess, subject: string) => {
   requireRole(access, 'resident')
@@ -1143,7 +1063,7 @@ const pollResults = async (pool: ReturnType<typeof withTenantPool>, pollId: stri
   return result.rows.map((row) => ({ id: row.id, label: row.label, votes: row.votes }))
 }
 
-const getResidentPolls = async (access: TenantAccess, subject: string) => {
+const getResidentPolls = async (access: TenantAccess, subject: string, pollId?: string) => {
   requireRole(access, 'resident')
   const pool = withTenantPool(access)
   const residentResult = await pool.query(`SELECT r.id FROM residents r JOIN units u ON u.id = r.unit_id
@@ -1153,19 +1073,19 @@ const getResidentPolls = async (access: TenantAccess, subject: string) => {
   const polls = await pool.query(`SELECT p.*, pp.resident_id IS NOT NULL AS has_voted,
       COALESCE(named_ballot.option_id, anonymous_ballot.option_id) AS my_option_id,
       (pp.ballot_id IS NOT NULL OR named_ballot.id IS NOT NULL) AS can_change_vote,
-      p.ends_at + make_interval(days => p.results_retention_days) AS results_visible_until
+      LEAST(p.ends_at,COALESCE(p.closed_at,p.ends_at)) + make_interval(days => p.results_retention_days) AS results_visible_until
     FROM polls p LEFT JOIN poll_participation pp ON pp.poll_id = p.id AND pp.resident_id = $1
     LEFT JOIN poll_ballots named_ballot ON named_ballot.poll_id = p.id AND named_ballot.resident_id = $1
     LEFT JOIN poll_ballots anonymous_ballot ON anonymous_ballot.id = pp.ballot_id
-    WHERE p.tenant_id = $2 AND (p.ends_at > NOW() OR p.ends_at + make_interval(days => p.results_retention_days) > NOW())
-    ORDER BY p.starts_at DESC LIMIT 50`, [residentId, access.tenantId])
+    WHERE p.tenant_id = $2 AND ($3::uuid IS NULL OR p.id=$3) AND (LEAST(p.ends_at,COALESCE(p.closed_at,p.ends_at)) + make_interval(days => p.results_retention_days) > NOW())
+    ORDER BY p.starts_at DESC LIMIT 50`, [residentId, access.tenantId, pollId??null])
   return Promise.all(polls.rows.map(async (poll) => {
     const options = await pool.query('SELECT id, label FROM poll_options WHERE poll_id = $1 ORDER BY position', [poll.id])
-    const live = poll.status === 'published' && new Date(poll.starts_at).getTime() <= Date.now() && new Date(poll.ends_at).getTime() > Date.now()
+    const live = poll.status === 'published' && !poll.closed_at && new Date(poll.starts_at).getTime() <= Date.now() && new Date(poll.ends_at).getTime() > Date.now()
     const ended = new Date(poll.ends_at).getTime() <= Date.now() || poll.status === 'archived'
     const resultsVisible = poll.show_results_live && live || ended && new Date(poll.results_visible_until).getTime() > Date.now()
     const voters = resultsVisible && !poll.anonymous ? await pool.query(`SELECT r.full_name, u.number AS unit, o.label AS option FROM poll_ballots b JOIN residents r ON r.id = b.resident_id JOIN units u ON u.id = r.unit_id JOIN poll_options o ON o.id = b.option_id WHERE b.poll_id = $1 ORDER BY u.number`, [poll.id]).then((r) => r.rows) : []
-    return { id: poll.id, question: poll.question, startsAt: poll.starts_at, endsAt: poll.ends_at, resultsVisibleUntil: poll.results_visible_until, resultsRetentionDays: poll.results_retention_days, status: poll.status, anonymous: poll.anonymous,
+    return { id: poll.id, question: poll.question, startsAt: poll.starts_at, endsAt: poll.ends_at, closedAt: poll.closed_at, effectiveEndsAt: poll.closed_at && new Date(poll.closed_at)<new Date(poll.ends_at)?poll.closed_at:poll.ends_at, resultsVisibleUntil: poll.results_visible_until, resultsRetentionDays: poll.results_retention_days, status: poll.status, anonymous: poll.anonymous,
       showResultsLive: poll.show_results_live, hasVoted: poll.has_voted, myOptionId: poll.my_option_id ?? null,
       canChangeVote: poll.can_change_vote, isLive: live, options: options.rows,
       results: resultsVisible ? await pollResults(pool, poll.id) : null, voters }
@@ -1183,7 +1103,7 @@ const voteInPoll = async (access: TenantAccess, subject: string, pollId: string,
     const resident = await client.query(`SELECT r.id FROM residents r JOIN units u ON u.id = r.unit_id WHERE r.auth_subject = $1 AND r.status = 'active' AND u.tenant_id = $2 LIMIT 1`, [subject, access.tenantId])
     const residentId = resident.rows[0]?.id
     if (!residentId) throw new ApiFault(403, 'forbidden', 'An active resident profile is required')
-    const poll = await client.query(`SELECT id, anonymous FROM polls WHERE id = $1 AND tenant_id = $2 AND status = 'published' AND starts_at <= NOW() AND ends_at > NOW() FOR UPDATE`, [pollId, access.tenantId])
+    const poll = await client.query(`SELECT id, anonymous FROM polls WHERE id = $1 AND tenant_id = $2 AND status = 'published' AND closed_at IS NULL AND starts_at <= NOW() AND ends_at > NOW() FOR UPDATE`, [pollId, access.tenantId])
     if (!poll.rows[0]) throw new ApiFault(409, 'invalid_request', 'This poll is not currently open')
     const option = await client.query('SELECT id FROM poll_options WHERE poll_id = $1 AND id = $2', [pollId, optionId])
     if (!option.rows[0]) throw new ApiFault(400, 'invalid_request', 'Choose an option in this poll')
@@ -1205,11 +1125,11 @@ const voteInPoll = async (access: TenantAccess, subject: string, pollId: string,
   } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
 }
 
-const getAdminPolls = async (access: TenantAccess) => {
+const getAdminPolls = async (access: TenantAccess, id?: string) => {
   requireRole(access, 'admin')
   const pool = withTenantPool(access)
-  const polls = await pool.query('SELECT * FROM polls WHERE tenant_id = $1 ORDER BY starts_at DESC LIMIT 100', [access.tenantId])
-  return Promise.all(polls.rows.map(async (poll) => ({ id: poll.id, question: poll.question, startsAt: poll.starts_at, endsAt: poll.ends_at,
+  const polls = await pool.query('SELECT * FROM polls WHERE tenant_id = $1 AND ($2::uuid IS NULL OR id=$2) ORDER BY starts_at DESC LIMIT 100', [access.tenantId,id??null])
+  return Promise.all(polls.rows.map(async (poll) => ({ id: poll.id, question: poll.question, startsAt: poll.starts_at, endsAt: poll.ends_at, closedAt: poll.closed_at, closedBy: poll.closed_by,
     anonymous: poll.anonymous, showResultsLive: poll.show_results_live, resultsRetentionDays: poll.results_retention_days, status: poll.status,
     options: await pool.query('SELECT id, label FROM poll_options WHERE poll_id = $1 ORDER BY position', [poll.id]).then((r) => r.rows),
     results: await pollResults(pool, poll.id),
@@ -1254,16 +1174,21 @@ const createAdminPoll = async (access: TenantAccess, input: unknown) => {
   if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime()) || ends <= starts) throw new ApiFault(400, 'invalid_request', 'Choose a valid end time after the start time')
   if (typeof v.anonymous !== 'boolean' || typeof v.showResultsLive !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Choose poll privacy and result visibility settings')
   if (v.resultsRetentionDays !== 7 && v.resultsRetentionDays !== 30 && v.resultsRetentionDays !== 90) throw new ApiFault(400, 'invalid_request', 'Choose a resident results retention period of 7, 30, or 90 days')
-  const pool = withTenantPool(access), client = await pool.connect()
-  try { await client.query('BEGIN'); const created = await client.query(`INSERT INTO polls (tenant_id, question, starts_at, ends_at, anonymous, show_results_live, results_retention_days, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [access.tenantId, question, starts.toISOString(), ends.toISOString(), v.anonymous, v.showResultsLive, v.resultsRetentionDays, access.subject]); const id = created.rows[0].id; for (let i=0;i<options.length;i++) await client.query('INSERT INTO poll_options (poll_id,label,position) VALUES ($1,$2,$3)', [id,options[i],i]); await client.query('COMMIT'); return { id } }
-  catch (e) { await client.query('ROLLBACK'); throw e } finally { client.release() }
+  const payload={question,options,startsAt:starts.toISOString(),endsAt:ends.toISOString(),anonymous:v.anonymous,showResultsLive:v.showResultsLive,resultsRetentionDays:v.resultsRetentionDays}
+  return publishCommunication(withTenantPool(access),access,'poll',v.requestKey,payload,async(client)=>{
+    const created=await client.query(`INSERT INTO polls(tenant_id,question,starts_at,ends_at,anonymous,show_results_live,results_retention_days,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[access.tenantId,question,payload.startsAt,payload.endsAt,v.anonymous,v.showResultsLive,v.resultsRetentionDays,access.subject])
+    const id=created.rows[0].id as string
+    for(let i=0;i<options.length;i++)await client.query('INSERT INTO poll_options(poll_id,label,position) VALUES($1,$2,$3)',[id,options[i],i])
+    return{id}
+  })
 }
 
 const endAdminPoll = async (access: TenantAccess, pollId: string) => {
   requireRole(access, 'admin')
-  const result = await withTenantPool(access).query("UPDATE polls SET status = 'archived', ends_at = LEAST(ends_at, NOW()) WHERE tenant_id = $1 AND id = $2 RETURNING id", [access.tenantId, pollId])
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pollId))throw new ApiFault(404,'not_found','Poll not found')
+  const result = await withTenantPool(access).query("UPDATE polls SET status = 'archived', closed_at=COALESCE(closed_at,NOW()), closed_by=COALESCE(closed_by,$3) WHERE tenant_id = $1 AND id = $2 RETURNING id,closed_at,closed_by,starts_at,ends_at", [access.tenantId, pollId,access.subject])
   if (!result.rows[0]) throw new ApiFault(404, 'not_found', 'Poll not found')
-  return { id: result.rows[0].id, status: 'ended' }
+  return { id: result.rows[0].id, status: 'ended', closedAt:result.rows[0].closed_at, startsAt:result.rows[0].starts_at, endsAt:result.rows[0].ends_at }
 }
 
 const markResidentNoticesRead = async (access: TenantAccess, subject: string) => {
@@ -1311,20 +1236,20 @@ const markResidentNoticeRead = async (access: TenantAccess, subject: string, not
      JOIN units u ON u.id = r.unit_id
      JOIN notices n ON n.tenant_id = u.tenant_id AND n.id = $3
      WHERE r.auth_subject = $1 AND r.status = 'active' AND u.tenant_id = $2
-       AND n.status = 'published' AND n.starts_at <= NOW()
-       AND (n.ends_at IS NULL OR n.ends_at > NOW())
+       AND n.status IN ('published','archived')
      ON CONFLICT (resident_id, notice_id) DO NOTHING`,
     [subject, access.tenantId, noticeId],
   )
+  if(!result.rowCount)await residentUpdates(pool,access,undefined,noticeId)
   return { marked: (result.rowCount ?? 0) > 0 }
 }
 
-const getAdminAnnouncements = async (access: TenantAccess) => {
+const getAdminAnnouncements = async (access: TenantAccess, id?: string) => {
   requireRole(access, 'admin')
   const result = await withTenantPool(access).query(
     `SELECT id, title, body, is_important, is_banner, starts_at, ends_at, published_at, status
-     FROM notices WHERE tenant_id = $1 ORDER BY starts_at DESC, published_at DESC LIMIT 200`,
-    [access.tenantId],
+     FROM notices WHERE tenant_id = $1 AND ($2::uuid IS NULL OR id=$2) ORDER BY starts_at DESC, published_at DESC LIMIT 200`,
+    [access.tenantId,id??null],
   )
   return result.rows.map((row) => ({ id: row.id, title: row.title, body: row.body, isImportant: row.is_important, isBanner: row.is_banner, startsAt: row.starts_at, endsAt: row.ends_at, publishedAt: row.published_at, status: row.status }))
 }
@@ -1343,14 +1268,11 @@ const createAdminAnnouncement = async (access: TenantAccess, input: unknown) => 
   if (Number.isNaN(endsAt.getTime()) || endsAt <= startsAt) throw new ApiFault(400, 'invalid_request', 'Choose an end time after the start time')
   if (typeof value.isImportant !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Choose whether this announcement is important')
   if (typeof value.isBanner !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Choose whether this announcement should appear as a banner')
-  const result = await withTenantPool(access).query(
-    `INSERT INTO notices (id, tenant_id, title, body, is_read, published_at, status, is_important, is_banner, starts_at, ends_at, created_by)
-     VALUES (gen_random_uuid(), $1, $2, $3, FALSE, NOW(), 'published', $4, $5, $6, $7, $8)
-     RETURNING id, title, body, is_important, is_banner, starts_at, ends_at, published_at, status`,
-    [access.tenantId, title, body, value.isImportant, value.isBanner, startsAt.toISOString(), endsAt.toISOString(), access.subject],
-  )
-  const row = result.rows[0]
-  return { id: row.id, title: row.title, body: row.body, isImportant: row.is_important, isBanner: row.is_banner, startsAt: row.starts_at, endsAt: row.ends_at, publishedAt: row.published_at, status: row.status }
+  const payload={title,body,startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),isImportant:value.isImportant,isBanner:value.isBanner}
+  return publishCommunication(withTenantPool(access),access,'announcement',value.requestKey,payload,async(client)=>{
+    const result=await client.query(`INSERT INTO notices(id,tenant_id,title,body,is_read,published_at,status,is_important,is_banner,starts_at,ends_at,created_by) VALUES(gen_random_uuid(),$1,$2,$3,FALSE,NOW(),'published',$4,$5,$6,$7,$8) RETURNING id`,[access.tenantId,title,body,value.isImportant,value.isBanner,payload.startsAt,payload.endsAt,access.subject])
+    return{id:result.rows[0].id as string}
+  })
 }
 
 const endAdminAnnouncement = async (access: TenantAccess, announcementId: string) => {
@@ -1360,7 +1282,7 @@ const endAdminAnnouncement = async (access: TenantAccess, announcementId: string
   }
   const result = await withTenantPool(access).query(
     `UPDATE notices SET status = 'archived'
-     WHERE tenant_id = $1 AND id = $2
+     WHERE tenant_id = $1 AND id = $2 AND status IN ('published','archived')
      RETURNING id`,
     [access.tenantId, announcementId],
   )
@@ -1372,30 +1294,7 @@ const getAdminOverview = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   const pool = withTenantPool(access)
   const [totals, units, transactions] = await Promise.all([
-    pool.query<{
-      billed_minor: string
-      collected_minor: string
-      overdue_minor: string
-    }>(
-      `WITH paid AS (
-         SELECT invoice_id, SUM(amount_minor) AS amount_minor
-         FROM payments WHERE status IN ('succeeded', 'reconciled', 'confirmed') GROUP BY invoice_id
-       ), latest_invoice AS (
-         SELECT DISTINCT ON (i.resident_id)
-                i.id, i.resident_id, i.total_minor, i.status, i.due_date,
-                COALESCE(p.amount_minor, 0) AS paid_minor
-         FROM invoices i
-         LEFT JOIN paid p ON p.invoice_id = i.id
-         WHERE i.status <> 'void'
-         ORDER BY i.resident_id, i.billing_period DESC
-       )
-       SELECT
-         COALESCE(SUM(i.total_minor), 0)::text AS billed_minor,
-         COALESCE(SUM(i.paid_minor), 0)::text AS collected_minor,
-         COALESCE(SUM(GREATEST(i.total_minor - i.paid_minor, 0))
-           FILTER (WHERE i.due_date < CURRENT_DATE AND i.status IN ('open', 'partially_paid')), 0)::text AS overdue_minor
-       FROM latest_invoice i`,
-    ),
+    financialOverview(pool, access),
     pool.query(
       `SELECT u.number,
               COALESCE(u.building_name, 'Unassigned building') AS building,
@@ -1414,18 +1313,21 @@ const getAdminOverview = async (access: TenantAccess) => {
          ORDER BY i.billing_period DESC
          LIMIT 1
        ) latest ON TRUE
+       WHERE u.tenant_id = $1
        ORDER BY u.number
        LIMIT 100`,
+      [access.tenantId],
     ),
     pool.query(
       `SELECT p.id, r.full_name AS resident, u.number AS unit, p.amount_minor, p.currency,
               p.status, p.created_at
-       FROM payments p
-       JOIN invoices i ON i.id = p.invoice_id
-       JOIN residents r ON r.id = i.resident_id
+       FROM payment_reports p
+       JOIN residents r ON r.id = p.resident_id
        JOIN units u ON u.id = r.unit_id
+       WHERE p.tenant_id = $1
        ORDER BY p.created_at DESC
        LIMIT 10`,
+      [access.tenantId],
     ),
   ])
   const apartmentCodeResult = await getPlatformPool().query<{ apartment_code: string }>(
@@ -1440,7 +1342,7 @@ const getAdminOverview = async (access: TenantAccess) => {
     apartmentCode: apartmentCodeResult.rows[0]?.apartment_code ?? '',
     billedMinor,
     collectedMinor,
-    outstandingMinor: Math.max(billedMinor - collectedMinor, 0),
+    outstandingMinor: minorUnits(amount?.outstanding_minor ?? '0'),
     overdueMinor: minorUnits(amount?.overdue_minor ?? '0'),
     currency: 'INR',
     unitStatus: units.rows.map((unit) => ({
@@ -1498,19 +1400,19 @@ const getAdminResidents = async (access: TenantAccess) => {
      FROM residents r
      JOIN units u ON u.id = r.unit_id
      LEFT JOIN LATERAL (
-       SELECT SUM(GREATEST(i.total_minor - COALESCE(paid.amount_minor, 0), 0)) AS outstanding_minor
+       SELECT SUM(GREATEST(i.total_minor - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0) - COALESCE(paid.amount_minor, 0), 0)) AS outstanding_minor
        FROM invoices i
        LEFT JOIN LATERAL (
-         SELECT SUM(p.amount_minor) AS amount_minor FROM payments p
+         SELECT SUM(p.amount_minor) AS amount_minor FROM invoice_payment_credits p
          WHERE p.invoice_id = i.id AND p.status IN ('succeeded', 'reconciled', 'confirmed')
        ) paid ON TRUE
        WHERE i.resident_id = r.id AND i.status IN ('open', 'partially_paid')
      ) dues ON TRUE
      LEFT JOIN LATERAL (
-       SELECT i.billing_period, i.due_date, i.total_minor,
+       SELECT i.billing_period, i.due_date, (i.total_minor - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)) AS total_minor,
               COALESCE((
                 SELECT SUM(p.amount_minor)
-                FROM payments p
+                FROM invoice_payment_credits p
                 WHERE p.invoice_id = i.id
                   AND p.status IN ('succeeded', 'reconciled', 'confirmed')
               ), 0) AS confirmed_minor
@@ -1717,7 +1619,7 @@ const recordResidentMoveOut = async (access: TenantAccess, residentId: string, r
   const moveOutDate = parseCalendarDate(input.moveOutDate, 'Move-out date')
   const newResidentStartDate = parseCalendarDate(input.newResidentStartDate, 'New resident start date')
   if (newResidentStartDate <= moveOutDate) throw new ApiFault(400, 'invalid_request', 'The new resident start date must be after the move-out date')
-  if (input.markDuesPaid !== undefined && typeof input.markDuesPaid !== 'boolean') throw new ApiFault(400, 'invalid_request', 'Dues settlement must be true or false')
+  if (input.markDuesPaid === true) throw new ApiFault(400, 'invalid_request', 'Move-out does not settle debt. Record a verified receipt with Cash or Bank account and reference in the former resident flow.')
   const finalReadingRaw = input.finalMeterReading
   let finalMeterReading: number | null = null
   if (finalReadingRaw !== null && finalReadingRaw !== undefined && finalReadingRaw !== '') {
@@ -1766,40 +1668,24 @@ const recordResidentMoveOut = async (access: TenantAccess, residentId: string, r
     }
 
     const invoices = await client.query<{ id: string; total_minor: string; confirmed_minor: string; pending_minor: string }>(
-      `SELECT i.id, i.total_minor::text,
+      `SELECT i.id, (i.total_minor - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0))::text AS total_minor,
               COALESCE(payments.confirmed_minor, 0)::text AS confirmed_minor,
               COALESCE(payments.pending_minor, 0)::text AS pending_minor
        FROM invoices i
        LEFT JOIN LATERAL (
          SELECT SUM(p.amount_minor) FILTER (WHERE p.status IN ('succeeded', 'reconciled', 'confirmed')) AS confirmed_minor,
                 SUM(p.amount_minor) FILTER (WHERE p.status = 'pending') AS pending_minor
-         FROM payments p WHERE p.invoice_id = i.id
+         FROM invoice_payment_credits p WHERE p.invoice_id = i.id
        ) payments ON TRUE
        WHERE i.resident_id = $1 AND i.status IN ('open', 'partially_paid')
        ORDER BY i.billing_period FOR UPDATE OF i`,
       [residentId],
     )
-    if (input.markDuesPaid === true && invoices.rows.some((invoice) => BigInt(invoice.pending_minor) > 0n)) {
-      throw new ApiFault(409, 'invalid_request', 'Resolve pending offline payment confirmations before marking move-out dues as paid')
-    }
     const outstandingMinor = invoices.rows.reduce((total, invoice) => {
       const due = BigInt(invoice.total_minor) - BigInt(invoice.confirmed_minor)
       return total + (due > 0n ? due : 0n)
     }, 0n)
     if (outstandingMinor > BigInt(Number.MAX_SAFE_INTEGER)) throw new ApiFault(500, 'data_integrity_error', 'Resident dues exceed the supported amount range')
-    if (input.markDuesPaid === true) {
-      for (const invoice of invoices.rows) {
-        const due = BigInt(invoice.total_minor) - BigInt(invoice.confirmed_minor)
-        if (due <= 0n) continue
-        await client.query(
-          `INSERT INTO payments (invoice_id, amount_minor, currency, method, status, reference, confirmed_by, confirmed_at)
-           VALUES ($1, $2, 'INR', 'offline_manual', 'confirmed', 'Move-out settlement', $3, NOW())`,
-          [invoice.id, due.toString(), access.subject],
-        )
-        await client.query("UPDATE invoices SET status = 'paid' WHERE id = $1", [invoice.id])
-      }
-    }
-
     await client.query(
       `UPDATE residents
        SET move_out_date = $2::date, final_meter_reading = $3,
@@ -1825,8 +1711,8 @@ const recordResidentMoveOut = async (access: TenantAccess, residentId: string, r
       unit: `${resident.building_name} · ${resident.number}`,
       moveOutDate,
       finalMeterReading,
-      outstandingMinor: input.markDuesPaid === true ? 0 : Number(outstandingMinor),
-      duesSettledMinor: input.markDuesPaid === true ? Number(outstandingMinor) : 0,
+      outstandingMinor: Number(outstandingMinor),
+      duesSettledMinor: 0,
     }
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1836,57 +1722,7 @@ const recordResidentMoveOut = async (access: TenantAccess, residentId: string, r
   }
 }
 
-const settleFormerResidentDues = async (access: TenantAccess, residentId: string) => {
-  requireRole(access, 'admin')
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(residentId)) throw new ApiFault(400, 'invalid_request', 'Choose a valid resident')
-  const client = await withTenantPool(access).connect()
-  try {
-    await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE')
-    const resident = await client.query<{ id: string; full_name: string; unit: string; building: string }>(
-      `SELECT r.id, r.full_name, u.number AS unit, u.building_name AS building
-       FROM residents r JOIN units u ON u.id = r.unit_id
-       WHERE r.id = $1 AND u.tenant_id = $2 FOR UPDATE OF r`,
-      [residentId, access.tenantId],
-    )
-    const residentRow = resident.rows[0]
-    if (!residentRow) throw new ApiFault(404, 'not_found', 'Resident not found')
-    const invoices = await client.query<{ id: string; total_minor: string; confirmed_minor: string; pending_minor: string }>(
-      `SELECT i.id, i.total_minor::text,
-              COALESCE(payments.confirmed_minor, 0)::text AS confirmed_minor,
-              COALESCE(payments.pending_minor, 0)::text AS pending_minor
-       FROM invoices i
-       LEFT JOIN LATERAL (
-         SELECT SUM(p.amount_minor) FILTER (WHERE p.status IN ('succeeded', 'reconciled', 'confirmed')) AS confirmed_minor,
-                SUM(p.amount_minor) FILTER (WHERE p.status = 'pending') AS pending_minor
-         FROM payments p WHERE p.invoice_id = i.id
-       ) payments ON TRUE
-       WHERE i.resident_id = $1 AND i.status IN ('open', 'partially_paid')
-       ORDER BY i.billing_period FOR UPDATE OF i`,
-      [residentId],
-    )
-    if (invoices.rows.some((invoice) => BigInt(invoice.pending_minor) > 0n)) throw new ApiFault(409, 'invalid_request', 'Resolve pending offline payment confirmations before settling these dues')
-    let settledMinor = 0n
-    for (const invoice of invoices.rows) {
-      const due = BigInt(invoice.total_minor) - BigInt(invoice.confirmed_minor)
-      if (due <= 0n) continue
-      settledMinor += due
-      await client.query(
-        `INSERT INTO payments (invoice_id, amount_minor, currency, method, status, reference, confirmed_by, confirmed_at)
-         VALUES ($1, $2, 'INR', 'offline_manual', 'confirmed', 'Former resident dues settlement', $3, NOW())`,
-        [invoice.id, due.toString(), access.subject],
-      )
-      await client.query("UPDATE invoices SET status = 'paid' WHERE id = $1", [invoice.id])
-    }
-    if (settledMinor > BigInt(Number.MAX_SAFE_INTEGER)) throw new ApiFault(500, 'data_integrity_error', 'Resident dues exceed the supported amount range')
-    await client.query('COMMIT')
-    return { resident: residentRow.full_name, unit: `${residentRow.building} · ${residentRow.unit}`, settledMinor: Number(settledMinor), status: 'paid' as const }
-  } catch (error) {
-    await client.query('ROLLBACK')
-    throw error
-  } finally {
-    client.release()
-  }
-}
+const settleFormerResidentDues = (access: TenantAccess, residentId: string, rawInput: unknown) => settleFormerBalance(withTenantPool(access), access, residentId, rawInput)
 
 const parseResidentInvitationToken = (token: unknown): { tenantId: string; token: string; tokenHash: string } => {
   if (typeof token !== 'string' || token.length > 140) throw new ApiFault(400, 'invalid_request', 'A valid resident invitation token is required')
@@ -2055,7 +1891,7 @@ const parseBlockInput = (input: unknown): { buildingName: string; floors: number
   const flats = value.flats
   const unitPrefix = typeof value.unitPrefix === 'string' ? value.unitPrefix.trim() : ''
   const maintenanceRatePerSqft = value.maintenanceRatePerSqft
-  if (buildingName.length < 1 || buildingName.length > 80 || !/^[\p{L}\p{N}][\p{L}\p{N}\p{M} .,'’()&\/#-]{0,79}$/u.test(buildingName)) {
+  if (buildingName.length < 1 || buildingName.length > 80 || !/^[\p{L}\p{N}][\p{L}\p{N}\p{M} .,'’()&/#-]{0,79}$/u.test(buildingName)) {
     throw new ApiFault(400, 'invalid_request', 'Block name must start with a letter or number and contain only letters, numbers, spaces, or common punctuation')
   }
   if (typeof floors !== 'number' || !Number.isInteger(floors) || floors < 1 || floors > 200) throw new ApiFault(400, 'invalid_request', 'Floors must be a whole number between 1 and 200')
@@ -2323,7 +2159,7 @@ const getBillingResidents = async (db: BillingDatabase, tenantId: string, period
      ), prior_payments AS (
        SELECT i.resident_id, SUM(p.amount_minor) AS amount_minor
        FROM invoices i
-       JOIN payments p ON p.invoice_id = i.id
+       JOIN invoice_payment_credits p ON p.invoice_id = i.id
        WHERE i.billing_period < $2::date
          AND i.status IN ('open', 'partially_paid')
          AND p.status IN ('succeeded', 'reconciled', 'confirmed')
@@ -2474,6 +2310,9 @@ const getBillingExceptions = async (db: BillingDatabase, tenantId: string, exclu
 const billingDueDate = (period: string, dueDay: number): string => `${period}-${String(dueDay).padStart(2, '0')}`
 
 const createBillingSnapshot = async (db: BillingDatabase, access: TenantAccess, period: string) => {
+  const cutover = (await db.query<{ date: string }>('SELECT cutover_date::text AS date FROM account_cutovers WHERE tenant_id=$1', [access.tenantId])).rows[0]
+  if (cutover && `${period}-01` < cutover.date) throw new ApiFault(400, 'invalid_request', 'New billing cannot predate the opening cutover. Earlier debt must be represented once in the opening source.')
+
   const [rules, residents, unitInputs] = await Promise.all([
     readBillingRules(db),
     getBillingResidents(db, access.tenantId, period),
@@ -2941,6 +2780,8 @@ const publishAdminBilling = async (access: TenantAccess, rawInput: unknown) => {
   const client = await pool.connect()
   try {
     await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE')
+    const accountLock = await client.query<{ locked: boolean }>('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked', [`${access.tenantId}:account-writes`])
+    if (!accountLock.rows[0]?.locked) throw new ApiFault(409, 'invalid_request', 'Accounts are changing. Refresh the billing preview and retry publication.')
     await client.query(
       `INSERT INTO billing_rules (id, updated_by) VALUES (1, $1) ON CONFLICT (id) DO NOTHING`,
       [access.subject],
@@ -3027,113 +2868,8 @@ const publishAdminBilling = async (access: TenantAccess, rawInput: unknown) => {
   }
 }
 
-const getAdminCollections = async (access: TenantAccess) => {
-  requireRole(access, 'admin')
-  const result = await withTenantPool(access).query<{
-    id: string
-    invoice_number: string
-    resident: string
-    unit: string
-    amount_minor: string
-    currency: string
-    method: string
-    status: string
-    reference: string | null
-    created_at: Date
-    confirmed_at: Date | null
-  }>(
-    `SELECT p.id, i.invoice_number, r.full_name AS resident, u.number AS unit,
-            p.amount_minor::text, p.currency, p.method, p.status, p.reference, p.created_at,
-            p.confirmed_at
-     FROM payments p
-     JOIN invoices i ON i.id = p.invoice_id
-     JOIN residents r ON r.id = i.resident_id
-     JOIN units u ON u.id = r.unit_id
-     WHERE u.tenant_id = $1
-     ORDER BY p.created_at DESC
-     LIMIT 500`,
-    [access.tenantId],
-  )
-  return result.rows.map((payment) => ({
-    id: payment.id,
-    invoice: payment.invoice_number,
-    resident: payment.resident,
-    unit: payment.unit,
-    amountMinor: minorUnits(payment.amount_minor),
-    currency: payment.currency,
-    method: payment.method,
-    status: payment.status,
-    reference: payment.reference,
-    createdAt: payment.created_at,
-    confirmedAt: payment.confirmed_at,
-    canConfirm: payment.method === 'offline_manual' && payment.status === 'pending',
-  }))
-}
-
-const confirmAdminManualPayment = async (access: TenantAccess, paymentId: string) => {
-  requireRole(access, 'admin')
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(paymentId)) {
-    throw new ApiFault(400, 'invalid_request', 'A valid payment identifier is required')
-  }
-  const client = await withTenantPool(access).connect()
-  try {
-    await client.query('BEGIN')
-    const invoiceResult = await client.query<{ id: string; total_minor: string; status: string }>(
-      `SELECT i.id, i.total_minor::text, i.status
-       FROM invoices i
-       JOIN residents r ON r.id = i.resident_id
-       JOIN units u ON u.id = r.unit_id
-       JOIN payments p ON p.invoice_id = i.id
-       WHERE p.id = $1 AND u.tenant_id = $2
-       FOR UPDATE OF i`,
-      [paymentId, access.tenantId],
-    )
-    const invoice = invoiceResult.rows[0]
-    if (!invoice) throw new ApiFault(404, 'not_found', 'Payment was not found in this organization')
-    const paymentResult = await client.query<{ amount_minor: string; method: string; status: string }>(
-      'SELECT amount_minor::text, method, status FROM payments WHERE id = $1 AND invoice_id = $2 FOR UPDATE',
-      [paymentId, invoice.id],
-    )
-    const payment = paymentResult.rows[0]
-    if (payment?.status === 'confirmed') {
-      await client.query('COMMIT')
-      return { id: paymentId, status: 'confirmed' as const, alreadyConfirmed: true }
-    }
-    if (!payment || payment.method !== 'offline_manual' || payment.status !== 'pending') {
-      throw new ApiFault(409, 'invalid_request', 'Only pending resident-reported offline payments can be confirmed')
-    }
-    if (invoice.status !== 'open' && invoice.status !== 'partially_paid') {
-      throw new ApiFault(409, 'invalid_request', 'This invoice is no longer accepting payment confirmation')
-    }
-    const confirmedResult = await client.query<{ amount_minor: string }>(
-      `SELECT COALESCE(SUM(amount_minor), 0)::text AS amount_minor
-       FROM payments WHERE invoice_id = $1 AND status IN ('succeeded', 'reconciled', 'confirmed')`,
-      [invoice.id],
-    )
-    const confirmedTotal = BigInt(confirmedResult.rows[0]?.amount_minor ?? '0') + BigInt(payment.amount_minor)
-    if (confirmedTotal > BigInt(invoice.total_minor)) {
-      throw new ApiFault(409, 'invalid_request', 'Confirming this payment would exceed the invoice total')
-    }
-    await client.query(
-      `UPDATE payments
-       SET status = 'confirmed', confirmed_by = $2, confirmed_at = NOW()
-       WHERE id = $1`,
-      [paymentId, access.subject],
-    )
-    await client.query(
-      `UPDATE invoices SET status = CASE WHEN $2::bigint >= total_minor THEN 'paid' ELSE 'partially_paid' END
-       WHERE id = $1 AND status IN ('open', 'partially_paid')`,
-      [invoice.id, confirmedTotal.toString()],
-    )
-    await client.query('COMMIT')
-    return { id: paymentId, status: 'confirmed' as const, alreadyConfirmed: false }
-  } catch (error) {
-    await client.query('ROLLBACK')
-    throw error
-  } finally {
-    client.release()
-  }
-}
+const getAdminCollections = (access: TenantAccess,params:globalThis.URLSearchParams) => listPaymentReports(withTenantPool(access), access,params)
+const confirmAdminManualPayment = (access: TenantAccess, reportId: string, rawInput: unknown) => confirmPaymentReport(withTenantPool(access), access, reportId, rawInput)
 
 const getPlatformOverview = async (request: IncomingMessage) => {
   await requireOperator(request)
@@ -3559,24 +3295,133 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, await updateResidentProfile(access, access.subject, await readJsonBody(request)), requestId)
         return
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/payments/history') {
+        const access = await resolveTenantAccess(request, 'resident')
+        respond(response, 200, await residentPaymentHistory(withTenantPool(access), access, requestUrl.searchParams), requestId)
+        return
+      }
+      const residentPaymentRecordRoute = requestUrl.pathname.match(/^\/v1\/tenant\/payments\/records\/(report|credit)\/([0-9a-f-]{36})$/i)
+      if (request.method === 'GET' && residentPaymentRecordRoute) {
+        const access = await resolveTenantAccess(request, 'resident')
+        respond(response, 200, await residentPaymentRecord(withTenantPool(access), access, residentPaymentRecordRoute[1]!, residentPaymentRecordRoute[2]!), requestId)
+        return
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/tenant/payments/manual') {
         const access = await resolveTenantAccess(request, 'resident')
-        respond(response, 201, await submitResidentManualPayment(access, access.subject, await readJsonBody(request)), requestId)
+        respond(response, 201, await submitResidentManualPayment(access, access.subject, await readJsonBody(request, 65_536)), requestId)
         return
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/memberships') {
         respond(response, 200, await getTenantMemberships(request), requestId)
         return
       }
+      if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/updates') {
+        const access=await resolveTenantAccess(request,'resident')
+        respond(response,200,await residentUpdates(withTenantPool(access),access,requestUrl.searchParams),requestId);return
+      }
+      const noticeDetail=requestUrl.pathname.match(/^\/v1\/tenant\/notices\/([0-9a-f-]{36})$/i)
+      if(request.method==='GET'&&noticeDetail){
+        const access=await resolveTenantAccess(request,'resident')
+        respond(response,200,await residentUpdates(withTenantPool(access),access,undefined,noticeDetail[1]),requestId);return
+      }
+      const pollDetail=requestUrl.pathname.match(/^\/v1\/tenant\/polls\/([0-9a-f-]{36})$/i)
+      if(request.method==='GET'&&pollDetail){
+        const access=await resolveTenantAccess(request,'resident')
+        if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pollDetail[1]!))throw new ApiFault(404,'not_found','Poll not found')
+        const poll=(await getResidentPolls(access,access.subject,pollDetail[1]))[0]
+        if(!poll)throw new ApiFault(404,'not_found','Poll not found')
+        respond(response,200,poll,requestId);return
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/notices') {
         const access = await resolveTenantAccess(request, 'resident')
         respond(response, 200, await getResidentNotices(access, access.subject), requestId)
         return
       }
+      const openingCreditRoute = requestUrl.pathname.match(/^\/v1\/admin\/accounts\/opening\/credit\/([0-9a-f-]{36})$/i)
+      if (openingCreditRoute && (request.method === 'GET' || request.method === 'POST')) {
+        const access = await resolveTenantAccess(request, 'admin')
+        const result = request.method === 'GET'
+          ? await openingCreditRead(withTenantPool(access), access, openingCreditRoute[1]!)
+          : await openingCreditApply(withTenantPool(access), access, openingCreditRoute[1]!, await readJsonBody(request))
+        respond(response, 200, result, requestId)
+        return
+      }
+      if (requestUrl.pathname === '/v1/admin/accounts/opening' && (request.method === 'GET' || request.method === 'POST')) {
+        const access = await resolveTenantAccess(request, 'admin')
+        if (request.method === 'GET') respond(response, 200, await openingRead(withTenantPool(access), access), requestId)
+        else {
+          const input = await readJsonBody(request, 1_048_576)
+          if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault(400, 'invalid_request', 'Opening details are required')
+          const action = (input as Record<string, unknown>).action
+          if (action !== 'preview' && action !== 'post') throw new ApiFault(400, 'invalid_request', 'Choose review or post')
+          respond(response, 200, action === 'preview' ? await openingPreview(withTenantPool(access), access, input) : await openingPost(withTenantPool(access), access, input), requestId)
+        }
+        return
+      }
+      if (requestUrl.pathname === '/v1/admin/accounts/reconciliation' && (request.method === 'GET' || request.method === 'POST')) {
+        const access = await resolveTenantAccess(request, 'admin')
+        const result = request.method === 'GET'
+          ? await reconciliationRead(withTenantPool(access), access, requestUrl.searchParams.get('account'), requestUrl.searchParams.get('period'))
+          : await reconciliationWrite(withTenantPool(access), access, await readJsonBody(request, 1_048_576))
+        respond(response, 200, result, requestId)
+        return
+      }
+      const ledgerSourceRoute=requestUrl.pathname.match(/^\/v1\/admin\/accounts\/ledgers\/([0-9a-f-]{36})\/sources\/(invoice|payment|opening_credit|opening_reversal)\/([0-9a-f-]{36})$/i)
+      if(request.method==='GET'&&ledgerSourceRoute){
+        const access=await resolveTenantAccess(request,'admin')
+        respond(response,200,await ledgerSource(withTenantPool(access),access,ledgerSourceRoute[1],ledgerSourceRoute[2],ledgerSourceRoute[3]),requestId);return
+      }
+      const accountRoute = requestUrl.pathname.match(/^\/v1\/admin\/accounts(?:\/(entries|ledgers)(?:\/([0-9a-f-]{36}))?)?$/i)
+      if (accountRoute && (request.method === 'GET' || (request.method === 'POST' && accountRoute[1] === 'entries'))) {
+        const access = await resolveTenantAccess(request, 'admin')
+        const result = request.method === 'GET'
+          ? await accountRead(withTenantPool(access), access, [accountRoute[1], accountRoute[2]].filter(Boolean).join('/'), requestUrl.searchParams.get('period'), requestUrl.searchParams)
+          : await accountWrite(withTenantPool(access), access, accountRoute[2], await readJsonBody(request))
+        respond(response, request.method === 'POST' && !accountRoute[2] ? 201 : 200, result, requestId)
+        return
+      }
+      if(request.method==='GET'&&requestUrl.pathname==='/v1/admin/assignees'){
+        const access=await resolveTenantAccess(request,'admin')
+        respond(response,200,await adminAssignees(access),requestId);return
+      }
+      const maintenanceRoute = requestUrl.pathname.match(/^\/v1\/admin\/maintenance(?:\/([0-9a-f-]{36}))?$/i)
+      if (maintenanceRoute && (request.method === 'GET' || request.method === 'POST')) {
+        const access = await resolveTenantAccess(request, 'admin')
+        const result = await maintenanceRequest(withTenantPool(access), access, request.method, maintenanceRoute[1], request.method === 'POST' ? await readJsonBody(request) : undefined, requestUrl.searchParams)
+        respond(response, request.method === 'POST' && !maintenanceRoute[1] ? 201 : 200, result, requestId)
+        return
+      }
+      const complaintPhotoRoute=requestUrl.pathname.match(/^\/v1\/(tenant|admin)\/complaints\/([0-9a-f-]{36})\/photos\/([0-9a-f-]{36})$/i)
+      if(request.method==='GET'&&complaintPhotoRoute){
+        const access=await resolveTenantAccess(request,complaintPhotoRoute[1]==='admin'?'admin':'resident')
+        const photo=await complaintPhoto(withTenantPool(access),access,complaintPhotoRoute[2]!,complaintPhotoRoute[3]!)
+        response.writeHead(200,{'Content-Type':'image/jpeg','Content-Length':String(photo.data.length),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Content-Disposition':`inline; filename="complaint-photo-${complaintPhotoRoute[3]}.jpg"`,'X-Request-Id':requestId});response.end(photo.data);return
+      }
+      const complaintRoute = requestUrl.pathname.match(/^\/v1\/(tenant|admin)\/complaints(?:\/([0-9a-f-]{36}))?$/i)
+      if (complaintRoute && (request.method === 'GET' || request.method === 'POST')) {
+        const access = await resolveTenantAccess(request, complaintRoute[1] === 'admin' ? 'admin' : 'resident')
+        const result = await complaintRequest(withTenantPool(access), access, request.method, complaintRoute[2], request.method === 'POST' ? await readJsonBody(request,complaintRoute[2]?32768:complaintPhotoLimits.requestBytes) : undefined, requestUrl.searchParams)
+        respond(response, request.method === 'POST' && !complaintRoute[2] ? 201 : 200, result, requestId)
+        return
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/polls') { const access = await resolveTenantAccess(request, 'resident'); respond(response, 200, await getResidentPolls(access, access.subject), requestId); return }
       const residentPollVoteMatch = requestUrl.pathname.match(/^\/v1\/tenant\/polls\/([^/]+)\/vote$/)
       if (request.method === 'POST' && residentPollVoteMatch) { const access = await resolveTenantAccess(request, 'resident'); respond(response, 200, await voteInPoll(access, access.subject, decodeURIComponent(residentPollVoteMatch[1] ?? ''), await readJsonBody(request)), requestId); return }
-      if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/polls') { const access = await resolveTenantAccess(request); respond(response, 200, await getAdminPolls(access), requestId); return }
+      const communicationDetail=requestUrl.pathname.match(/^\/v1\/admin\/(announcements|polls)\/([0-9a-f-]{36})$/i)
+      if(request.method==='GET'&&communicationDetail){
+        const access=await resolveTenantAccess(request,'admin'),id=communicationDetail[2]!
+        if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))throw new ApiFault(404,'not_found','Record not found')
+        const record=communicationDetail[1]==='polls'?(await getAdminPolls(access,id))[0]:(await getAdminAnnouncements(access,id))[0]
+        if(!record)throw new ApiFault(404,'not_found','Record not found')
+        respond(response,200,record,requestId);return
+      }
+      if(request.method==='GET'&&requestUrl.pathname==='/v1/admin/communications/context'){
+        const access=await resolveTenantAccess(request,'admin')
+        const context=(await withTenantPool(access).query('SELECT name,timezone FROM organizations WHERE tenant_id=$1',[access.tenantId])).rows[0]
+        if(!context)throw new ApiFault(404,'not_found','Community settings not found')
+        respond(response,200,context,requestId);return
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/polls') { const access = await resolveTenantAccess(request); respond(response, 200, await adminCommunications(withTenantPool(access),access,'poll',requestUrl.searchParams), requestId); return }
       const adminPollResponsesMatch = requestUrl.pathname.match(/^\/v1\/admin\/polls\/([^/]+)\/responses$/)
       if (request.method === 'GET' && adminPollResponsesMatch) {
         const access = await resolveTenantAccess(request)
@@ -3602,7 +3447,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/announcements') {
         const access = await resolveTenantAccess(request)
-        respond(response, 200, await getAdminAnnouncements(access), requestId)
+        respond(response, 200, await adminCommunications(withTenantPool(access),access,'announcement',requestUrl.searchParams), requestId)
         return
       }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/announcements') {
@@ -3635,7 +3480,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       const residentSettleDuesMatch = requestUrl.pathname.match(/^\/v1\/admin\/residents\/([^/]+)\/settle-dues$/)
       if (request.method === 'POST' && residentSettleDuesMatch) {
         const access = await resolveTenantAccess(request)
-        respond(response, 200, await settleFormerResidentDues(access, decodeURIComponent(residentSettleDuesMatch[1] ?? '')), requestId)
+        respond(response, 200, await settleFormerResidentDues(access, decodeURIComponent(residentSettleDuesMatch[1] ?? ''), await readJsonBody(request)), requestId)
         return
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/resident-invitations') {
@@ -3704,15 +3549,16 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 201, await publishAdminBilling(access, await readJsonBody(request)), requestId)
         return
       }
+      if(request.method==='GET'&&requestUrl.pathname==='/v1/admin/overdues'){const access=await resolveTenantAccess(request,'admin');respond(response,200,await overdueQueue(withTenantPool(access),access,requestUrl.searchParams),requestId);return}
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/collections') {
         const access = await resolveTenantAccess(request)
-        respond(response, 200, await getAdminCollections(access), requestId)
+        respond(response, 200, await getAdminCollections(access,requestUrl.searchParams), requestId)
         return
       }
       const manualPaymentConfirmationMatch = requestUrl.pathname.match(/^\/v1\/admin\/collections\/([^/]+)\/confirm$/)
       if (request.method === 'POST' && manualPaymentConfirmationMatch) {
         const access = await resolveTenantAccess(request, 'admin')
-        respond(response, 200, await confirmAdminManualPayment(access, decodeURIComponent(manualPaymentConfirmationMatch[1] ?? '')), requestId)
+        respond(response, 200, await confirmAdminManualPayment(access, decodeURIComponent(manualPaymentConfirmationMatch[1] ?? ''), await readJsonBody(request)), requestId)
         return
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/platform/overview') {

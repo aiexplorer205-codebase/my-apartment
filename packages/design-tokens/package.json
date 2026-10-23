@@ -2,5 +2,5 @@
   "name": "@nivasa/design-tokens",
   "version": "0.1.0",
   "private": true,
-  "exports": { "./tokens.css": "./tokens.css" }
+  "exports": { "./tokens.css": "./tokens.css", "./prototype.css": "./prototype.css" }
 }

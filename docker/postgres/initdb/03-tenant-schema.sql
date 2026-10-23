@@ -15,3 +15,15 @@
 \i /migrations/tenant_db/014_polls.sql
 \i /migrations/tenant_db/015_poll_vote_changes.sql
 \i /migrations/tenant_db/016_poll_result_retention.sql
+\i /migrations/tenant_db/017_complaints.sql
+\i /migrations/tenant_db/018_maintenance.sql
+\i /migrations/tenant_db/019_collections_and_accounts.sql
+\i /migrations/tenant_db/020_account_workflows.sql
+\i /migrations/tenant_db/021_reconciliation.sql
+\i /migrations/tenant_db/022_opening_balances.sql
+\i /migrations/tenant_db/023_resident_payment_history.sql
+\i /migrations/tenant_db/024_maintenance_workflows.sql
+\i /migrations/tenant_db/025_poll_closure.sql
+\i /migrations/tenant_db/026_communication_publications.sql
+\i /migrations/tenant_db/027_complaint_photos.sql
+\i /migrations/tenant_db/028_admin_assignment.sql

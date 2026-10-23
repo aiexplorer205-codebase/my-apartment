@@ -19,7 +19,8 @@
     "@nivasa/contracts": "workspace:*",
     "@nivasa/shared": "workspace:*",
     "jose": "^5.9.6",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@types/pg": "^8.11.10",

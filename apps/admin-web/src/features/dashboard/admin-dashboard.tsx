@@ -1,12 +1,20 @@
 'use client'
 
+import { useCommunicationList, CommunicationFilters, CommunicationPagination } from '../communications/list-controls'
+import { PublicationReview } from '../communications/publication-review'
+import { communityDateTimeInput, communityDateTimeToIso } from '../communications/scheduling'
+import { LedgerSourceView,type LedgerSourceRef } from '../accounts/ledger-source'
+import { AdminOverdue } from '../collections/overdues'
+import { AccountsWorkspace } from '../accounts/accounts'
+import { MaintenanceWorkspace } from '../complaints/maintenance'
+import { ComplaintWorkspace } from '../complaints/complaints'
 import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { AuthBoundary, LoadState, TenantWorkspacePicker } from '../../lib/auth-ui'
 import { formValidationMessage } from '../../lib/form-validation'
 import { useApiPost, useApiQuery } from '../../lib/use-api'
 import { useAuth0 } from '../../app/auth-provider'
 import { getAppConfig, useTranslation, LanguageSwitcher } from '@nivasa/app-platform'
-import { useAppMessages } from '@nivasa/ui'
+import { ReceiptReview, useAppMessages } from '@nivasa/ui'
 
 type AdminOverview = {
   tenantId: string
@@ -46,6 +54,9 @@ const adminNavigation = [
   { label: 'Overdues', navKey: 'overdues', icon: 'alert' },
   { label: 'Announcements', navKey: 'announcements', icon: 'megaphone' },
   { label: 'Polls', navKey: 'polls', icon: 'chart' },
+  { label: 'Accounts', navKey: 'accounts', icon: 'wallet' },
+  { label: 'Maintenance', navKey: 'maintenance', icon: 'building' },
+  { label: 'Complaints', navKey: 'complaints', icon: 'alert' },
   { label: 'Reports', navKey: 'reports', icon: 'chart' },
   { label: 'Settings', navKey: 'settings', icon: 'settings' },
 ] as const
@@ -68,8 +79,16 @@ function AdminNavIcon({ name }: { name: AdminIconName }) {
 }
 
 function AdminContent() {
-  type Section = 'Overview' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
+  type Section = 'Accounts' | 'More' | 'Maintenance' | 'Complaints' | 'Overview' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
   const [section, setSection] = useState<Section>('Overview')
+  const [expenseTaskId, setExpenseTaskId] = useState<string | undefined>(undefined)
+  const [expenseComplaintId,setExpenseComplaintId]=useState<string|undefined>()
+  const [expenseEntryId,setExpenseEntryId]=useState<string|undefined>()
+  const [maintenanceId,setMaintenanceId]=useState<string|undefined>()
+  const [maintenanceComplaintId,setMaintenanceComplaintId]=useState<string|undefined>()
+  const [complaintId,setComplaintId]=useState<string|undefined>()
+  const openTask=(id:string)=>{setMaintenanceId(id);setMaintenanceComplaintId(undefined);setSection('Maintenance')}
+  const openComplaint=(id:string)=>{setComplaintId(id);setSection('Complaints')}
   const [firstBlockFlowOpen, setFirstBlockFlowOpen] = useState(false)
   const { data, loading, error, reload } = useApiQuery<AdminOverview>('/v1/admin/overview')
   const blockInventory = useApiQuery<{ allowedBlocks: number; buildings: Array<{ id: string }> }>('/v1/admin/buildings')
@@ -79,9 +98,9 @@ function AdminContent() {
   const needsInitialBlock = !blockInventory.loading && !blockInventory.error && blockInventory.data?.buildings.length === 0
 
   const metrics = data ? [
-    { label: t('admin:overview.totalBilled', 'Total billed'), value: data.billedMinor, detail: t('admin:overview.totalBilledDetail', 'Latest invoice balance per resident'), tone: 'blue' },
+    { label: t('admin:overview.totalBilled', 'Total billed'), value: data.billedMinor, detail: t('admin:overview.totalBilledDetail', 'Published charges, excluding carried duplicates'), tone: 'blue' },
     { label: t('admin:overview.collected', 'Collected'), value: data.collectedMinor, detail: t('admin:overview.collectedDetail', 'Verified payment records'), tone: 'green' },
-    { label: t('admin:overview.outstanding', 'Outstanding'), value: data.outstandingMinor, detail: t('admin:overview.outstandingDetail', 'Billed less collected'), tone: 'amber' },
+    { label: t('admin:overview.outstanding', 'Outstanding'), value: data.outstandingMinor, detail: t('admin:overview.outstandingDetail', 'Charges less confirmed receipts and applied credits'), tone: 'amber' },
     { label: t('admin:overview.overdue', 'Overdue'), value: data.overdueMinor, detail: t('admin:overview.overdueDetail', 'Past-due open invoices'), tone: 'red' },
   ] : []
 
@@ -146,6 +165,7 @@ function AdminContent() {
                 </article>
               ))}
             </div>
+            <ComplaintWorkspace onOpen={() => setSection('Complaints')} />
             <div className="grid-two admin-overview-grid">
               <section className="card">
                 <div className="admin-card-heading"><div><h2>Block payment status</h2><p>Occupancy and latest payment status</p></div><button type="button" className="text-action" onClick={() => setSection('Flats & Residents')}>View blocks <span aria-hidden="true">→</span></button></div>
@@ -175,56 +195,73 @@ function AdminContent() {
           : section === 'Billing' ? <AdminBilling />
             : section === 'Collections' ? <AdminCollections />
               : section === 'Overdues' ? <AdminOverdue />
+                  : section === 'More' ? <section className="section-stack"><h2>More</h2><div className="admin-more-grid">{adminNavigation.filter((item) => !['Overview', 'Flats & Residents', 'Billing', 'Collections'].includes(item.label)).map((item) => <button type="button" className="card complaint-record" key={item.label} onClick={() => setSection(item.label)}><AdminNavIcon name={item.icon} /><strong>{item.label}</strong></button>)}</div><div className="card"><TenantWorkspacePicker /><LanguageSwitcher /><button className="secondary" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>Sign out</button></div></section>
+                  : section === 'Accounts' ? <AccountsWorkspace key={`${expenseTaskId??expenseComplaintId??'accounts'}:${expenseEntryId??'new'}`} initialTaskId={expenseTaskId} initialComplaintId={expenseComplaintId} initialEntryId={expenseEntryId} onCollections={()=>setSection('Collections')} onTask={openTask} onComplaint={openComplaint} onBack={expenseTaskId ? () => openTask(expenseTaskId) : expenseComplaintId ? () => openComplaint(expenseComplaintId) : undefined} />
+                  : section === 'Maintenance' ? <MaintenanceWorkspace key={`${maintenanceId??'list'}:${maintenanceComplaintId??''}`} initialId={maintenanceId} initialComplaintId={maintenanceComplaintId} onComplaint={openComplaint} onExpense={(taskId,entryId) => { setExpenseTaskId(taskId);setExpenseComplaintId(undefined);setExpenseEntryId(entryId);setMaintenanceId(taskId);setSection('Accounts') }} />
+                  : section === 'Complaints' ? <ComplaintWorkspace key={complaintId??'list'} initialId={complaintId} onTask={openTask} onExpense={(id,entryId)=>{setExpenseTaskId(undefined);setExpenseComplaintId(id);setExpenseEntryId(entryId);setSection('Accounts')}} onPlanMaintenance={(id)=>{setMaintenanceId(undefined);setMaintenanceComplaintId(id);setSection('Maintenance')}} />
                   : section === 'Reports' ? <AdminReports /> : <AdminSettings />}
         </>}
         </div>
       </section>
+      {hasBlocks && <nav className="admin-mobile-tabs" aria-label="Main destinations">{(['Overview', 'Flats & Residents', 'Billing', 'Collections', 'More'] as const).map((destination) => <button type="button" key={destination} className={section === destination || (destination === 'More' && !['Overview', 'Flats & Residents', 'Billing', 'Collections'].includes(section)) ? 'active' : ''} aria-current={section === destination ? 'page' : undefined} onClick={() => setSection(destination)}><AdminNavIcon name={destination === 'More' ? 'grid' : adminNavigation.find((item) => item.label === destination)!.icon} /><span>{destination === 'Flats & Residents' ? 'Flats' : destination}</span></button>)}</nav>}
     </main>
   )
 }
 
-type AdminAnnouncement = { id: string; title: string; body: string; isImportant: boolean; isBanner: boolean; startsAt: string; endsAt: string | null; publishedAt: string; status: string }
+type AdminAnnouncement = { displayStatus?:string; id: string; title: string; body: string; isImportant: boolean; isBanner: boolean; startsAt: string; endsAt: string | null; publishedAt: string; status: string }
 
-const localDateTimeInput = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+type AnnouncementDraft={title:string;body:string;startsAt:string;endsAt:string;isImportant:boolean;isBanner:boolean;requestKey:string}
+type PollDraft={question:string;options:string[];startsAt:string;endsAt:string;anonymous:boolean;showResultsLive:boolean;resultsRetentionDays:number;requestKey:string}
 
 function AdminAnnouncements() {
-  const { data, loading, error, reload } = useApiQuery<AdminAnnouncement[]>('/v1/admin/announcements')
+  const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<string | null>(null)
+  const list=useCommunicationList<AdminAnnouncement>('announcements',Boolean(selectedAnnouncementId))
+  const {data:pageData,loading,error,reload}=list.query
+  const data=pageData?.items
+  const context=useApiQuery<{name:string;timezone:string}>('/v1/admin/communications/context')
+  const [review,setReview]=useState<AnnouncementDraft|null>(null)
+  const publishLock=useRef(false)
   const post = useApiPost()
   const { pushMessage } = useAppMessages()
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [startsAt, setStartsAt] = useState(() => localDateTimeInput(new Date()))
-  const [endsAt, setEndsAt] = useState(() => localDateTimeInput(new Date(Date.now() + 86_400_000)))
+  const [startsAt, setStartsAt] = useState('')
+  const [endsAt, setEndsAt] = useState('')
   const [isImportant, setIsImportant] = useState(false)
   const [isBanner, setIsBanner] = useState(false)
   const [saving, setSaving] = useState(false)
   const [endingAnnouncementId, setEndingAnnouncementId] = useState<string | null>(null)
   const [validationError, setValidationError] = useState<string | null>(null)
-  const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<string | null>(null)
   const [creatingAnnouncement, setCreatingAnnouncement] = useState(false)
-  const selectedAnnouncement = data?.find((announcement) => announcement.id === selectedAnnouncementId)
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    setValidationError(null)
-    setSaving(true)
-    try {
-      await post('/v1/admin/announcements', { title, body, startsAt: new Date(startsAt).toISOString(), endsAt: new Date(endsAt).toISOString(), isImportant, isBanner })
-      pushMessage('Announcement published.', 'success')
-      const now = new Date()
-      setTitle(''); setBody(''); setStartsAt(localDateTimeInput(now)); setEndsAt(localDateTimeInput(new Date(now.getTime() + 86_400_000))); setIsImportant(false); setIsBanner(false)
-      setCreatingAnnouncement(false)
-      reload()
-    } catch (cause) {
-      pushMessage(cause instanceof Error ? cause.message : 'Could not publish this announcement.', 'error')
-    } finally { setSaving(false) }
+  const detail=useApiQuery<AdminAnnouncement>(`/v1/admin/announcements/${selectedAnnouncementId??''}`,{enabled:Boolean(selectedAnnouncementId)})
+  const selectedAnnouncement=detail.data?.id===selectedAnnouncementId?detail.data:data?.find((announcement)=>announcement.id===selectedAnnouncementId)
+  const submit = (event: FormEvent) => {
+    event.preventDefault();setValidationError(null)
+    try{
+      if(title.trim().length<3||!body.trim())throw new Error('Enter a title of at least 3 characters and a non-empty message.')
+      if(!context.data)throw new Error('Load the community timezone before reviewing.')
+      const start=communityDateTimeToIso(startsAt,context.data.timezone),end=communityDateTimeToIso(endsAt,context.data.timezone)
+      if(end<=start)throw new Error('End time must be after the start time.')
+      setReview({title:title.trim(),body:body.trim(),startsAt:start,endsAt:end,isImportant,isBanner,requestKey:globalThis.crypto.randomUUID()})
+    }catch(cause){setValidationError(cause instanceof Error?cause.message:'Check the announcement details.')}
+  }
+  const publish=async()=>{
+    if(!review||publishLock.current)return
+    publishLock.current=true;setSaving(true);setValidationError(null)
+    try{
+      const result=await post<{id:string}>('/v1/admin/announcements',review)
+      pushMessage('Announcement published.','success');setReview(null);setTitle('');setBody('');setIsImportant(false);setIsBanner(false);setCreatingAnnouncement(false);setSelectedAnnouncementId(result.id);reload()
+    }catch(cause){setValidationError(cause instanceof Error?cause.message:'Could not publish this announcement.')}
+    finally{publishLock.current=false;setSaving(false)}
   }
   const endAnnouncement = async (announcementId: string) => {
     if (endingAnnouncementId) return
+    if(!window.confirm('End this announcement? It will stop appearing as a live banner and remain in history.'))return
     setEndingAnnouncementId(announcementId)
     try {
       await post(`/v1/admin/announcements/${encodeURIComponent(announcementId)}/end`, {})
       pushMessage('Announcement marked ended.', 'success')
-      reload()
+      reload();detail.reload()
     } catch (cause) {
       pushMessage(cause instanceof Error ? cause.message : 'Could not end this announcement.', 'error')
     } finally {
@@ -232,23 +269,25 @@ function AdminAnnouncements() {
     }
   }
   const now = Date.now()
+  if(selectedAnnouncementId&&!selectedAnnouncement)return <section className="section-stack"><button className="secondary" type="button" onClick={()=>setSelectedAnnouncementId(null)}>Back to announcements</button><LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/></section>
+  if(review&&context.data)return <PublicationReview title="Review announcement" timeZone={context.data.timezone} startsAt={review.startsAt} endsAt={review.endsAt} busy={saving} error={validationError} onConfirm={()=>void publish()} onBack={()=>{setReview(null);setValidationError(null)}}><h2>{review.title}</h2><p className="complaint-text">{review.body}</p><p>{review.isImportant?'Important':'Standard'} · {review.isBanner?'Resident banner enabled':'No resident banner'}</p></PublicationReview>
   if (selectedAnnouncement) {
     const start = new Date(selectedAnnouncement.startsAt).getTime()
     const end = selectedAnnouncement.endsAt ? new Date(selectedAnnouncement.endsAt).getTime() : null
-    const state = selectedAnnouncement.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live'
+    const state = selectedAnnouncement.status==='draft'?'Draft':selectedAnnouncement.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live'
     return <section className="section-stack admin-announcements">
-      <div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => setSelectedAnnouncementId(null)}>← Back to announcements</button><span>Announcement details</span></div>
-      <article className="card admin-full-detail">
+      <div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => {list.back();setSelectedAnnouncementId(null)}}>← Back to announcements</button><span>Announcement details</span></div>
+      <LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/><article className="card admin-full-detail">
         <div className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{selectedAnnouncement.isImportant && <span className="status-pill warning">Important</span>}{selectedAnnouncement.isBanner && <span className="status-pill">Banner</span>}</div>
         <h2>{selectedAnnouncement.isImportant && !/^important:\s*/i.test(selectedAnnouncement.title) ? `IMPORTANT: ${selectedAnnouncement.title}` : selectedAnnouncement.title}</h2>
         <div className="admin-detail-meta"><span>Starts <strong>{new Date(selectedAnnouncement.startsAt).toLocaleString('en-IN')}</strong></span><span>{selectedAnnouncement.endsAt ? <>Ends <strong>{new Date(selectedAnnouncement.endsAt).toLocaleString('en-IN')}</strong></> : 'No end time'}</span><span>Published <strong>{new Date(selectedAnnouncement.publishedAt).toLocaleString('en-IN')}</strong></span></div>
         <div className="admin-full-detail-body">{selectedAnnouncement.body}</div>
-        {state !== 'Ended' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(selectedAnnouncement.id)}>{endingAnnouncementId === selectedAnnouncement.id ? 'Ending…' : 'Mark ended'}</button></div>}
+        {state !== 'Ended' && state !== 'Draft' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(selectedAnnouncement.id)}>{endingAnnouncementId === selectedAnnouncement.id ? 'Ending…' : 'Mark ended'}</button></div>}
       </article>
     </section>
   }
   if (creatingAnnouncement) return <section className="section-stack admin-announcements">
-    <div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => { setValidationError(null); setCreatingAnnouncement(false) }}>← Back to announcements</button><span>Create announcement</span></div>
+    <div className="admin-detail-toolbar"><button className="secondary" type="button" disabled={saving} onClick={() => { setValidationError(null); setCreatingAnnouncement(false) }}>← Back to announcements</button><span>Create announcement · {context.data?.timezone}</span></div>
     <form className="card apartment-form-grid" onSubmit={(event) => void submit(event)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}>
       <label className="admin-field full"><span>Title</span><input required minLength={3} maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Water supply maintenance" /></label>
       <label className="admin-field full"><span>Message</span><textarea required maxLength={5000} rows={5} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write the announcement for residents" /></label>
@@ -257,33 +296,41 @@ function AdminAnnouncements() {
       <label className="admin-announcement-important"><input type="checkbox" checked={isImportant} onChange={(event) => setIsImportant(event.target.checked)} /><span><strong>Important announcement</strong><small>Add an Important tag and an IMPORTANT: prefix to the title.</small></span></label>
       <label className="admin-announcement-important"><input type="checkbox" checked={isBanner} onChange={(event) => setIsBanner(event.target.checked)} /><span><strong>Banner announcement</strong><small>Show this announcement at the top of the resident app.</small></span></label>
       {validationError && <p className="field-validation-error full" role="alert">{validationError}</p>}
-      <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving}>{saving ? 'Publishing…' : 'Publish announcement'}</button></div>
+      <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving||!context.data}>Review announcement</button></div>
     </form>
   </section>
   return <section className="section-stack admin-announcements">
-    <div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" onClick={() => { setValidationError(null); setCreatingAnnouncement(true) }}>＋ Create announcement</button></div></div>
-    <div className="card"><div className="admin-card-heading"><div><h2>All announcements</h2><p>Scheduled and past announcements stay here for reference.</p></div></div><LoadState loading={loading} error={error} onRetry={reload} />
-      {!loading && !error && data?.length === 0 && <p>No announcements yet.</p>}
+    <div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" disabled={context.loading||Boolean(context.error)} onClick={() => { if(!context.data)return;const now=new Date();setStartsAt(communityDateTimeInput(now,context.data.timezone));setEndsAt(communityDateTimeInput(new Date(now.getTime()+86400000),context.data.timezone));setValidationError(null);setCreatingAnnouncement(true) }}>＋ Create announcement</button></div></div>
+    <LoadState loading={context.loading} error={context.error} onRetry={context.reload}/><CommunicationFilters drafts search={list.search} status={list.status} onChange={list.change}/><div className="card"><div className="admin-card-heading"><div><h2>All announcements</h2><p>Scheduled and past announcements stay here for reference.</p></div></div><LoadState loading={loading} error={error} onRetry={reload} />
+      {!loading && !error && data?.length === 0 && <p>No announcements match this view.</p>}
       <div className="admin-announcement-list">{data?.map((item) => {
         const start = new Date(item.startsAt).getTime()
         const end = item.endsAt ? new Date(item.endsAt).getTime() : null
-        const state = item.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live'
-        return <article className="admin-announcement-item" key={item.id}><div><button type="button" className="admin-announcement-open" onClick={() => setSelectedAnnouncementId(item.id)}><span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{item.isImportant && <span className="status-pill warning">Important</span>}{item.isBanner && <span className="status-pill">Banner</span>}</span><h3>{item.isImportant && !/^important:\s*/i.test(item.title) ? `IMPORTANT: ${item.title}` : item.title}</h3><p>{item.body}</p><small>{new Date(item.startsAt).toLocaleString('en-IN')}{item.endsAt ? ` – ${new Date(item.endsAt).toLocaleString('en-IN')}` : ' · No end time'} · Click to view details</small></button>{state !== 'Ended' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(item.id)}>{endingAnnouncementId === item.id ? 'Ending…' : 'Mark ended'}</button></div>}</div></article>
+        const state = item.displayStatus ?? (item.status==='draft'?'Draft':item.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live')
+        return <article className="admin-announcement-item" key={item.id}><div><button type="button" className="admin-announcement-open" onClick={() => {list.remember();setSelectedAnnouncementId(item.id)}}><span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{item.isImportant && <span className="status-pill warning">Important</span>}{item.isBanner && <span className="status-pill">Banner</span>}</span><h3>{item.isImportant && !/^important:\s*/i.test(item.title) ? `IMPORTANT: ${item.title}` : item.title}</h3><p>{item.body}</p><small>{new Date(item.startsAt).toLocaleString('en-IN')}{item.endsAt ? ` – ${new Date(item.endsAt).toLocaleString('en-IN')}` : ' · No end time'} · Click to view details</small></button>{state !== 'Ended' && state !== 'Draft' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(item.id)}>{endingAnnouncementId === item.id ? 'Ending…' : 'Mark ended'}</button></div>}</div></article>
       })}</div>
     </div>
+    {!loading&&!error&&pageData&&<CommunicationPagination page={list.page} pageSize={pageData.pageSize} total={pageData.total} onPage={list.setPage}/>}
   </section>
 }
 
-type AdminPoll = { id: string; question: string; startsAt: string; endsAt: string; anonymous: boolean; showResultsLive: boolean; resultsRetentionDays: number; status: string; options: Array<{id:string;label:string}>; results: Array<{id:string;label:string;votes:number}> }
+type AdminPoll = { displayStatus?:string; id: string; question: string; startsAt: string; endsAt: string; closedAt:string|null;closedBy:string|null; anonymous: boolean; showResultsLive: boolean; resultsRetentionDays: number; status: string; options: Array<{id:string;label:string}>; results: Array<{id:string;label:string;votes:number}> }
 function AdminPolls() {
-  const { data, loading, error, reload } = useApiQuery<AdminPoll[]>('/v1/admin/polls')
-  const post = useApiPost(); const { pushMessage } = useAppMessages()
   const [selectedPollId, setSelectedPollId] = useState<string | null>(null)
+  const list=useCommunicationList<AdminPoll>('polls',Boolean(selectedPollId))
+  const {data:pageData,loading,error,reload}=list.query
+  const data=pageData?.items
+  const context=useApiQuery<{name:string;timezone:string}>('/v1/admin/communications/context')
+  const [review,setReview]=useState<PollDraft|null>(null),publishLock=useRef(false)
+  const post = useApiPost(); const { pushMessage } = useAppMessages()
+  const endingLock=useRef(false)
+  const [endingId,setEndingId]=useState<string|null>(null)
   const [creatingPoll, setCreatingPoll] = useState(false)
-  const selectedPoll = data?.find((poll) => poll.id === selectedPollId)
+  const detail=useApiQuery<AdminPoll>(`/v1/admin/polls/${selectedPollId??''}`,{enabled:Boolean(selectedPollId)})
+  const selectedPoll=detail.data?.id===selectedPollId?detail.data:data?.find((poll)=>poll.id===selectedPollId)
   const [question,setQuestion] = useState(''); const [options,setOptions] = useState(['',''])
-  const [startsAt,setStartsAt] = useState(() => localDateTimeInput(new Date()))
-  const [endsAt,setEndsAt] = useState(() => localDateTimeInput(new Date(Date.now()+7*86_400_000)))
+  const [startsAt,setStartsAt] = useState('')
+  const [endsAt,setEndsAt] = useState('')
   const [anonymous,setAnonymous] = useState(true); const [showResultsLive,setShowResultsLive] = useState(false); const [resultsRetentionDays,setResultsRetentionDays] = useState(30); const [saving,setSaving] = useState(false)
   const [validationError, setValidationError] = useState<string | null>(null)
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -291,6 +338,7 @@ function AdminPolls() {
     setValidationError(null)
     const form = event.currentTarget
     const normalizedOptions = options.map((option) => option.trim())
+    if(question.trim().length<3||normalizedOptions.some((label)=>!label)){setValidationError('Enter a descriptive question and a non-empty label for every option.');return}
     // Compare option labels case-insensitively, matching the API's uniqueness rule.
     const optionKeys = normalizedOptions.map((option) => option.toLocaleLowerCase())
     const firstDuplicateIndex = optionKeys.findIndex((option, index) => option && optionKeys.indexOf(option) !== index)
@@ -304,52 +352,65 @@ function AdminPolls() {
       form.querySelector<HTMLInputElement>('input[name="poll-ends-at"]')?.focus()
       return
     }
-    setSaving(true)
-    try {
-      await post('/v1/admin/polls', { question, options: normalizedOptions, startsAt: new Date(startsAt).toISOString(), endsAt: new Date(endsAt).toISOString(), anonymous, showResultsLive, resultsRetentionDays })
-      setQuestion(''); setOptions(['', '']); setValidationError(null)
-      setCreatingPoll(false)
-      pushMessage('Poll created.', 'success')
-      reload()
-    } catch (cause) {
-      setValidationError(cause instanceof Error ? cause.message : 'Could not create poll.')
-    } finally { setSaving(false) }
+    try{
+      if(!context.data)throw new Error('Load the community timezone before reviewing.')
+      const start=communityDateTimeToIso(startsAt,context.data.timezone),end=communityDateTimeToIso(endsAt,context.data.timezone)
+      if(end<=start)throw new Error('End time must be after the start time.')
+      setReview({question:question.trim(),options:normalizedOptions,startsAt:start,endsAt:end,anonymous,showResultsLive,resultsRetentionDays,requestKey:globalThis.crypto.randomUUID()})
+    }catch(cause){setValidationError(cause instanceof Error?cause.message:'Check the poll details.')}
   }
-  const end = async (id:string) => { try { await post(`/v1/admin/polls/${encodeURIComponent(id)}/end`,{});pushMessage('Poll ended.','success');reload() } catch(e) { pushMessage(e instanceof Error?e.message:'Could not end poll.','error') } }
+  const publish=async()=>{
+    if(!review||publishLock.current)return
+    publishLock.current=true;setSaving(true);setValidationError(null)
+    try{
+      const result=await post<{id:string}>('/v1/admin/polls',review)
+      setQuestion('');setOptions(['','']);setReview(null);setCreatingPoll(false);setSelectedPollId(result.id);pushMessage('Poll published.','success');reload()
+    }catch(cause){setValidationError(cause instanceof Error?cause.message:'Could not publish poll.')}
+    finally{publishLock.current=false;setSaving(false)}
+  }
+  const end = async (id:string) => {
+    if(endingLock.current||!window.confirm('End this poll? Voting stops immediately. Its planned schedule and recorded votes will remain. Resident result retention runs from the actual ending time.'))return
+    endingLock.current=true;setEndingId(id)
+    try{await post(`/v1/admin/polls/${encodeURIComponent(id)}/end`,{});pushMessage('Poll ended.','success');reload();detail.reload()}
+    catch(e){pushMessage(`${e instanceof Error?e.message:'Could not end poll.'} Refresh the poll after an interrupted request to check its status.`,'error')}
+    finally{endingLock.current=false;setEndingId(null)}
+  }
   const createForm = <form className="card apartment-form-grid" onSubmit={(e)=>void submit(e)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}><label className="admin-field full"><span>Question</span><input required minLength={3} maxLength={500} value={question} onChange={e=>setQuestion(e.target.value)} placeholder="What should we improve next?"/></label>
       {options.map((value,i)=><label className="admin-field full" key={i}><span>Option {i+1}</span><input data-poll-option required maxLength={200} value={value} onChange={e=>setOptions(options.map((x,j)=>j===i?e.target.value:x))}/></label>)}
       {options.length<10&&<button className="secondary" type="button" onClick={()=>setOptions([...options,''])}>＋ Add option</button>}{options.length>2&&<button className="secondary" type="button" onClick={()=>setOptions(options.slice(0,-1))}>Remove last option</button>}
       <div className="admin-poll-date-row full"><label className="admin-field"><span>Starts</span><input type="datetime-local" name="poll-starts-at" required value={startsAt} onChange={e=>setStartsAt(e.target.value)}/></label><label className="admin-field"><span>Ends</span><input type="datetime-local" name="poll-ends-at" required min={startsAt} value={endsAt} onChange={e=>setEndsAt(e.target.value)}/></label></div>
-      <label className="admin-announcement-important"><input type="checkbox" checked={anonymous} onChange={e=>setAnonymous(e.target.checked)}/><span><strong>Anonymous poll</strong><small>Admins see totals only; individual choices are not linked to residents.</small></span></label>
+      <label className="admin-announcement-important"><input type="checkbox" checked={anonymous} onChange={e=>setAnonymous(e.target.checked)}/><span><strong>Anonymous poll</strong><small>Admin and resident results show totals only; no named choices are exposed.</small></span></label>
       <label className="admin-announcement-important"><input type="checkbox" checked={showResultsLive} onChange={e=>setShowResultsLive(e.target.checked)}/><span><strong>Show results while live</strong><small>Residents can see totals before voting closes.</small></span></label>
       <label className="admin-field full"><span>Show results to residents after the poll ends</span><select value={resultsRetentionDays} onChange={e=>setResultsRetentionDays(Number(e.target.value))}><option value={7}>7 days</option><option value={30}>30 days (recommended)</option><option value={90}>90 days</option></select><small>Results are removed from the resident app after this period. Admins retain poll results.</small></label>
       {validationError && <p className="field-validation-error full" role="alert">{validationError}</p>}
-      <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving}>{saving?'Creating…':'Create poll'}</button></div>
+      <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving||!context.data}>Review poll</button></div>
     </form>
-  if (selectedPoll) return <section className="section-stack admin-announcements"><AdminPollDetails poll={selectedPoll} onBack={() => setSelectedPollId(null)} onEnd={end}/></section>
-  if (creatingPoll) return <section className="section-stack admin-announcements"><div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => { setValidationError(null); setCreatingPoll(false) }}>← Back to polls</button><span>Create poll</span></div>{createForm}</section>
-  return <section className="section-stack admin-announcements"><div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" onClick={() => { setValidationError(null); setCreatingPoll(true) }}>＋ Create poll</button></div></div><div className="card">
+  if(selectedPollId&&!selectedPoll)return <section className="section-stack"><button className="secondary" type="button" onClick={()=>{list.back();setSelectedPollId(null)}}>Back to polls</button><LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/></section>
+  if(review&&context.data)return <PublicationReview title="Review poll privacy and schedule" timeZone={context.data.timezone} startsAt={review.startsAt} endsAt={review.endsAt} busy={saving} error={validationError} onConfirm={()=>void publish()} onBack={()=>{setReview(null);setValidationError(null)}}><h2>{review.question}</h2><ol>{review.options.map((label,index)=><li key={index}>{label}</li>)}</ol><p>{review.anonymous?'Anonymous · no named choices in results':'Named · individual choices may be visible'}</p><p>{review.showResultsLive?'Residents can see live totals':'Results stay hidden until close'} · Visible to residents for {review.resultsRetentionDays} days after close.</p></PublicationReview>
+  if (selectedPoll) return <section className="section-stack admin-announcements"><LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/><AdminPollDetails poll={selectedPoll} onBack={() => {list.back();setSelectedPollId(null)}} onEnd={end} ending={endingId!==null}/></section>
+  if (creatingPoll) return <section className="section-stack admin-announcements"><div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => { setValidationError(null); setCreatingPoll(false) }}>← Back to polls</button><span>Create poll · {context.data?.timezone}</span></div>{createForm}</section>
+  return <section className="section-stack admin-announcements"><div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" disabled={context.loading||Boolean(context.error)} onClick={() => { if(!context.data)return;const now=new Date();setStartsAt(communityDateTimeInput(now,context.data.timezone));setEndsAt(communityDateTimeInput(new Date(now.getTime()+7*86400000),context.data.timezone));setValidationError(null);setCreatingPoll(true) }}>＋ Create poll</button></div></div><LoadState loading={context.loading} error={context.error} onRetry={context.reload}/><CommunicationFilters search={list.search} status={list.status} onChange={list.change}/><div className="card">
       <div className="admin-card-heading"><div><h2>All polls</h2><p>Live, scheduled and completed polls. Select a poll to view full results.</p></div></div>
       <LoadState loading={loading} error={error} onRetry={reload}/>
-      {!loading && !error && data?.length === 0 && <p>No polls have been created yet.</p>}
+      {!loading && !error && data?.length === 0 && <p>No polls match this view.</p>}
       <div className="admin-poll-list">{data?.map((poll) => {
-        const state = poll.status === 'archived' || new Date(poll.endsAt).getTime() <= Date.now() ? 'Ended' : new Date(poll.startsAt).getTime() > Date.now() ? 'Scheduled' : 'Live'
+        const state = poll.displayStatus ?? (poll.status === 'archived' || new Date(poll.endsAt).getTime() <= Date.now() ? 'Ended' : new Date(poll.startsAt).getTime() > Date.now() ? 'Scheduled' : 'Live')
         const total = poll.results.reduce((sum, option) => sum + option.votes, 0)
         return <article className="admin-poll-list-item" key={poll.id}>
-          <button type="button" className="admin-poll-list-open" onClick={() => setSelectedPollId(poll.id)}>
+          <button type="button" className="admin-poll-list-open" onClick={() => {list.remember();setSelectedPollId(poll.id)}}>
             <span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span><span className="status-pill">{poll.anonymous ? 'Anonymous' : 'Open'}</span></span>
             <strong>{poll.question}</strong>
-            <small>{new Date(poll.startsAt).toLocaleString('en-IN')} – {new Date(poll.endsAt).toLocaleString('en-IN')} · {total} {total === 1 ? 'vote' : 'votes'} · View full results →</small>
+            <small>{new Date(poll.startsAt).toLocaleString('en-IN')} – {new Date(poll.endsAt).toLocaleString('en-IN')}{poll.closedAt?` · Closed ${new Date(poll.closedAt).toLocaleString('en-IN')}`:''} · {total} {total === 1 ? 'vote' : 'votes'} · View full results →</small>
           </button>
-          {state !== 'Ended' && <button className="secondary" type="button" onClick={() => void end(poll.id)}>End poll</button>}
+          {state !== 'Ended' && <button className="secondary" type="button" disabled={endingId!==null} onClick={() => void end(poll.id)}>{endingId===poll.id?'Ending…':'End poll'}</button>}
         </article>
       })}</div>
-    </div></section>
+    </div>{!loading&&!error&&pageData&&<CommunicationPagination page={list.page} pageSize={pageData.pageSize} total={pageData.total} onPage={list.setPage}/>}</section>
 }
 
 type AdminPollResponses = { items: Array<{ full_name: string; unit: string; option: string }>; page: number; pageSize: number; total: number; pageCount: number }
 
-function AdminPollDetails({ poll, onBack, onEnd }: { poll: AdminPoll; onBack: () => void; onEnd: (id: string) => Promise<void> }) {
+function AdminPollDetails({ poll, onBack, onEnd, ending }: { poll: AdminPoll; onBack: () => void; onEnd: (id: string) => Promise<void>; ending:boolean }) {
   const [page, setPage] = useState(1)
   const [optionId, setOptionId] = useState('')
   const responsesPath = `/v1/admin/polls/${encodeURIComponent(poll.id)}/responses?page=${page}${optionId ? `&optionId=${encodeURIComponent(optionId)}` : ''}`
@@ -363,8 +424,8 @@ function AdminPollDetails({ poll, onBack, onEnd }: { poll: AdminPoll; onBack: ()
     <article className="card admin-full-detail admin-poll-detail-heading">
       <div className="admin-announcement-badges"><span className={`status-pill ${status === 'Live' ? 'success' : status === 'Scheduled' ? 'warning' : ''}`}>{status}</span><span className="status-pill">{poll.anonymous ? 'Anonymous poll' : 'Open poll'}</span></div>
       <h2>{poll.question}</h2>
-      <div className="admin-detail-meta"><span>Starts <strong>{new Date(poll.startsAt).toLocaleString('en-IN')}</strong></span><span>Ends <strong>{new Date(poll.endsAt).toLocaleString('en-IN')}</strong></span><span>Resident results <strong>{poll.resultsRetentionDays} days after close</strong></span></div>
-      {!ended && <div className="admin-announcement-actions"><button className="secondary" type="button" onClick={() => void onEnd(poll.id)}>End poll</button></div>}
+      <div className="admin-detail-meta"><span>Starts <strong>{new Date(poll.startsAt).toLocaleString('en-IN')}</strong></span><span>Ends <strong>{new Date(poll.endsAt).toLocaleString('en-IN')}</strong></span><span>Resident results <strong>{poll.resultsRetentionDays} days after close</strong></span>{poll.closedAt&&<span>{new Date(poll.closedAt)<new Date(poll.startsAt)?'Cancelled before start':'Closed'} <strong>{new Date(poll.closedAt).toLocaleString('en-IN')}</strong></span>}</div>
+      {!ended && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={ending} onClick={() => void onEnd(poll.id)}>{ending?'Ending…':'End poll'}</button></div>}
     </article>
     <section className="admin-poll-summary-grid" aria-label="Poll summary">
       <article className="admin-poll-summary-card"><span>Total votes</span><strong>{totalVotes.toLocaleString('en-IN')}</strong><small>Recorded responses</small></article>
@@ -571,51 +632,6 @@ function AdminBuildings({ onBlocksChanged, selectedBlockId, onSelectBlock, setup
   </section>
 }
 
-function AdminOverdue() {
-  const [search, setSearch] = useState('')
-  const [buildingFilter, setBuildingFilter] = useState('all')
-  const { data, loading, error, reload } = useApiQuery<AdminResident[]>('/v1/admin/residents')
-  const overdue = (data ?? []).filter((resident) => resident.paymentStatus === 'overdue')
-  const buildings = [...new Set(overdue.map((resident) => resident.building))].sort((a, b) => a.localeCompare(b))
-  const filteredOverdue = overdue.filter((resident) => {
-    const query = `${resident.name} ${resident.email} ${resident.building} ${resident.unit} ${resident.billingPeriod ?? ''}`.toLowerCase()
-    return (buildingFilter === 'all' || resident.building === buildingFilter) && query.includes(search.trim().toLowerCase())
-  })
-  return <section className="admin-overdues">
-    <header className="collections-page-heading">
-      <div><span className="eyebrow">FOLLOW-UP QUEUE</span><p>Review residents whose latest invoice is past due.</p></div>
-      <button className="secondary" type="button" onClick={reload} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh records'}</button>
-    </header>
-    <div className="overdues-summary-grid">
-      <article className="card overdues-summary-card">
-        <div className="overdues-summary-label"><span aria-hidden="true">!</span>Overdue accounts</div>
-        <strong>{loading ? '—' : overdue.length}</strong>
-        <small>Residents with a past-due latest invoice</small>
-      </article>
-      <article className="card overdues-summary-card">
-        <div className="overdues-summary-label"><span aria-hidden="true">▦</span>Buildings affected</div>
-        <strong>{loading ? '—' : buildings.length}</strong>
-        <small>Buildings with overdue residents</small>
-      </article>
-    </div>
-    <section className="card overdues-table-card" aria-label="Overdue resident accounts">
-      <div className="overdues-toolbar">
-        <label className="collections-search"><span aria-hidden="true">⌕</span><input aria-label="Search overdue residents" placeholder="Search resident, block, or email…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-        <label className="collections-filter"><span className="sr-only">Filter by building</span><select aria-label="Filter by building" value={buildingFilter} onChange={(event) => setBuildingFilter(event.target.value)}><option value="all">All buildings</option>{buildings.map((building) => <option value={building} key={building}>{building}</option>)}</select></label>
-      </div>
-      <LoadState loading={loading} error={error} onRetry={reload} />
-      {!loading && !error && overdue.length === 0 && <div className="collections-empty" role="status"><span aria-hidden="true">✓</span><strong>No overdue accounts</strong><p>There are no residents with a past-due latest invoice.</p></div>}
-      {!loading && !error && overdue.length > 0 && filteredOverdue.length === 0 && <div className="collections-empty" role="status"><span aria-hidden="true">⌕</span><strong>No matching accounts</strong><p>Try another search or choose a different building.</p><button className="secondary" type="button" onClick={() => { setSearch(''); setBuildingFilter('all') }}>Clear filters</button></div>}
-      {!loading && !error && filteredOverdue.length > 0 && <div className="collections-table-scroll"><table className="collections-table overdues-table"><thead><tr><th>Resident / block</th><th>Building</th><th>Email</th><th>Latest invoice period</th><th>Follow-up status</th></tr></thead><tbody>{filteredOverdue.map((resident) => <tr key={resident.id}>
-        <td><div className="collections-resident"><span className="collections-avatar">{resident.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><span><strong>{resident.name}</strong><small>Block {resident.unit}</small></span></div></td>
-        <td>{resident.building}</td><td className="overdues-email">{resident.email}</td><td>{resident.billingPeriod ?? 'Unavailable'}</td><td><span className="collections-status danger"><i />Overdue</span></td>
-      </tr>)}</tbody></table></div>}
-      {!loading && !error && filteredOverdue.length > 0 && <footer className="overdues-table-footer">Showing {filteredOverdue.length} of {overdue.length} overdue account{overdue.length === 1 ? '' : 's'}</footer>}
-    </section>
-    <aside className="collections-reconcile-note"><span className="collections-reconcile-icon" aria-hidden="true">i</span><div><strong>Latest invoice status</strong><span>This queue is based on each resident’s latest invoice. Reminder delivery and aging calculations are not available in this workspace yet.</span></div></aside>
-  </section>
-}
-
 function AdminReports() {
   const { data, loading, error, reload } = useApiQuery<AdminOverview>('/v1/admin/overview')
   return <section className="section-stack"><div className="card card-title-row"><div><p>Current billing and collection summary from persisted records.</p></div><button className="secondary" type="button" onClick={reload}>Refresh</button></div><LoadState loading={loading} error={error} onRetry={reload} />
@@ -674,12 +690,14 @@ function AdminResidents() {
   const [transitionResident, setTransitionResident] = useState<AdminResident | null>(null)
   const [transitionForm, setTransitionForm] = useState({ fullName: '', email: '', phone: '', occupancyType: 'owner' as 'owner' | 'tenant', moveOutDate: todayString, startDate: tomorrowString, finalMeterReading: '' })
   const [transitionMoveOutRecorded, setTransitionMoveOutRecorded] = useState(false)
-  const [markDuesPaid, setMarkDuesPaid] = useState(false)
   const [transitionBusy, setTransitionBusy] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const [lifecycleMessage, setLifecycleMessage] = useState<string | null>(null)
   const [duesSettlementError, setDuesSettlementError] = useState<string | null>(null)
   const [settlingResidentId, setSettlingResidentId] = useState<string | null>(null)
+  const [settlementReview, setSettlementReview] = useState<AdminResident | null>(null)
+  const settlementKey = useRef('')
+  const settlementLock = useRef(false)
   const post = useApiPost()
   const { data, loading, error, reload } = useApiQuery<AdminResident[]>('/v1/admin/residents')
   const units = useApiQuery<ResidentUnit[]>('/v1/admin/units')
@@ -778,7 +796,6 @@ function AdminResidents() {
     setTransitionResident(resident)
     setTransitionForm({ fullName: '', email: '', phone: '', occupancyType: 'owner', moveOutDate: resident.moveOutDate ?? todayString, startDate: nextDayString, finalMeterReading: resident.finalMeterReading === null ? '' : String(resident.finalMeterReading) })
     setTransitionMoveOutRecorded(Boolean(resident.moveOutDate))
-    setMarkDuesPaid(false)
     setTransitionError(null)
   }
   const submitNewResidentTransition = async (event: FormEvent) => {
@@ -787,12 +804,11 @@ function AdminResidents() {
     setTransitionError(null)
     setTransitionBusy(true)
     try {
-      if (!transitionMoveOutRecorded || markDuesPaid) {
+      if (!transitionMoveOutRecorded) {
         await post(`/v1/admin/residents/${encodeURIComponent(transitionResident.id)}/move-out`, {
           moveOutDate: transitionForm.moveOutDate,
           newResidentStartDate: transitionForm.startDate,
           finalMeterReading: transitionForm.finalMeterReading.trim() ? Number(transitionForm.finalMeterReading) : null,
-          markDuesPaid,
         })
         setTransitionMoveOutRecorded(true)
       }
@@ -816,17 +832,21 @@ function AdminResidents() {
       setTransitionBusy(false)
     }
   }
-  const settleFormerDues = async (resident: AdminResident) => {
-    if (!globalThis.confirm(`Confirm that you received ${formatMoney(resident.outstandingMinor, 'INR')} from ${resident.name}, then mark the outstanding invoices paid?`)) return
+  const settleFormerDues = (resident: AdminResident) => { settlementKey.current = globalThis.crypto.randomUUID(); setDuesSettlementError(null); setSettlementReview(resident) }
+  const confirmFormerDues = async (resident: AdminResident, account: 'Cash' | 'Bank', reference: string) => {
+    if (settlementLock.current) return
+    settlementLock.current = true
     setDuesSettlementError(null)
     setSettlingResidentId(resident.id)
     try {
-      const result = await post<{ resident: string; unit: string; settledMinor: number }>('/v1/admin/residents/' + encodeURIComponent(resident.id) + '/settle-dues')
+      const result = await post<{ resident: string; unit: string; settledMinor: number }>('/v1/admin/residents/' + encodeURIComponent(resident.id) + '/settle-dues', { account, reference, expectedAmountMinor: resident.outstandingMinor, requestKey: settlementKey.current })
+      setSettlementReview(null)
       setLifecycleMessage(`${formatMoney(result.settledMinor, 'INR')} received from ${result.resident} for ${result.unit}; outstanding invoices are marked paid.`)
       reload()
     } catch (cause) {
       setDuesSettlementError(cause instanceof Error ? cause.message : 'Could not settle this resident’s dues. Refresh and try again.')
     } finally {
+      settlementLock.current = false
       setSettlingResidentId(null)
     }
   }
@@ -869,7 +889,7 @@ function AdminResidents() {
         </td>
         <td><span className={`status-pill ${flat.paymentStatus === 'overdue' ? 'warning' : flat.paymentStatus === 'paid' ? 'success' : ''}`}>{flat.paymentStatus.replaceAll('_', ' ')}</span></td>
         <td><div className="flat-resident-actions">
-          {flatResidents.map((resident) => resident.status === 'active' ? (resident.moveOutDate && pendingInvitationUnitIds.has(resident.unitId) ? <small key={resident.id}>Invitation pending</small> : <button type="button" className="secondary" key={resident.id} onClick={() => startNewResidentTransition(resident)}>{resident.moveOutDate ? 'Continue new resident' : '＋ New resident'}</button>) : resident.outstandingMinor > 0 && <button type="button" className="secondary" key={resident.id} disabled={settlingResidentId === resident.id} onClick={() => void settleFormerDues(resident)}>{settlingResidentId === resident.id ? 'Recording…' : 'Mark dues paid'}</button>)}
+          {flatResidents.map((resident) => resident.status === 'active' ? (resident.moveOutDate && pendingInvitationUnitIds.has(resident.unitId) ? <small key={resident.id}>Invitation pending</small> : <button type="button" className="secondary" key={resident.id} onClick={() => startNewResidentTransition(resident)}>{resident.moveOutDate ? 'Continue new resident' : '＋ New resident'}</button>) : resident.outstandingMinor > 0 && <button type="button" className="secondary" key={resident.id} disabled={settlingResidentId === resident.id} onClick={() => settleFormerDues(resident)}>{settlingResidentId === resident.id ? 'Recording…' : 'Record receipt'}</button>)}
           {flatInvitations.map((invitation) => <span className="invitation-row-actions" key={invitation.id}>{invitation.canManage && invitation.displayStatus !== 'revoked' && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => void resendInvitation(invitation)}>{invitationActionId === invitation.id ? 'Sending…' : invitation.displayStatus === 'expired' ? 'Send again' : 'Resend'}</button>}{invitation.canManage && invitation.displayStatus === 'pending' && <button className="secondary danger-button" type="button" disabled={invitationActionId === invitation.id} onClick={() => void revokeInvitation(invitation)}>{invitationActionId === invitation.id ? 'Working…' : 'Cancel'}</button>}</span>)}
           {canAddResident && <button type="button" className="secondary" onClick={() => startInvite(flat)}>＋ Add resident</button>}
         </div></td>
@@ -879,10 +899,11 @@ function AdminResidents() {
     </section>
     {invitationActionError && <p className="form-error" role="alert">{invitationActionError}</p>}
     {invitationActionMessage && <p className="billing-success" role="status">{invitationActionMessage}</p>}
+    {settlementReview && <ReceiptReview key={settlementReview.id} title="Record former resident receipt" amountMinor={settlementReview.outstandingMinor} busy={settlingResidentId !== null} error={duesSettlementError} onCancel={() => setSettlementReview(null)} onConfirm={(account,reference) => void confirmFormerDues(settlementReview,account,reference)}><h2>{settlementReview.name} · {settlementReview.unit}</h2><p>This verifies money received. It does not waive or transfer debt to the next resident.</p></ReceiptReview>}
     {transitionResident && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !transitionBusy) setTransitionResident(null) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="new-resident-transition-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT CHANGE · {transitionResident.building} · {transitionResident.unit}</span><h2 id="new-resident-transition-title">Move out and invite new resident</h2><p>Current resident: {transitionResident.name} · {transitionResident.email}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={transitionBusy} onClick={() => setTransitionResident(null)}>×</button></div>
       <form onSubmit={submitNewResidentTransition} onInvalidCapture={(event) => formValidationMessage(event, setTransitionError)}>
         <div className="unit-setup-panel"><strong>Current resident move-out</strong><div className="apartment-form-grid"><label className="admin-field"><span>Move-out date</span><input type="date" value={transitionForm.moveOutDate} disabled={transitionMoveOutRecorded} onChange={(event) => setTransitionForm((current) => ({ ...current, moveOutDate: event.target.value, startDate: current.startDate <= event.target.value ? dayAfter(event.target.value) : current.startDate }))} required /></label><div className="admin-field"><span>Outstanding dues</span><strong>{formatMoney(transitionResident.outstandingMinor, 'INR')}</strong><small>Unpaid invoices stay with {transitionResident.name} unless you record a settlement.</small></div>
-          {transitionResident.outstandingMinor > 0 && <label className="rate-option full"><input type="checkbox" checked={markDuesPaid} onChange={(event) => setMarkDuesPaid(event.target.checked)} /><span>We have received {formatMoney(transitionResident.outstandingMinor, 'INR')}; record it as paid and settle the old resident’s outstanding invoices.</span></label>}
+          {transitionResident.outstandingMinor > 0 && <p>Outstanding dues stay with the departing resident. Record any verified receipt separately with an account and reference.</p>}
           {billing.data?.rules.template === 'metered_water' && <label className="admin-field"><span>Final water meter reading · kL</span><input type="number" min="0" step="0.001" value={transitionForm.finalMeterReading} disabled={transitionMoveOutRecorded} onChange={(event) => setTransitionForm((current) => ({ ...current, finalMeterReading: event.target.value }))} required /></label>}
         </div></div>
         <div className="unit-setup-panel"><strong>New resident invitation</strong><div className="apartment-form-grid"><label className="admin-field"><span>Full name</span><input value={transitionForm.fullName} onChange={(event) => setTransitionForm((current) => ({ ...current, fullName: event.target.value }))} required minLength={2} maxLength={120} autoComplete="name" /></label><label className="admin-field"><span>Email address</span><input type="email" value={transitionForm.email} onChange={(event) => setTransitionForm((current) => ({ ...current, email: event.target.value }))} required maxLength={254} autoComplete="email" /></label><label className="admin-field"><span>Mobile number <small>(optional)</small></span><input type="tel" value={transitionForm.phone} onChange={(event) => setTransitionForm((current) => ({ ...current, phone: event.target.value }))} maxLength={24} autoComplete="tel" /></label><label className="admin-field"><span>Occupancy type</span><select value={transitionForm.occupancyType} onChange={(event) => setTransitionForm((current) => ({ ...current, occupancyType: event.target.value as 'owner' | 'tenant' }))}><option value="owner">Owner</option><option value="tenant">Tenant</option></select></label><label className="admin-field"><span>New resident start date</span><input type="date" min={dayAfter(transitionForm.moveOutDate)} value={transitionForm.startDate} disabled={transitionMoveOutRecorded} onChange={(event) => setTransitionForm((current) => ({ ...current, startDate: event.target.value }))} required /></label></div><p className="form-hint">The invitation is sent now. Resident access begins on the start date, and the old resident’s access ends after their move-out date.</p></div>
@@ -1415,6 +1436,8 @@ function AdminBilling() {
 }
 
 type AdminPayment = {
+  residentId:string
+  building:string
   id: string
   invoice: string
   resident: string
@@ -1427,109 +1450,112 @@ type AdminPayment = {
   createdAt: string
   canConfirm: boolean
   confirmedAt: string | null
+  account: 'Cash' | 'Bank' | null
+  allocations: Array<{ invoiceId: string; invoice: string; billingPeriod: string; amountMinor: number }>
 }
 
 function AdminCollections() {
-  const now = new Date()
+  const [reviewPayment, setReviewPayment] = useState<AdminPayment | null>(null)
+  const confirmationLock = useRef(false)
+  const currentPeriod=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()).slice(0,7)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [periodFilter, setPeriodFilter] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
+  const [periodFilter, setPeriodFilter] = useState(currentPeriod)
   const [page, setPage] = useState(0)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
-  const { data, loading, error, reload } = useApiQuery<AdminPayment[]>('/v1/admin/collections')
+  const params=new globalThis.URLSearchParams({search,status:statusFilter,period:periodFilter,page:String(page+1)})
+  const { data, loading, error, reload } = useApiQuery<{payments:AdminPayment[];total:number;pageSize:number;summary:{total:number;pendingCount:number;pendingMinor:number;confirmedMonthCount:number;confirmedMonthMinor:number;month:string}}>(`/v1/admin/collections?${params}`)
   const post = useApiPost()
-  const payments = data ?? []
-  const normalizedStatus = (status: string) => status === 'reconciled' || status === 'succeeded' || status === 'confirmed'
-    ? 'confirmed'
-    : status
-  const currentMonthPayments = payments.filter((payment) => {
-    const date = new Date(payment.createdAt)
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  })
-  const confirmedThisMonth = currentMonthPayments.filter((payment) => normalizedStatus(payment.status) === 'confirmed')
-  const pendingPayments = payments.filter((payment) => payment.status === 'pending')
-  const attentionPayments = payments.filter((payment) => payment.status === 'failed' || payment.status === 'refunded')
-  const currentMonthConfirmedTotal = confirmedThisMonth.reduce((total, payment) => total + payment.amountMinor, 0)
-  const pendingTotal = pendingPayments.reduce((total, payment) => total + payment.amountMinor, 0)
-  const filteredPayments = payments.filter((payment) => {
-    const period = new Date(payment.createdAt)
-    const paymentPeriod = `${period.getFullYear()}-${String(period.getMonth() + 1).padStart(2, '0')}`
-    const matchesPeriod = !periodFilter || paymentPeriod === periodFilter
-    const matchesStatus = statusFilter === 'all' || normalizedStatus(payment.status) === statusFilter
-    const searchText = `${payment.resident} ${payment.unit} ${payment.invoice} ${payment.id} ${payment.reference ?? ''} ${payment.method} ${payment.status}`.toLowerCase()
-    return matchesPeriod && matchesStatus && searchText.includes(search.trim().toLowerCase())
-  })
-  const pageSize = 10
-  const pageCount = Math.ceil(filteredPayments.length / pageSize)
-  const pagePayments = filteredPayments.slice(page * pageSize, (page + 1) * pageSize)
+  const payments=data?.payments??[],pagePayments=payments,pageSize=data?.pageSize??10,pageCount=Math.max(1,Math.ceil((data?.total??0)/pageSize))
+  const summary=data?.summary
+  const normalizedStatus=(status:string)=>status
+  const [sources,setSources]=useState<Array<LedgerSourceRef&{residentId:string}>>([])
+  const position=useRef({window:0,panel:0}),restore=useRef(false),heading=useRef<globalThis.HTMLHeadingElement>(null)
+  const remember=()=>{position.current={window:window.scrollY,panel:document.querySelector('.admin-shell .content-panel')?.scrollTop??0};window.scrollTo({top:0});document.querySelector('.admin-shell .content-panel')?.scrollTo({top:0})}
+  const back=()=>{restore.current=true;setReviewPayment(null);setSources([])}
+  useEffect(()=>{if(data&&page>=pageCount)setPage(Math.max(0,pageCount-1))},[data,page,pageCount])
+  useEffect(()=>{const previous=document.title;document.title=`${reviewPayment?'Confirm offline payment':'Collections'} | ${previous.split(' | ').slice(-1)[0]}`;heading.current?.focus({preventScroll:true});return()=>{document.title=previous}},[reviewPayment?.id])
+  useEffect(()=>{if(!reviewPayment&&!sources.length&&data&&restore.current){const frame=window.requestAnimationFrame(()=>{window.scrollTo({top:position.current.window});document.querySelector('.admin-shell .content-panel')?.scrollTo({top:position.current.panel});heading.current?.focus({preventScroll:true});restore.current=false});return()=>window.cancelAnimationFrame(frame)}},[reviewPayment,sources.length,data])
   const setCollectionFilter = (update: () => void) => {
     update()
     setPage(0)
   }
 
-  const confirmPayment = async (payment: AdminPayment) => {
+  const confirmPayment = async (payment: AdminPayment, account: 'Cash' | 'Bank', reference: string) => {
+    if (confirmationLock.current) return
+    confirmationLock.current = true
     setConfirmingId(payment.id)
     setActionError(null)
     setActionMessage(null)
     try {
-      await post(`/v1/admin/collections/${encodeURIComponent(payment.id)}/confirm`)
-      setActionMessage(`Offline payment ${formatMoney(payment.amountMinor, payment.currency)} for ${payment.resident} · Block ${payment.unit} confirmed.`)
+      await post(`/v1/admin/collections/${encodeURIComponent(payment.id)}/confirm`, { account, reference, expectedAmountMinor: payment.amountMinor })
+      back()
+      setActionMessage(`Offline payment ${formatMoney(payment.amountMinor, payment.currency)} for ${payment.resident} · ${payment.building} · ${payment.unit} confirmed.`)
       reload()
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Could not confirm this payment. Refresh and try again.')
     } finally {
+      confirmationLock.current = false
       setConfirmingId(null)
     }
   }
 
-  return <section className="admin-collections">
+  if(sources.length){const selected=sources[sources.length-1];return <LedgerSourceView key={`${selected.kind}:${selected.id}`} residentId={selected.residentId} source={selected} returnLabel="Return to collections" onLedger={back} onBack={()=>sources.length===1?back():setSources((value)=>value.slice(0,-1))} onInvoice={(id)=>setSources((value)=>[...value,{residentId:selected.residentId,kind:'invoice',id}])}/>}
+  if (reviewPayment) return <ReceiptReview key={reviewPayment.id} title="Confirm offline payment" amountMinor={reviewPayment.amountMinor} busy={confirmingId !== null} error={actionError} onCancel={() => { back(); setActionError(null) }} onConfirm={(account, reference) => void confirmPayment(reviewPayment,account,reference)}><h2>{reviewPayment.resident} · {reviewPayment.building} · {reviewPayment.unit}</h2><p>Reported {new Date(reviewPayment.createdAt).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}</p><div>{reviewPayment.allocations.map((allocation) => <div className="list-row" key={allocation.invoiceId}><span>{allocation.invoice} · {allocation.billingPeriod}</span><strong>{formatMoney(allocation.amountMinor,reviewPayment.currency)}</strong></div>)}</div></ReceiptReview>
+
+  return <section className="admin-collections" aria-busy={Boolean(confirmingId)}>
     <header className="collections-page-heading">
-      <div><span className="eyebrow">PAYMENTS & SETTLEMENTS</span><p>Review resident payments and confirm offline amounts received.</p></div>
+      <div><span className="eyebrow">PAYMENTS & SETTLEMENTS</span><h2 ref={heading} tabIndex={-1}>Collections</h2><p>Review resident payments and confirm offline amounts received.</p></div>
       <button type="button" className="secondary" onClick={reload} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh records'}</button>
     </header>
     {actionMessage && <p className="payment-feedback success" role="status">{actionMessage}</p>}
     {actionError && <p className="form-error" role="alert">{actionError}</p>}
     <div className="collections-kpis" aria-label="Collection summary">
-      <article className="card collections-kpi collections-kpi-green"><div className="collections-kpi-label"><span aria-hidden="true">✓</span>Confirmed this month</div><strong>{formatMoney(currentMonthConfirmedTotal, payments[0]?.currency ?? 'INR')}</strong><small>{confirmedThisMonth.length} confirmed payment{confirmedThisMonth.length === 1 ? '' : 's'}</small></article>
-      <article className="card collections-kpi collections-kpi-amber"><div className="collections-kpi-label"><span aria-hidden="true">◷</span>Awaiting confirmation</div><strong>{formatMoney(pendingTotal, payments[0]?.currency ?? 'INR')}</strong><small>{pendingPayments.length} pending payment{pendingPayments.length === 1 ? '' : 's'}</small></article>
-      <article className="card collections-kpi collections-kpi-red"><div className="collections-kpi-label"><span aria-hidden="true">!</span>Needs attention</div><strong>{attentionPayments.length}</strong><small>Failed or refunded records</small></article>
+      <article className="card collections-kpi collections-kpi-green"><div className="collections-kpi-label"><span aria-hidden="true">✓</span>Confirmed this month</div><strong>{formatMoney(summary?.confirmedMonthMinor??0, 'INR')}</strong><small>{summary?.confirmedMonthCount??0} confirmed payments · {summary?.month??'current month'}</small></article>
+      <article className="card collections-kpi collections-kpi-amber"><div className="collections-kpi-label"><span aria-hidden="true">◷</span>Awaiting confirmation</div><strong>{formatMoney(summary?.pendingMinor??0, 'INR')}</strong><small>{summary?.pendingCount??0} pending reports · all months</small></article>
+      <article className="card collections-kpi collections-kpi-red"><div className="collections-kpi-label"><span aria-hidden="true">!</span>All reports</div><strong>{summary?.total??0}</strong><small>Complete community history</small></article>
     </div>
     <section className="card collections-table-card" aria-label="Payment records">
       <div className="collections-toolbar">
-        <label className="collections-search"><span aria-hidden="true">⌕</span><input aria-label="Search payment records" placeholder="Search resident, block, invoice or reference…" value={search} onChange={(event) => setCollectionFilter(() => setSearch(event.target.value))} /></label>
-        <label className="collections-filter"><span className="sr-only">Filter by payment status</span><select aria-label="Filter by payment status" value={statusFilter} onChange={(event) => setCollectionFilter(() => setStatusFilter(event.target.value))}><option value="all">All statuses</option><option value="pending">Pending confirmation</option><option value="confirmed">Confirmed</option><option value="failed">Failed</option><option value="refunded">Refunded</option></select></label>
-        <label className="collections-period"><span className="sr-only">Filter by payment month</span><input aria-label="Filter by payment month" type="month" value={periodFilter} onChange={(event) => setCollectionFilter(() => setPeriodFilter(event.target.value))} /></label>
+        <label className="collections-search"><span aria-hidden="true">⌕</span><input aria-label="Search payment records" placeholder="Search resident, block, invoice or reference…" maxLength={160} value={search} onChange={(event) => setCollectionFilter(() => setSearch(event.target.value))} /></label>
+        <label className="collections-filter"><span className="sr-only">Filter by payment status</span><select aria-label="Filter by payment status" value={statusFilter} onChange={(event) => setCollectionFilter(() => setStatusFilter(event.target.value))}><option value="all">All statuses</option><option value="pending">Pending confirmation</option><option value="confirmed">Confirmed</option></select></label>
+        <label className="collections-period"><span className="sr-only">Filter by reported month</span><input aria-label="Filter by reported month" type="month" value={periodFilter} onChange={(event) => setCollectionFilter(() => setPeriodFilter(event.target.value))} /></label>
       </div>
       <LoadState loading={loading} error={error} onRetry={reload} />
-      {!loading && !error && payments.length === 0 && <div className="collections-empty" role="status"><span aria-hidden="true">▤</span><strong>No payment records yet</strong><p>Resident-submitted offline payments will appear here for administrator confirmation.</p></div>}
-      {!loading && !error && payments.length > 0 && filteredPayments.length === 0 && <div className="collections-empty" role="status"><span aria-hidden="true">⌕</span><strong>No matching payments</strong><p>Try changing the search text, status, or month filter.</p><button className="secondary" type="button" onClick={() => { setSearch(''); setStatusFilter('all'); setPeriodFilter('') }}>Clear filters</button></div>}
+      {!loading && !error && data?.summary.total === 0 && <div className="collections-empty" role="status"><span aria-hidden="true">▤</span><strong>No payment records yet</strong><p>Resident-submitted offline payments will appear here for administrator confirmation.</p></div>}
+      {!loading && !error && data&&data.summary.total>0&&data.total===0 && <div className="collections-empty" role="status"><span aria-hidden="true">⌕</span><strong>No matching payments</strong><p>Try changing the search text, status, or month filter.</p><button className="secondary" type="button" onClick={() => { setSearch(''); setStatusFilter('all'); setPeriodFilter('') }}>Clear filters</button></div>}
       {!loading && !error && pagePayments.length > 0 && <>
         <div className="collections-table-scroll"><table className="collections-table"><thead><tr><th>Resident / block</th><th>Payment ID</th><th>Amount</th><th>Date</th><th>Method</th><th>Status</th><th>Action</th></tr></thead><tbody>{pagePayments.map((payment) => {
           const status = normalizedStatus(payment.status)
           const statusTone = status === 'confirmed' ? 'success' : status === 'pending' ? 'warning' : status === 'failed' || status === 'refunded' ? 'danger' : 'neutral'
           return <tr key={payment.id}>
-            <td><div className="collections-resident"><span className="collections-avatar">{payment.resident.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><span><strong>{payment.resident}</strong><small>Block {payment.unit}</small></span></div></td>
+            <td><div className="collections-resident"><span className="collections-avatar">{payment.resident.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><span><strong>{payment.resident}</strong><small>{payment.building} · {payment.unit}</small></span></div></td>
             <td><span className="collections-mono" title={payment.id}>{payment.id.slice(0, 8).toUpperCase()}</span><small className="collections-invoice">{payment.invoice}{payment.reference ? ` · Ref ${payment.reference}` : ''}</small></td>
             <td><strong className="collections-amount">{formatMoney(payment.amountMinor, payment.currency)}</strong></td>
-            <td><span className="collections-date">{new Date(payment.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span><small className="collections-time">{new Date(payment.createdAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</small></td>
+            <td><span className="collections-date">{new Date(payment.createdAt).toLocaleDateString('en-IN', { timeZone:'Asia/Kolkata',day: 'numeric', month: 'short', year: 'numeric' })}</span><small className="collections-time">{new Date(payment.createdAt).toLocaleTimeString('en-IN', { timeZone:'Asia/Kolkata',hour: 'numeric', minute: '2-digit' })}</small></td>
             <td><span className="collections-method">{payment.method === 'offline_manual' ? 'Manual / offline' : payment.method.replaceAll('_', ' ')}</span></td>
             <td><span className={`collections-status ${statusTone}`}><i />{status === 'confirmed' ? 'Confirmed' : status.replaceAll('_', ' ')}</span></td>
             <td>{payment.canConfirm
-              ? <button className="collections-confirm" type="button" disabled={confirmingId !== null} onClick={() => void confirmPayment(payment)}>{confirmingId === payment.id ? 'Confirming…' : 'Confirm payment'}</button>
+              ? <button className="collections-confirm" type="button" disabled={confirmingId !== null} onClick={() => { remember(); setActionError(null); setReviewPayment(payment) }}>{confirmingId === payment.id ? 'Confirming…' : 'Confirm payment'}</button>
               : payment.confirmedAt
-                ? <small className="collections-confirmed-at">Confirmed {new Date(payment.confirmedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small>
+                ? <span><button type="button" className="text-action" onClick={()=>{remember();setSources([{residentId:payment.residentId,kind:'payment',id:payment.id}])}}>View record</button><small className="collections-confirmed-at">{payment.account} · Confirmed {new Date(payment.confirmedAt).toLocaleDateString('en-IN', { timeZone:'Asia/Kolkata',day: 'numeric', month: 'short' })}</small></span>
                 : <span className="collections-no-action">—</span>}</td>
           </tr>
         })}</tbody></table></div>
-        <footer className="collections-pagination"><span>Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, filteredPayments.length)} of {filteredPayments.length} payment{filteredPayments.length === 1 ? '' : 's'}{payments.length === 500 ? ' · latest 500 records' : ''}</span><div><button type="button" className="secondary" disabled={page === 0} onClick={() => setPage((current) => current - 1)}>Previous</button><span>Page {page + 1} of {pageCount}</span><button type="button" className="secondary" disabled={page >= pageCount - 1} onClick={() => setPage((current) => current + 1)}>Next</button></div></footer>
+        <footer className="collections-pagination"><span>Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, (data?.total??0))} of {(data?.total??0)} payment{(data?.total??0) === 1 ? '' : 's'}</span><div><button type="button" className="secondary" disabled={page === 0} onClick={() => setPage((current) => current - 1)}>Previous</button><span>Page {page + 1} of {pageCount}</span><button type="button" className="secondary" disabled={page >= pageCount - 1} onClick={() => setPage((current) => current + 1)}>Next</button></div></footer>
       </>}
     </section>
     <aside className="collections-reconcile-note"><span className="collections-reconcile-icon" aria-hidden="true">i</span><div><strong>Payment confirmation is handled here</strong><span>Resident-reported offline payments stay pending until an administrator confirms receipt. Automated gateway reconciliation is not enabled.</span></div></aside>
   </section>
 }
 
+function AdminWorkspace() {
+  const { activeTenantId, user } = useAuth0()
+  return <AdminContent key={`${user?.sub ?? ''}:${activeTenantId ?? ''}`} />
+}
+
 export default function AdminDashboard() {
-  return <AuthBoundary><AdminContent /></AuthBoundary>
+  return <AuthBoundary><AdminWorkspace /></AuthBoundary>
 }

@@ -11,11 +11,11 @@
     "defaultSummary": "A live summary of your apartment operations.",
     "refreshData": "Refresh data",
     "totalBilled": "Total billed",
-    "totalBilledDetail": "Latest invoice balance per resident",
+    "totalBilledDetail": "Published charges, excluding repeated carry-forwards",
     "collected": "Collected",
     "collectedDetail": "Verified payment records",
     "outstanding": "Outstanding",
-    "outstandingDetail": "Billed less collected",
+    "outstandingDetail": "Charges less confirmed receipts and applied credits",
     "overdue": "Overdue",
     "overdueDetail": "Past-due open invoices",
     "noMetrics": "No organization metrics are available to this account."

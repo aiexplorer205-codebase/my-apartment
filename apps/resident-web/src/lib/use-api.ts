@@ -5,8 +5,9 @@ import { apiFetch } from '@nivasa/api-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 
-export function useApiQuery<T extends object>(path: string, options: { tenantScoped?: boolean; retainDataOnReload?: boolean } = {}) {
+export function useApiQuery<T extends object>(path: string, options: { tenantScoped?: boolean; retainDataOnReload?: boolean; enabled?: boolean } = {}) {
   const { isAuthenticated, activeTenantId } = useAuth0()
+  const enabled = options.enabled ?? true
   const tenantScoped = options.tenantScoped ?? true
   const retainDataOnReload = options.retainDataOnReload ?? false
   const [data, setData] = useState<T | null>(null)
@@ -27,7 +28,7 @@ export function useApiQuery<T extends object>(path: string, options: { tenantSco
     }
     setLoading(!retainDataOnReload || tenantChanged || !hasData.current)
     const load = async () => {
-      if (!isAuthenticated) { setLoading(false); return }
+      if (!enabled || !isAuthenticated) { hasData.current = false; setData(null); setError(null); setLoading(false); return }
       setError(null)
       try {
         const payload = await apiFetch<T>(path, {
@@ -45,7 +46,7 @@ export function useApiQuery<T extends object>(path: string, options: { tenantSco
     }
     void load()
     return () => { cancelled = true }
-  }, [activeTenantId, isAuthenticated, path, revision, retainDataOnReload, tenantScoped])
+  }, [activeTenantId, isAuthenticated, path, revision, retainDataOnReload, tenantScoped, enabled])
 
   return { data, loading, error, reload }
 }
