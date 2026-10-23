@@ -24,5 +24,5 @@ RUN chown -R node:node /workspace
 USER node
 WORKDIR /workspace/apps/operator-web
 
-EXPOSE 3001
-CMD ["node", "node_modules/next/dist/bin/next", "start", "-H", "0.0.0.0", "-p", "3001"]
+EXPOSE 3000
+CMD ["node", "node_modules/next/dist/bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]
