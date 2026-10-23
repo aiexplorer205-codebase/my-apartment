@@ -80,3 +80,46 @@ docker compose exec postgres psql -U postgres -d postgres -c '\l'
 ```
 
 Run these commands with your local development Compose configuration. Don’t use them for production data.
+## Correcting published maintenance charges
+
+Apply `029_billing_adjustments.sql` to the template and all existing tenants
+before deploying the updated API:
+
+```sh
+scripts/run-migrations.sh tenant all-tenants 029_billing_adjustments.sql
+```
+
+Run this migration once per database; the current runner does not track migration
+history. Fresh volumes include it automatically.
+
+In **Billing**, choose **Adjust charges / history** on an invoice. Select the
+original charge line, credit or additional charge, amount, posting date and
+reason. Review the resulting charges, outstanding amount and any new resident
+credit before posting. Published invoices and lines stay unchanged; numbered
+adjustments remain separately visible. Pending payment reports must be resolved
+first. Imported opening invoices use the existing opening correction workflow.
+
+For the same correction across residents, expand **Correct multiple published
+invoices**, select up to 100 invoices and review every resident's result. The
+whole batch posts in one transaction; a stale or invalid invoice rolls it back.
+Use individual corrections for different amounts or multiple matching lines.
+
+In **Accounts → Resident ledgers**, open a resident and use **Adjustment
+credits** to apply available credit to an outstanding invoice or record a refund
+already paid outside the app. Both actions require review. Applying credit adds
+no cash receipt. Refunds consume credit once and create a separate Cash/Bank
+outflow, shown separately from vendor expenses. Refund records cannot be reversed
+as ordinary expenses. Residents see adjustments, credit uses and refunds in
+payment history; administrators can inspect adjustment and refund ledger sources.
+
+Invoice charges and invoice adjustments change resident receivables. Confirmed
+payment reports create one cash receipt with invoice allocations. Repair/vendor
+expenses link to maintenance tasks or complaints independently; completing a task
+does not automatically bill residents. Existing posted vendor expenses retain the
+reversal/replacement flow. Carried dues are excluded from new ledger charges.
+
+Post corrections after the finalized account period and opening cutover. The
+original invoice date is retained. Current invoice/overdue balances include
+adjustments; dated resident ledgers record adjustments on their posting date.
+The account registers are Cash/Bank books and resident subledgers, not a balanced
+double-entry general ledger. Report exports remain unavailable in the current app.

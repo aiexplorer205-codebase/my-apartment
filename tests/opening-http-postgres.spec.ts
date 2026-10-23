@@ -235,7 +235,7 @@ describe.skipIf(process.env.NIVASA_DATABASE_TESTS!=='1')('Opening balances over 
     expect(february.body.accounts.find((row:{account:string})=>row.account==='Bank')).toMatchObject({openingMinor:0,closingMinor:-52000,expensesMinor:52000})
     expect((await request(f.admin,f.id,'/v1/admin/accounts?period=2026-02')).body.filters.to).toBe('2026-02-28')
     expect((await request(f.admin,f.id,'/v1/admin/accounts?period=2024-02')).body.filters.to).toBe('2024-02-29')
-    for(const suffix of ['&from=2026-02-30','&from=2026-02-01','&status=confirmed','&account=Wallet','&type=refund','&page=0','&search='+('x'.repeat(161))])expect((await request(f.admin,f.id,'/v1/admin/accounts?period=2026-01'+suffix)).status).toBe(400)
+    for(const suffix of ['&from=2026-02-30','&from=2026-02-01','&status=confirmed','&account=Wallet','&type=unsupported','&page=0','&search='+('x'.repeat(161))])expect((await request(f.admin,f.id,'/v1/admin/accounts?period=2026-01'+suffix)).status).toBe(400)
     expect((await request(f.admin,f.id,'/v1/admin/accounts?period=0000-01')).status).toBe(400)
     expect((await request(f.admin,f.id,'/v1/admin/accounts?period=2026-01&page=99')).body.entries).toEqual([])
     expect((await request(f.resident,f.id,'/v1/admin/accounts?period=2026-01')).status).toBe(403)
@@ -674,6 +674,23 @@ describe.skipIf(process.env.NIVASA_DATABASE_TESTS!=='1')('Opening balances over 
     expect(history.status).toBe(200);expect(history.body.records).toEqual(expect.arrayContaining([expect.objectContaining({kind:'adjustment',amountMinor:10000})]))
     const record=await request(f.resident,f.id,`/v1/tenant/payments/records/adjustment/${posted.body.id}`)
     expect(record.status).toBe(200);expect(record.body.allocations[0].invoiceId).toBe(invoiceId)
+    const report=await request(f.resident,f.id,'/v1/tenant/payments/manual',{invoiceIds:[invoiceId],amount:900,requestKey:randomUUID()})
+    expect((await request(f.admin,f.id,`/v1/admin/collections/${report.body.id}/confirm`,{account:'Bank',reference:'ADJUST-HTTP-PAID',expectedAmountMinor:90000})).status).toBe(200)
+    const paidReview=await request(f.admin,f.id,path,{...input,action:'preview'})
+    expect((await request(f.admin,f.id,path,{...input,action:'post',fingerprint:paidReview.body.fingerprint,requestKey:randomUUID()})).status).toBe(200)
+    expect((await request(f.resident,f.id,'/v1/tenant/home')).body).toMatchObject({totalOutstandingMinor:0,availableAdjustmentCreditMinor:10000})
+    const creditsPath=`/v1/admin/accounts/credits/${f.residentId}`
+    const credits=await request(f.admin,f.id,creditsPath)
+    expect(credits.status).toBe(200)
+    const refund={kind:'refund',creditId:credits.body.credits[0].id,amount:100,account:'Bank',date,reason:'Refund verified excess charge'}
+    expect((await request(f.resident,f.id,creditsPath,refund)).status).toBe(403)
+    const refundReview=await request(f.admin,f.id,creditsPath,{...refund,action:'preview'})
+    expect(refundReview.status).toBe(200)
+    const refunded=await request(f.admin,f.id,creditsPath,{...refund,action:'post',fingerprint:refundReview.body.fingerprint,requestKey:randomUUID()})
+    expect(refunded.status).toBe(200)
+    expect((await request(f.resident,f.id,'/v1/tenant/home')).body.availableAdjustmentCreditMinor).toBe(0)
+    expect((await request(f.resident,f.id,`/v1/tenant/payments/records/refund/${refunded.body.id}`)).status).toBe(200)
+
   })
 
 })

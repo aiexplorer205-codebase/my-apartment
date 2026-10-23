@@ -57,6 +57,7 @@ type ResidentHome = {
   manualPaymentAvailableMinor: number
   invoiceBalances: InvoiceBalance[]
   totalOutstandingMinor: number
+  availableAdjustmentCreditMinor: number
   availableOpeningCreditMinor: number
   totalPendingPaymentMinor: number
   totalMinor: number
@@ -339,6 +340,7 @@ function ResidentContent() {
         {(activeTab === 'home' || activeTab === 'payments') && <LoadState loading={home.loading} error={home.error} onRetry={home.reload} />}
         {(activeTab === 'home' || activeTab === 'payments') && !home.loading && !home.error && !home.data && <p role="status">No resident data is available for this account.</p>}
 
+        {home.data && home.data.availableAdjustmentCreditMinor > 0 && (activeTab === 'home' || activeTab === 'payments') && <p className="payment-pending-note" role="status">Invoice adjustment credit available: {formatMoney(home.data.availableAdjustmentCreditMinor, home.data.currency)}. Ask your administrator to apply it to an outstanding invoice or arrange a refund before paying again.</p>}
         {home.data && home.data.availableOpeningCreditMinor > 0 && (activeTab === 'home' || activeTab === 'payments') && <p className="payment-pending-note" role="status">Opening resident credit available: {formatMoney(home.data.availableOpeningCreditMinor, home.data.currency)}. Ask your administrator to apply it to outstanding invoices before making further payments. This credit is separate from a cash receipt.</p>}
 
         {activeTab === 'home' && home.data && (
