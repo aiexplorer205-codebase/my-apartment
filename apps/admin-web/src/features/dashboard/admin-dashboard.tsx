@@ -1,5 +1,6 @@
 'use client'
 
+import { InvoiceCorrections, BulkInvoiceCorrections } from '../accounts/billing-corrections'
 import { useCommunicationList, CommunicationFilters, CommunicationPagination } from '../communications/list-controls'
 import { PublicationReview } from '../communications/publication-review'
 import { communityDateTimeInput, communityDateTimeToIso } from '../communications/scheduling'
@@ -1059,6 +1060,7 @@ const billingTemplateDetails: Record<BillingTemplate, { title: string; descripti
 
 function AdminBilling() {
   const now = new Date()
+  const [correctionInvoice,setCorrectionInvoice]=useState<string|null>(null)
   const [billingPeriod, setBillingPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [rulesForm, setRulesForm] = useState<BillingRulesForm>({ template: 'standard', maintenance: '0', water: '0', sinkingFund: '0', maintenanceRatePerSqft: '0', waterRatePerKl: '0', dueDay: '10', gracePeriodDays: '0', lateFee: '0' })
   const [rulesEditorForm, setRulesEditorForm] = useState<BillingRulesForm>({ template: 'standard', maintenance: '0', water: '0', sinkingFund: '0', maintenanceRatePerSqft: '0', waterRatePerKl: '0', dueDay: '10', gracePeriodDays: '0', lateFee: '0' })
@@ -1415,7 +1417,7 @@ function AdminBilling() {
     <section className="card">
       <div className="billing-section-heading"><div><h3>Invoices</h3><p>Resident invoices, status, and charge breakdown.</p></div></div>
       {!loading && !error && !data?.invoices.length && <p className="billing-empty" role="status">No invoices have been created yet.</p>}
-      {!!data?.invoices.length && <div className="table-scroll"><table className="data-table"><thead><tr><th>Invoice</th><th>Resident / block</th><th>Period / due date</th><th>Charges</th><th>Status</th><th>Total</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number}</strong></td><td>{invoice.resident}<small>Block {invoice.unit}</small></td><td>{invoice.billingPeriod}<small>Due {invoice.dueDate}</small></td><td>{invoice.items ?? '—'}</td><td><span className={`status-pill ${invoice.status === 'void' ? 'warning' : ''}`}>{invoice.status.replaceAll('_', ' ')}</span></td><td>{formatMoney(invoice.totalMinor, invoice.currency)}</td></tr>)}</tbody></table></div>}
+      {data&&<BulkInvoiceCorrections invoices={data.invoices} onPosted={reload}/>}{correctionInvoice&&<section className="card section-stack"><button className="secondary" type="button" onClick={()=>setCorrectionInvoice(null)}>Close adjustments</button><InvoiceCorrections key={correctionInvoice} invoiceId={correctionInvoice} onPosted={reload}/></section>}{!!data?.invoices.length && <div className="table-scroll"><table className="data-table"><thead><tr><th>Invoice</th><th>Resident / block</th><th>Period / due date</th><th>Charges</th><th>Status</th><th>Total</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number}</strong><button className="text-action" type="button" onClick={()=>setCorrectionInvoice(invoice.id)}>Adjust charges / history</button></td><td>{invoice.resident}<small>Block {invoice.unit}</small></td><td>{invoice.billingPeriod}<small>Due {invoice.dueDate}</small></td><td>{invoice.items ?? '—'}</td><td><span className={`status-pill ${invoice.status === 'void' ? 'warning' : ''}`}>{invoice.status.replaceAll('_', ' ')}</span></td><td>{formatMoney(invoice.totalMinor, invoice.currency)}</td></tr>)}</tbody></table></div>}
     </section>
     {previewOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !publishing) setPreviewOpen(false) }}><section className="admin-modal card billing-preview-modal" role="dialog" aria-modal="true" aria-labelledby="billing-preview-title">
       <div className="admin-modal-header"><div><span className="eyebrow">BILLING RUN · PREVIEW</span><h2 id="billing-preview-title">Preview {billingPeriod}</h2><p>Review the invoice total and any blocks needing attention.</p></div><button className="modal-close" type="button" aria-label="Close preview" disabled={publishing} onClick={() => setPreviewOpen(false)}>×</button></div>

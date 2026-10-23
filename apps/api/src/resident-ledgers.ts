@@ -17,6 +17,11 @@ const events=`WITH people AS (
  FROM invoices i JOIN people r ON r.id=i.resident_id WHERE i.status NOT IN ('void','draft') OR i.is_opening_balance AND i.status='void'
  UNION ALL SELECT i.resident_id,pr.id,'payment',(MAX(COALESCE(p.confirmed_at,p.created_at)) AT TIME ZONE 'Asia/Kolkata')::date,pr.created_at,COALESCE(pr.reference,'Confirmed collection'),0,SUM(p.amount_minor),pr.id,pr.status
  FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN people r ON r.id=i.resident_id JOIN payment_reports pr ON pr.id=p.report_id AND pr.resident_id=i.resident_id AND pr.tenant_id=$1 WHERE p.status IN ('confirmed','succeeded','reconciled') GROUP BY i.resident_id,pr.id
+ UNION ALL SELECT a.resident_id,a.id,'adjustment',a.effective_date,a.created_at,'ADJ-'||a.number||' · '||a.reason,
+ CASE WHEN a.kind='debit' THEN a.amount_minor ELSE 0 END,CASE WHEN a.kind='credit' THEN a.amount_minor ELSE 0 END,NULL::uuid,'posted'
+ FROM billing_adjustments a JOIN people r ON r.id=a.resident_id WHERE a.tenant_id=$1
+ UNION ALL SELECT a.resident_id,a.id,'refund',a.effective_date,a.created_at,a.reason,a.amount_minor,0,NULL::uuid,'posted'
+ FROM resident_credit_uses a JOIN people r ON r.id=a.resident_id WHERE a.tenant_id=$1 AND a.account_entry_id IS NOT NULL
  UNION ALL SELECT o.resident_id,o.id,'opening_credit',(source.payload->>'date')::date,o.created_at,'Opening resident credit',0,-o.amount_minor,NULL::uuid,'posted'
  FROM resident_opening_balances o JOIN people r ON r.id=o.resident_id JOIN account_opening_batches source ON source.id=o.batch_id WHERE o.amount_minor<0 AND o.tenant_id=$1
  UNION ALL SELECT o.resident_id,b.id,'opening_reversal',(source.payload->>'date')::date,b.created_at,'Opening balance correction',CASE WHEN o.amount_minor>0 THEN -o.amount_minor ELSE 0 END,CASE WHEN o.amount_minor<0 THEN o.amount_minor ELSE 0 END,NULL::uuid,'posted'

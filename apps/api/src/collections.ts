@@ -56,7 +56,7 @@ export async function submitPaymentReport(pool: Pool, access: Access, raw: unkno
       const result = await reportResult(client,prior.id,number(prior.amount_minor),prior.status)
       await client.query('COMMIT'); return result
     }
-    const invoices = await client.query(`SELECT i.id,to_char(i.billing_period,'YYYY-MM') AS period,i.total_minor::text,
+    const invoices = await client.query(`SELECT i.id,to_char(i.billing_period,'YYYY-MM') AS period,(i.total_minor+invoice_adjustment_total(i.id))::text AS total_minor,
       COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)::text AS carried,
       COALESCE((SELECT SUM(amount_minor) FROM invoice_payment_credits WHERE invoice_id=i.id AND status IN ('pending','confirmed','succeeded','reconciled')),0)::text AS allocated
       FROM invoices i WHERE i.id=ANY($1::uuid[]) AND i.resident_id=$2 AND i.status IN ('open','partially_paid') ORDER BY i.id FOR UPDATE`,[ids,resident.id])
@@ -105,7 +105,7 @@ export async function confirmPaymentReport(pool: Pool, access: Access, id: strin
       if (report.account_name!==input.account || report.reference!==input.reference) throw new ApiFault(409,'invalid_request','This report was already confirmed with different account details. Refresh to inspect the receipt.')
       await client.query('COMMIT'); return {id,status:'confirmed',alreadyConfirmed:true}
     }
-    const invoices = await client.query(`SELECT i.id,i.total_minor::text,i.status,COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)::text AS carried FROM invoices i WHERE i.id IN (SELECT invoice_id FROM payments WHERE report_id=$1) ORDER BY i.id FOR UPDATE`,[id])
+    const invoices = await client.query(`SELECT i.id,(i.total_minor+invoice_adjustment_total(i.id))::text AS total_minor,i.status,COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)::text AS carried FROM invoices i WHERE i.id IN (SELECT invoice_id FROM payments WHERE report_id=$1) ORDER BY i.id FOR UPDATE`,[id])
     const allocations = await client.query(`SELECT id,invoice_id,amount_minor::text,status FROM payments WHERE report_id=$1 ORDER BY invoice_id FOR UPDATE`,[id])
     if (!allocations.rows.length || allocations.rows.some((row) => row.status!=='pending') || allocations.rows.reduce((sum,row) => sum+BigInt(row.amount_minor),0n)!==BigInt(report.amount_minor)) throw new ApiFault(409,'data_integrity_error','The report allocations need review before confirmation')
     for (const invoice of invoices.rows) {
@@ -135,7 +135,7 @@ export async function settleFormerBalance(pool: Pool, access: Access, residentId
     if(!resident) throw new ApiFault(404,'not_found','Former resident not found')
     const prior=(await client.query(`SELECT id,amount_minor::text,request_fingerprint FROM payment_reports WHERE tenant_id=$1 AND request_subject=$2 AND request_key=$3`,[access.tenantId,access.subject,key])).rows[0]
     if(prior){if(prior.request_fingerprint!==fingerprint)throw new ApiFault(409,'invalid_request','This request key was used for another receipt');await client.query('COMMIT');return{resident:resident.full_name,unit:resident.unit,settledMinor:number(prior.amount_minor),alreadyConfirmed:true}}
-    const invoices=await client.query(`SELECT i.id,i.total_minor::text,COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)::text AS carried,
+    const invoices=await client.query(`SELECT i.id,(i.total_minor+invoice_adjustment_total(i.id))::text AS total_minor,COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)::text AS carried,
       COALESCE((SELECT SUM(amount_minor) FROM invoice_payment_credits WHERE invoice_id=i.id AND status IN ('confirmed','succeeded','reconciled')),0)::text AS credited,
       EXISTS(SELECT 1 FROM invoice_payment_credits WHERE invoice_id=i.id AND status='pending') AS pending FROM invoices i WHERE i.resident_id=$1 AND i.status IN ('open','partially_paid') ORDER BY i.id FOR UPDATE`,[residentId])
     if(invoices.rows.some((row)=>row.pending))throw new ApiFault(409,'invalid_request','Confirm pending payment reports before recording a former-resident receipt')
@@ -152,9 +152,9 @@ export async function settleFormerBalance(pool: Pool, access: Access, residentId
 export const financialOverview = (pool: Pool | PoolClient, access: Access) => pool.query<{billed_minor:string;collected_minor:string;overdue_minor:string;outstanding_minor:string}>(
   `WITH charges AS (
      SELECT i.id,i.status,i.due_date,
-       i.total_minor-COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0) AS amount,
+       (i.total_minor+invoice_adjustment_total(i.id))-COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0) AS amount,
        COALESCE((SELECT SUM(amount_minor) FROM payments WHERE invoice_id=i.id AND status IN ('confirmed','succeeded','reconciled')),0) AS paid,
-       COALESCE((SELECT SUM(amount_minor) FROM opening_credit_allocations WHERE invoice_id=i.id),0) AS credit
+       COALESCE((SELECT SUM(amount_minor) FROM opening_credit_allocations WHERE invoice_id=i.id),0)+COALESCE((SELECT SUM(amount_minor) FROM resident_credit_uses WHERE invoice_id=i.id),0)-COALESCE((SELECT SUM(c.amount_minor) FROM resident_credits c JOIN billing_adjustments a ON a.id=c.adjustment_id WHERE a.invoice_id=i.id),0) AS credit
      FROM invoices i JOIN residents r ON r.id=i.resident_id JOIN units u ON u.id=r.unit_id
      WHERE u.tenant_id=$1 AND i.status NOT IN ('void','draft')
    ) SELECT COALESCE(SUM(amount),0)::text AS billed_minor,COALESCE(SUM(paid),0)::text AS collected_minor,

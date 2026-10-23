@@ -649,4 +649,31 @@ describe.skipIf(process.env.NIVASA_DATABASE_TESTS!=='1')('Opening balances over 
     expect((await f.pool.query('SELECT COUNT(*)::int AS count FROM complaint_photos WHERE tenant_id=$1',[f.id])).rows[0].count).toBe(1)
   },15000)
 
+  it('reviews and posts authorized invoice corrections and exposes them to the resident',async()=>{
+    const f=await tenant(),other=await tenant(),invoiceId=randomUUID(),itemId=randomUUID()
+    await f.pool.query(`INSERT INTO invoices(id,invoice_number,resident_id,billing_period,due_date,status,total_minor) VALUES($1,'ADJUST-HTTP',$2,'2026-01-01','2026-01-25','open',100000)`,[invoiceId,f.residentId])
+    await f.pool.query(`INSERT INTO invoice_items(id,invoice_id,category,description,amount_minor) VALUES($1,$2,'maintenance','Maintenance',100000)`,[itemId,invoiceId])
+    const path=`/v1/admin/billing/invoices/${invoiceId}/adjustments`
+    const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
+    const input={kind:'credit',itemId,amount:100,date,reason:'Correct maintenance rate'}
+    expect((await request(f.resident,f.id,path)).status).toBe(403)
+    expect((await request(other.admin,other.id,path)).status).toBe(404)
+    const preview=await request(f.admin,f.id,path,{...input,action:'preview'})
+    expect(preview.status).toBe(200);expect(preview.body).toMatchObject({chargesMinor:90000,outstandingMinor:90000,newCreditMinor:0})
+    const body={...input,action:'post',fingerprint:preview.body.fingerprint,requestKey:randomUUID()}
+    const posted=await request(f.admin,f.id,path,body)
+    expect(posted.status).toBe(200)
+    expect((await request(f.admin,f.id,path,body)).body.id).toBe(posted.body.id)
+    const home=await request(f.resident,f.id,'/v1/tenant/home')
+    expect(home.status).toBe(200);expect(home.body).toMatchObject({totalOutstandingMinor:90000,breakdown:{maintenanceMinor:90000,totalMinor:90000}})
+    const ledger=await request(f.admin,f.id,`/v1/admin/accounts/ledgers/${f.residentId}`)
+    expect(ledger.body.resident.balanceMinor).toBe(90000)
+    const source=await request(f.admin,f.id,`/v1/admin/accounts/ledgers/${f.residentId}/sources/adjustment/${posted.body.id}`)
+    expect(source.status).toBe(200);expect(source.body.source.details).toContainEqual({label:'Reason',value:input.reason})
+    const history=await request(f.resident,f.id,'/v1/tenant/payments/history')
+    expect(history.status).toBe(200);expect(history.body.records).toEqual(expect.arrayContaining([expect.objectContaining({kind:'adjustment',amountMinor:10000})]))
+    const record=await request(f.resident,f.id,`/v1/tenant/payments/records/adjustment/${posted.body.id}`)
+    expect(record.status).toBe(200);expect(record.body.allocations[0].invoiceId).toBe(invoiceId)
+  })
+
 })

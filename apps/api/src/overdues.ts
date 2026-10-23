@@ -9,7 +9,7 @@ export async function overdueQueue(pool:Pool,access:Access,params:globalThis.URL
  if(search.length>160||block!=='All'&&block!=='unassigned'&&!uuid.test(block)||!['All','active','inactive','suspended'].includes(status)||!/^[1-9][0-9]{0,5}$/.test(pageText))throw new ApiFault(400,'invalid_request','Choose valid overdue filters and page')
  const page=Number(pageText),pageSize=20
  const queue=`WITH charges AS (
-  SELECT i.resident_id,i.due_date,GREATEST(i.total_minor-COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)-COALESCE((SELECT SUM(amount_minor) FROM invoice_payment_credits WHERE invoice_id=i.id AND status IN ('confirmed','succeeded','reconciled')),0),0) AS due,
+  SELECT i.resident_id,i.due_date,GREATEST((i.total_minor+invoice_adjustment_total(i.id))-COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)-COALESCE((SELECT SUM(amount_minor) FROM invoice_payment_credits WHERE invoice_id=i.id AND status IN ('confirmed','succeeded','reconciled')),0),0) AS due,
    COALESCE((SELECT SUM(amount_minor) FROM payments WHERE invoice_id=i.id AND status='pending'),0) AS pending
   FROM invoices i JOIN residents r ON r.id=i.resident_id JOIN units u ON u.id=r.unit_id WHERE u.tenant_id=$1 AND i.status IN ('open','partially_paid')
  ), balances AS (

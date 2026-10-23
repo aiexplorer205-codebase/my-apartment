@@ -51,7 +51,7 @@ export async function accountRead(pool:Pool,access:Access,path:string,period:str
   const last=new Date(`${from}T00:00:00Z`);last.setUTCMonth(last.getUTCMonth()+1);last.setUTCDate(0)
   const filters={from:date(params.get('from')??from),to:date(params.get('to')??last.toISOString().slice(0,10)),account:params.get('account')??'All',type:params.get('type')??'All',status:params.get('status')??'All',search:(params.get('search')??'').trim()}
   const pageText=params.get('page')??'1'
-  if(filters.from>filters.to||!['All','Cash','Bank'].includes(filters.account)||!['All','expense','other_income','collection','opening','reversal'].includes(filters.type)||!['All','draft','posted','posted_with_reversals','reversed'].includes(filters.status)||filters.search.length>160||!/^[1-9][0-9]{0,5}$/.test(pageText))throw new ApiFault(400,'invalid_request','Choose valid register filters and page')
+  if(filters.from>filters.to||!['All','Cash','Bank'].includes(filters.account)||!['All','expense','other_income','collection','opening','reversal','refund'].includes(filters.type)||!['All','draft','posted','posted_with_reversals','reversed'].includes(filters.status)||filters.search.length>160||!/^[1-9][0-9]{0,5}$/.test(pageText))throw new ApiFault(400,'invalid_request','Choose valid register filters and page')
   const page=Number(pageText),pageSize=20
   const where=`WHERE e.tenant_id=$1 AND e.entry_date >= $2::date AND e.entry_date <= $3::date AND ($4='All' OR e.account_name=$4) AND ($5='All' OR e.entry_type=$5) AND ($6='All' OR ($6='draft' AND e.status='draft') OR ($6='posted_with_reversals' AND e.status='posted') OR ($6='posted' AND e.status='posted' AND NOT EXISTS(SELECT 1 FROM account_entries r WHERE r.tenant_id=e.tenant_id AND r.reverses_id=e.id)) OR ($6='reversed' AND EXISTS(SELECT 1 FROM account_entries r WHERE r.tenant_id=e.tenant_id AND r.reverses_id=e.id))) AND ($7='' OR strpos(lower(concat_ws(' ',e.party,e.category,e.description,e.account_name)),lower($7))>0)`
   const values=[access.tenantId,filters.from,filters.to,filters.account,filters.type,filters.status,filters.search]
@@ -65,6 +65,7 @@ export async function accountRead(pool:Pool,access:Access,path:string,period:str
       COALESCE(SUM(e.amount_minor) FILTER(WHERE e.entry_date >= $2::date AND e.entry_type='collection'),0)::text AS receipts,
       COALESCE(SUM(e.amount_minor) FILTER(WHERE e.entry_date >= $2::date AND (e.entry_type='other_income' OR (e.entry_type='reversal' AND original.entry_type='other_income'))),0)::text AS income,
       COALESCE(SUM(e.amount_minor) FILTER(WHERE e.entry_date >= $2::date AND (e.entry_type='expense' OR (e.entry_type='reversal' AND original.entry_type='expense'))),0)::text AS expenses,
+      COALESCE(SUM(e.amount_minor) FILTER(WHERE e.entry_date >= $2::date AND e.entry_type='refund'),0)::text AS refunds,
       COALESCE(SUM(e.amount_minor),0)::text AS closing
       FROM account_entries e LEFT JOIN account_entries original ON original.id=e.reverses_id
       WHERE e.tenant_id=$1 AND e.status='posted' AND e.entry_date<$2::date+INTERVAL '1 month' GROUP BY e.account_name`,[access.tenantId,from])
@@ -78,7 +79,7 @@ export async function accountRead(pool:Pool,access:Access,path:string,period:str
     const reconciliations=await client.query('SELECT account_name,status FROM account_reconciliations WHERE tenant_id=$1 AND period=$2::date',[access.tenantId,from])
     const cutover=(await client.query('SELECT cutover_date::text AS date FROM account_cutovers WHERE tenant_id=$1',[access.tenantId])).rows[0]??null
     await client.query('COMMIT')
-    return{period,cutover,filters,total,page,pageSize,categories,receivables,entries:result.rows.map(({amount,...entry})=>({...entry,amountMinor:integer(amount)})),accounts:['Cash','Bank'].map((account)=>{const row=balances.rows.find((entry)=>entry.account===account);return{account,reconciliationStatus:reconciliations.rows.find((item)=>item.account_name===account)?.status??'unreconciled',openingMinor:integer(row?.opening??0),receiptsMinor:integer(row?.receipts??0),incomeMinor:integer(row?.income??0),expensesMinor:-integer(row?.expenses??0),closingMinor:integer(row?.closing??0)}})}
+    return{period,cutover,filters,total,page,pageSize,categories,receivables,entries:result.rows.map(({amount,...entry})=>({...entry,amountMinor:integer(amount)})),accounts:['Cash','Bank'].map((account)=>{const row=balances.rows.find((entry)=>entry.account===account);return{account,reconciliationStatus:reconciliations.rows.find((item)=>item.account_name===account)?.status??'unreconciled',openingMinor:integer(row?.opening??0),receiptsMinor:integer(row?.receipts??0),incomeMinor:integer(row?.income??0),expensesMinor:0-integer(row?.expenses??0),refundsMinor:0-integer(row?.refunds??0),closingMinor:integer(row?.closing??0)}})}
   }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
 }
 
@@ -130,6 +131,7 @@ export async function accountWrite(pool:Pool,access:Access,id:string|undefined,r
     }
     if(input.action!=='reverse')throw new ApiFault(400,'invalid_request','Choose save, post or reverse')
     if(row.status!=='posted'||!['expense','other_income'].includes(row.entry_type))throw new ApiFault(409,'invalid_request','Only posted expense or other-income entries support this correction flow')
+    if((await client.query('SELECT 1 FROM resident_credit_uses WHERE account_entry_id=$1',[id])).rows.length)throw new ApiFault(409,'invalid_request','Resident refunds cannot be reversed as ordinary expenses; the credit has already been consumed')
     const reason=bounded(input.reason,'a reversal reason',2000),date=validateAccountDate(input.date)
     if(date<row.effective_date)throw new ApiFault(400,'invalid_request','A reversal cannot predate its original entry')
     const prior=(await client.query('SELECT id,created_by,request_key,reason,entry_date::text AS effective_date FROM account_entries WHERE reverses_id=$1',[id])).rows[0]

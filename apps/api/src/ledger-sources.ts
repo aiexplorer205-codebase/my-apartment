@@ -5,7 +5,7 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]
 const minor=(value:unknown)=>{const n=Number(value);if(!Number.isSafeInteger(n))throw new ApiFault(500,'data_integrity_error','Source amount exceeds the supported range');return n}
 export async function ledgerSource(pool:Pool,access:Access,residentId:string,kind:string,id:string){
  if(access.role!=='admin')throw new ApiFault(403,'forbidden','Administrator permission is required')
- if(!uuid.test(residentId)||!uuid.test(id)||!['invoice','payment','opening_credit','opening_reversal'].includes(kind))throw new ApiFault(400,'invalid_request','Choose a valid ledger source')
+ if(!uuid.test(residentId)||!uuid.test(id)||!['invoice','payment','opening_credit','opening_reversal','adjustment','refund'].includes(kind))throw new ApiFault(400,'invalid_request','Choose a valid ledger source')
  const db=await pool.connect()
  try{
   await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
@@ -22,6 +22,12 @@ export async function ledgerSource(pool:Pool,access:Access,residentId:string,kin
     if(opening)details.push({label:'Verified source',value:opening.source},{label:'Reason',value:opening.reason||'Initial import'},{label:'Recorded by',value:opening.created_by})
    }
    source={...row,amount:undefined,amountMinor:minor(row.amount),ledgerAmountMinor:row.status==='draft'||row.status==='void'&&!row.isOpening?0:minor(BigInt(row.amount)-carried),details,lines:items.map(({amount,...item})=>({...item,amountMinor:minor(amount)}))}
+  }else if(kind==='adjustment'||kind==='refund'){
+   const row=kind==='adjustment'
+    ?(await db.query(`SELECT a.id,'ADJ-'||a.number AS title,a.effective_date::text AS date,a.created_at AS "createdAt",a.amount_minor::text AS amount,a.kind,a.reason,a.created_by AS actor,a.invoice_id AS "invoiceId" FROM billing_adjustments a WHERE a.id=$1 AND a.resident_id=$2 AND a.tenant_id=$3`,[id,residentId,access.tenantId])).rows[0]
+    :(await db.query(`SELECT a.id,'Resident refund' AS title,a.effective_date::text AS date,a.created_at AS "createdAt",a.amount_minor::text AS amount,'refund' AS kind,a.reason,a.created_by AS actor,a.account_entry_id AS "accountEntryId" FROM resident_credit_uses a WHERE a.id=$1 AND a.resident_id=$2 AND a.tenant_id=$3 AND a.account_entry_id IS NOT NULL`,[id,residentId,access.tenantId])).rows[0]
+   if(!row)throw new ApiFault(404,'not_found','Correction source not found')
+   source={...row,status:'posted',amountMinor:minor(row.amount),details:[{label:'Type',value:row.kind},{label:'Reason',value:row.reason},{label:'Recorded by',value:row.actor}],lines:row.invoiceId?[{invoiceId:row.invoiceId,label:'Original invoice',amountMinor:minor(row.amount)}]:[]}
   }else if(kind==='payment'){
    const row=(await db.query(`SELECT pr.id,pr.status,pr.reference AS title,pr.created_at AS "createdAt",pr.confirmed_at AS "confirmedAt",pr.confirmed_by AS "confirmedBy",pr.account_name AS account,pr.amount_minor::text AS amount,(SELECT id FROM account_entries WHERE tenant_id=pr.tenant_id AND report_id=pr.id) AS "accountEntryId" FROM payment_reports pr WHERE pr.id=$1 AND pr.resident_id=$2 AND pr.tenant_id=$3`,[id,residentId,access.tenantId])).rows[0]
    if(!row)throw new ApiFault(404,'not_found','Collection source not found')

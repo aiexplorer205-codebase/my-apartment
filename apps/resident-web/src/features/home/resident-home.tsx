@@ -12,7 +12,7 @@ import { getAppConfig, useTranslation, LanguageSwitcher } from '@nivasa/app-plat
 import { useAppMessages } from '@nivasa/ui'
 
 type Payment = {
-  kind: 'report' | 'credit'
+  kind: 'report' | 'credit' | 'adjustment' | 'adjustment_credit' | 'refund'
   periods: string[]
   id: string
   invoiceId: string
@@ -104,8 +104,8 @@ const formatBillingPeriod = (period: string) => {
 }
 
 
-const paymentDescription=(payment:Payment)=>payment.kind==='credit'?'Opening credit applied':payment.periods.length>1?`Offline payment · ${payment.periods.length} invoice periods`:payment.invoiceId.startsWith('OPEN-')?'Opening resident dues':payment.billingPeriod?`${formatBillingPeriod(payment.billingPeriod)} offline payment`:'Offline payment report'
-const paymentStatusLabel=(payment:Payment)=>payment.kind==='credit'?'Credit applied':payment.status==='pending'?'Awaiting confirmation':['confirmed','reconciled','succeeded'].includes(payment.status)?'Confirmed':payment.status
+const paymentDescription=(payment:Payment)=>payment.kind==='adjustment'?'Invoice adjustment':payment.kind==='refund'?'Resident refund':payment.kind==='adjustment_credit'?'Adjustment credit applied':payment.kind==='credit'?'Opening credit applied':payment.periods.length>1?`Offline payment · ${payment.periods.length} invoice periods`:payment.invoiceId.startsWith('OPEN-')?'Opening resident dues':payment.billingPeriod?`${formatBillingPeriod(payment.billingPeriod)} offline payment`:'Offline payment report'
+const paymentStatusLabel=(payment:Payment)=>payment.kind==='adjustment'?'Invoice adjustment':payment.kind==='refund'?'Resident refund':payment.kind==='adjustment_credit'?'Adjustment credit applied':payment.kind==='credit'?'Credit applied':payment.status==='pending'?'Awaiting confirmation':['confirmed','reconciled','succeeded'].includes(payment.status)?'Confirmed':payment.status
 
 function ResidentContent() {
   const { pushMessage } = useAppMessages()

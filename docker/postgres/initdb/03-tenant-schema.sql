@@ -27,3 +27,4 @@
 \i /migrations/tenant_db/026_communication_publications.sql
 \i /migrations/tenant_db/027_complaint_photos.sql
 \i /migrations/tenant_db/028_admin_assignment.sql
+\i /migrations/tenant_db/029_billing_adjustments.sql

@@ -1,3 +1,4 @@
+import { adjustmentRead, adjustmentWrite, adjustmentBatch, creditRead, creditWrite } from '../apps/api/src/billing-adjustments.ts'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -523,6 +524,96 @@ describe.skipIf(!enabled)('PostgreSQL collection and account invariants', () => 
     await expect(residentPaymentHistory(pool,f.resident,new globalThis.URLSearchParams({page:'0'}))).rejects.toThrow('page number')
     await expect(residentPaymentHistory(pool,f.resident,new globalThis.URLSearchParams({status:'unknown'}))).rejects.toThrow('status')
     await expect(residentPaymentHistory(pool,f.resident,new globalThis.URLSearchParams({period:'2026-99'}))).rejects.toThrow('month')
+  })
+
+  const adjustmentInput = async(f:Awaited<ReturnType<typeof fixture>>,amount=100,kind='credit')=>{
+    const itemId=randomUUID()
+    await pool.query(`INSERT INTO invoice_items(id,invoice_id,category,description,amount_minor) VALUES($1,$2,'maintenance','Monthly maintenance',100000)`,[itemId,f.first])
+    const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
+    return {kind,itemId,amount,reason:'Correct verified maintenance charge',date}
+  }
+  const postAdjustment=async(f:Awaited<ReturnType<typeof fixture>>,input:Awaited<ReturnType<typeof adjustmentInput>>)=>{
+    const preview=await adjustmentWrite(pool,f.admin,f.first,{...input,action:'preview'}) as {fingerprint:string}
+    return adjustmentWrite(pool,f.admin,f.first,{...input,action:'post',fingerprint:preview.fingerprint,requestKey:randomUUID()})
+  }
+  it('adjusts unpaid invoices without cash movement, retains originals and rejects stale reviews',async()=>{
+    const f=await fixture(),input=await adjustmentInput(f)
+    const preview=await adjustmentWrite(pool,f.admin,f.first,{...input,action:'preview'}) as {fingerprint:string}
+    const post={...input,action:'post',fingerprint:preview.fingerprint,requestKey:randomUUID()}
+    const result=await adjustmentWrite(pool,f.admin,f.first,post)
+    expect((await adjustmentWrite(pool,f.admin,f.first,post)).id).toBe(result.id)
+    await expect(adjustmentWrite(pool,f.admin,f.first,{...post,amount:200})).rejects.toThrow('different correction')
+    await expect(adjustmentWrite(pool,f.admin,f.first,{...post,requestKey:randomUUID()})).rejects.toThrow('changed')
+    await expect(pool.query('UPDATE invoices SET total_minor=1 WHERE id=$1',[f.first])).rejects.toThrow('immutable')
+    await expect(pool.query('UPDATE invoice_items SET amount_minor=1 WHERE id=$1',[input.itemId])).rejects.toThrow('immutable')
+    expect((await adjustmentRead(pool,f.admin,f.first)).outstandingMinor).toBe(90000)
+    expect((await financialOverview(pool,f.admin)).rows[0].outstanding_minor).toBe('290000')
+    expect((await pool.query('SELECT total_minor::text FROM invoices WHERE id=$1',[f.first])).rows[0].total_minor).toBe('100000')
+    expect((await pool.query('SELECT count(*)::int AS n FROM account_entries WHERE tenant_id=$1',[f.tenantId])).rows[0].n).toBe(0)
+    await expect(pool.query(`UPDATE billing_adjustments SET reason='rewrite' WHERE id=$1`,[result.id])).rejects.toThrow('immutable')
+    const report=await submitPaymentReport(pool,f.resident,{invoiceIds:[f.first],amount:900,requestKey:randomUUID()})
+    await confirmPaymentReport(pool,f.admin,report.id,{account:'Bank',reference:'ADJUSTED-PAYMENT',expectedAmountMinor:90000})
+    expect((await adjustmentRead(pool,f.admin,f.first)).status).toBe('paid')
+  })
+  it('turns paid-invoice reductions into spendable credit, applies and refunds exactly once',async()=>{
+    const f=await fixture(),input=await adjustmentInput(f,500)
+    const report=await submitPaymentReport(pool,f.resident,{invoiceIds:[f.first],amount:1000,requestKey:randomUUID()})
+    await confirmPaymentReport(pool,f.admin,report.id,{account:'Bank',reference:'PAID-CORRECTION',expectedAmountMinor:100000})
+    await postAdjustment(f,input)
+    const credit=(await creditRead(pool,f.admin,f.residentId)).credits[0]!
+    expect(credit.availableMinor).toBe(50000)
+    const apply={kind:'apply',creditId:credit.id,invoiceId:f.second,amount:300,date:input.date,reason:'Apply maintenance credit'}
+    const preview=await creditWrite(pool,f.admin,f.residentId,{...apply,action:'preview'}) as {fingerprint:string}
+    const commit={...apply,action:'post',fingerprint:preview.fingerprint,requestKey:randomUUID()}
+    const results=await Promise.all([creditWrite(pool,f.admin,f.residentId,commit),creditWrite(pool,f.admin,f.residentId,commit)])
+    expect(results[0].id).toBe(results[1].id)
+    expect((await financialOverview(pool,f.admin)).rows[0].outstanding_minor).toBe('170000')
+    const refund={kind:'refund',creditId:credit.id,account:'Bank',amount:200,date:input.date,reason:'BANK-REFUND-001'}
+    const review=await creditWrite(pool,f.admin,f.residentId,{...refund,action:'preview'}) as {fingerprint:string}
+    const refundCommit={...refund,action:'post',fingerprint:review.fingerprint,requestKey:randomUUID()}
+    await creditWrite(pool,f.admin,f.residentId,refundCommit)
+    await creditWrite(pool,f.admin,f.residentId,refundCommit)
+    expect((await creditRead(pool,f.admin,f.residentId)).credits[0]!.availableMinor).toBe(0)
+    await expect(creditWrite(pool,f.admin,f.residentId,{...refund,action:'preview'})).rejects.toThrow('already been applied or refunded')
+    const balances=await accountRead(pool,f.admin,'',input.date.slice(0,7)) as {accounts:Array<{account:string;closingMinor:number;refundsMinor:number;expensesMinor:number}>}
+    expect(balances.accounts.find((row)=>row.account==='Bank')).toMatchObject({closingMinor:80000,refundsMinor:20000,expensesMinor:0})
+    const ledger=await accountRead(pool,f.admin,`ledgers/${f.residentId}`,null) as {resident:{balanceMinor:number}}
+    expect(ledger.resident.balanceMinor).toBe(170000)
+    const history=await residentPaymentHistory(pool,f.resident,new globalThis.URLSearchParams())
+    expect(history.records.map((row)=>row.kind)).toEqual(expect.arrayContaining(['adjustment','adjustment_credit','refund']))
+  })
+  it('splits partial-payment credits, prevents foreign access, overcredits, pending and closed-period corrections',async()=>{
+    const f=await fixture(),other=await fixture(),input=await adjustmentInput(f,800)
+    await expect(adjustmentWrite(pool,other.admin,f.first,{...input,action:'preview'})).rejects.toThrow('not found')
+    await expect(adjustmentWrite(pool,f.resident,f.first,{...input,action:'preview'})).rejects.toThrow('Administrator')
+    await expect(adjustmentWrite(pool,f.admin,f.first,{...input,amount:1001,action:'preview'})).rejects.toThrow('exceeds')
+    const report=await submitPaymentReport(pool,f.resident,{invoiceIds:[f.first],amount:500,requestKey:randomUUID()})
+    await expect(adjustmentWrite(pool,f.admin,f.first,{...input,action:'preview'})).rejects.toThrow('pending')
+    await confirmPaymentReport(pool,f.admin,report.id,{account:'Cash',reference:'PARTIAL-CREDIT',expectedAmountMinor:50000})
+    await postAdjustment(f,input)
+    expect((await creditRead(pool,f.admin,f.residentId)).credits[0]!.availableMinor).toBe(30000)
+    await postAdjustment(f,{...input,kind:'debit',amount:100})
+    expect((await adjustmentRead(pool,f.admin,f.first)).outstandingMinor).toBe(10000)
+    await pool.query(`INSERT INTO account_reconciliations(tenant_id,account_name,period,status,statement_opening_minor,statement_closing_minor,statement_reference,created_by,updated_by,finalized_at,finalized_by,finalized_snapshot) VALUES($1,'Bank',date_trunc('month',$2::date),'finalized',0,0,'test',$3,$3,NOW(),$3,'test')`,[f.tenantId,input.date,f.admin.subject])
+    await expect(adjustmentWrite(pool,f.admin,f.first,{...input,amount:1,action:'preview'})).rejects.toThrow('finalized')
+  })
+
+  it('posts bulk corrections atomically and rejects a stale invoice without partially posting the batch',async()=>{
+    const a=await fixture(),b=await fixture()
+    // Use two residents in the same community.
+    await pool.query("UPDATE units SET tenant_id=$1,number='A-102' WHERE tenant_id=$2",[a.tenantId,b.tenantId])
+    const one=await adjustmentInput(a),two=await adjustmentInput(b)
+    const rows=[{...one,invoiceId:a.first,category:'maintenance'},{...two,invoiceId:b.first,category:'maintenance'}]
+    const preview=await adjustmentBatch(pool,a.admin,{action:'preview',rows})
+    const reviewed=rows.map((row,index)=>({...row,fingerprint:(preview.results[index] as {fingerprint:string}).fingerprint,requestKey:randomUUID()}))
+    await postAdjustment(a,{...one,amount:50})
+    await expect(adjustmentBatch(pool,a.admin,{action:'post',rows:[reviewed[1],reviewed[0]]})).rejects.toThrow('changed')
+    expect((await adjustmentRead(pool,a.admin,b.first)).adjustments).toHaveLength(0)
+    const fresh=await adjustmentBatch(pool,a.admin,{action:'preview',rows})
+    const commit={action:'post',rows:rows.map((row,index)=>({...row,fingerprint:(fresh.results[index] as {fingerprint:string}).fingerprint,requestKey:randomUUID()}))}
+    const results=await adjustmentBatch(pool,a.admin,commit)
+    expect(results.results).toHaveLength(2)
+    expect((await adjustmentBatch(pool,a.admin,commit)).results.map((row)=>row.id)).toEqual(results.results.map((row)=>row.id))
   })
 
 })

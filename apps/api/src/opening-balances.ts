@@ -128,7 +128,7 @@ const creditPlan=async(db:Database,access:Access,residentId:string)=>{
   const opening=(await db.query(`SELECT o.id,o.amount_minor::text,COALESCE((SELECT SUM(amount_minor) FROM opening_credit_allocations WHERE opening_id=o.id),0)::text AS used FROM resident_opening_balances o WHERE o.resident_id=$1 AND o.tenant_id=$2 AND o.amount_minor<0 AND o.superseded_by IS NULL`,[residentId,access.tenantId])).rows[0]
   const available=opening?-integer(opening.amount_minor)-integer(opening.used):0
   const invoices=(await db.query(`SELECT i.id,i.invoice_number AS invoice,to_char(i.billing_period,'YYYY-MM') AS period,
-    (i.total_minor-COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)-COALESCE((SELECT SUM(amount_minor) FROM invoice_payment_credits WHERE invoice_id=i.id AND status IN ('pending','confirmed','succeeded','reconciled')),0))::text AS available
+    ((i.total_minor+invoice_adjustment_total(i.id))-COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)-COALESCE((SELECT SUM(amount_minor) FROM invoice_payment_credits WHERE invoice_id=i.id AND status IN ('pending','confirmed','succeeded','reconciled')),0))::text AS available
     FROM invoices i WHERE i.resident_id=$1 AND i.status IN ('open','partially_paid') ORDER BY i.billing_period,i.id`,[residentId])).rows
   const total=invoices.reduce((sum,row)=>sum+Math.max(integer(row.available),0),0),amountMinor=Math.min(available,total)
   const allocations=amountMinor>0?allocateManualPayment(amountMinor,invoices.map((row)=>({invoiceId:row.id,billingPeriod:row.period,availableMinor:Math.max(integer(row.available),0)}))):[]
@@ -157,7 +157,7 @@ export async function openingCreditApply(pool:Pool,access:Access,residentId:stri
     await client.query('INSERT INTO opening_credit_actions(id,tenant_id,resident_id,actor_subject,request_key,payload_hash,result) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)',[result.id,access.tenantId,residentId,access.subject,requestKey,payloadHash,JSON.stringify(result)])
     for(const allocation of plan.allocations){
       await client.query('INSERT INTO opening_credit_allocations(opening_id,invoice_id,amount_minor,created_by,request_key,action_id) VALUES($1,$2,$3,$4,$5,$6)',[plan.openingId,allocation.invoiceId,allocation.amountMinor,access.subject,requestKey,result.id])
-      await client.query(`UPDATE invoices i SET status=CASE WHEN COALESCE((SELECT SUM(amount_minor) FROM invoice_payment_credits WHERE invoice_id=i.id AND status IN ('confirmed','succeeded','reconciled')),0)>=i.total_minor-COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0) THEN 'paid' ELSE 'partially_paid' END WHERE i.id=$1`,[allocation.invoiceId])
+      await client.query(`UPDATE invoices i SET status=CASE WHEN COALESCE((SELECT SUM(amount_minor) FROM invoice_payment_credits WHERE invoice_id=i.id AND status IN ('confirmed','succeeded','reconciled')),0)>=(i.total_minor+invoice_adjustment_total(i.id))-COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0) THEN 'paid' ELSE 'partially_paid' END WHERE i.id=$1`,[allocation.invoiceId])
     }
     await client.query('COMMIT');return result
   }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}

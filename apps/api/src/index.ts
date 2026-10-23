@@ -1,3 +1,4 @@
+import { adjustmentRead, adjustmentWrite, adjustmentBatch, creditRead, creditWrite } from './billing-adjustments.js'
 import { overdueQueue } from './overdues.js'
 import { ledgerSource } from './ledger-sources.js'
 import { residentPaymentHistory, residentPaymentRecord, residentRecentPayments } from './resident-payments.js'
@@ -734,7 +735,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     status: string
   }>(
     `SELECT i.id, i.invoice_number, to_char(i.billing_period, 'YYYY-MM') AS billing_period, i.due_date::text,
-            i.total_minor::text, i.status,
+            (i.total_minor+invoice_adjustment_total(i.id))::text AS total_minor, i.status,
             COALESCE(carried.previous_dues_minor, 0)::text AS previous_dues_minor
      FROM invoices i
      LEFT JOIN LATERAL (
@@ -759,7 +760,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       `SELECT invoice_id,
               COALESCE(SUM(amount_minor) FILTER (WHERE status IN ('succeeded', 'reconciled', 'confirmed')), 0)::text AS confirmed_minor,
               COALESCE(SUM(amount_minor) FILTER (WHERE status = 'pending'), 0)::text AS pending_minor,
-              COALESCE(SUM(amount_minor) FILTER (WHERE method = 'opening_credit'), 0)::text AS opening_credit_minor
+              COALESCE(SUM(amount_minor) FILTER (WHERE method IN ('opening_credit','adjustment_credit')), 0)::text AS opening_credit_minor
        FROM invoice_payment_credits
        WHERE invoice_id = ANY($1::uuid[])
        GROUP BY invoice_id`,
@@ -815,7 +816,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
   if (invoice) {
     const items = await pool.query<{ category: string; amount_minor: string }>(
       `SELECT category, COALESCE(SUM(amount_minor), 0)::text AS amount_minor
-       FROM invoice_items WHERE invoice_id = $1 GROUP BY category`,
+       FROM (SELECT category,amount_minor FROM invoice_items WHERE invoice_id=$1 UNION ALL SELECT category,CASE WHEN kind='debit' THEN amount_minor ELSE -amount_minor END FROM billing_adjustments WHERE invoice_id=$1) adjusted GROUP BY category`,
       [invoice.id],
     )
     for (const item of items.rows) {
@@ -835,7 +836,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     // using the same charge/payment model as the admin billing preview.
     const livePreviousDuesResult = await pool.query<{ amount_minor: string }>(
       `WITH prior_invoice_charges AS (
-         SELECT SUM(GREATEST(i.total_minor - COALESCE(carried.amount_minor, 0), 0)) AS charge_minor
+         SELECT SUM(GREATEST((i.total_minor+invoice_adjustment_total(i.id)) - COALESCE(carried.amount_minor, 0), 0)) AS charge_minor
          FROM invoices i
          LEFT JOIN LATERAL (
            SELECT SUM(ii.amount_minor) AS amount_minor
@@ -1400,7 +1401,7 @@ const getAdminResidents = async (access: TenantAccess) => {
      FROM residents r
      JOIN units u ON u.id = r.unit_id
      LEFT JOIN LATERAL (
-       SELECT SUM(GREATEST(i.total_minor - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0) - COALESCE(paid.amount_minor, 0), 0)) AS outstanding_minor
+       SELECT SUM(GREATEST((i.total_minor+invoice_adjustment_total(i.id)) - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0) - COALESCE(paid.amount_minor, 0), 0)) AS outstanding_minor
        FROM invoices i
        LEFT JOIN LATERAL (
          SELECT SUM(p.amount_minor) AS amount_minor FROM invoice_payment_credits p
@@ -1409,7 +1410,7 @@ const getAdminResidents = async (access: TenantAccess) => {
        WHERE i.resident_id = r.id AND i.status IN ('open', 'partially_paid')
      ) dues ON TRUE
      LEFT JOIN LATERAL (
-       SELECT i.billing_period, i.due_date, (i.total_minor - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)) AS total_minor,
+       SELECT i.billing_period, i.due_date, ((i.total_minor+invoice_adjustment_total(i.id)) - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0)) AS total_minor,
               COALESCE((
                 SELECT SUM(p.amount_minor)
                 FROM invoice_payment_credits p
@@ -1668,7 +1669,7 @@ const recordResidentMoveOut = async (access: TenantAccess, residentId: string, r
     }
 
     const invoices = await client.query<{ id: string; total_minor: string; confirmed_minor: string; pending_minor: string }>(
-      `SELECT i.id, (i.total_minor - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0))::text AS total_minor,
+      `SELECT i.id, ((i.total_minor+invoice_adjustment_total(i.id)) - COALESCE((SELECT SUM(amount_minor) FROM invoice_items WHERE invoice_id=i.id AND category='previous_dues'),0))::text AS total_minor,
               COALESCE(payments.confirmed_minor, 0)::text AS confirmed_minor,
               COALESCE(payments.pending_minor, 0)::text AS pending_minor
        FROM invoices i
@@ -2147,7 +2148,7 @@ const getBillingResidents = async (db: BillingDatabase, tenantId: string, period
        GROUP BY u.id, u.number
      ), prior_invoice_charges AS (
        SELECT i.resident_id,
-              SUM(GREATEST(i.total_minor - COALESCE(carried.amount_minor, 0), 0)) AS charge_minor
+              SUM(GREATEST((i.total_minor+invoice_adjustment_total(i.id)) - COALESCE(carried.amount_minor, 0), 0)) AS charge_minor
        FROM invoices i
        LEFT JOIN LATERAL (
          SELECT SUM(ii.amount_minor) AS amount_minor
@@ -2485,7 +2486,7 @@ const getAdminBilling = async (access: TenantAccess) => {
     }>(
       `SELECT i.id, i.invoice_number, r.full_name AS resident, u.number AS unit,
               to_char(i.billing_period, 'YYYY-MM') AS billing_period,
-              i.due_date::text AS due_date, i.status, i.total_minor::text,
+              i.due_date::text AS due_date, i.status, (i.total_minor+invoice_adjustment_total(i.id))::text AS total_minor,
               i.currency, item_summary.items
        FROM invoices i
        JOIN residents r ON r.id = i.resident_id
@@ -3300,7 +3301,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, await residentPaymentHistory(withTenantPool(access), access, requestUrl.searchParams), requestId)
         return
       }
-      const residentPaymentRecordRoute = requestUrl.pathname.match(/^\/v1\/tenant\/payments\/records\/(report|credit)\/([0-9a-f-]{36})$/i)
+      const residentPaymentRecordRoute = requestUrl.pathname.match(/^\/v1\/tenant\/payments\/records\/(report|credit|adjustment|adjustment_credit|refund)\/([0-9a-f-]{36})$/i)
       if (request.method === 'GET' && residentPaymentRecordRoute) {
         const access = await resolveTenantAccess(request, 'resident')
         respond(response, 200, await residentPaymentRecord(withTenantPool(access), access, residentPaymentRecordRoute[1]!, residentPaymentRecordRoute[2]!), requestId)
@@ -3366,7 +3367,20 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, result, requestId)
         return
       }
-      const ledgerSourceRoute=requestUrl.pathname.match(/^\/v1\/admin\/accounts\/ledgers\/([0-9a-f-]{36})\/sources\/(invoice|payment|opening_credit|opening_reversal)\/([0-9a-f-]{36})$/i)
+      if(requestUrl.pathname==='/v1/admin/billing/adjustments/batch'&&request.method==='POST'){
+        const access=await resolveTenantAccess(request,'admin')
+        respond(response,200,await adjustmentBatch(withTenantPool(access),access,await readJsonBody(request,1_048_576)),requestId);return
+      }
+      const adjustmentRoute=requestUrl.pathname.match(/^\/v1\/admin\/billing\/invoices\/([0-9a-f-]{36})\/adjustments$/i)
+      const creditRoute=requestUrl.pathname.match(/^\/v1\/admin\/accounts\/credits\/([0-9a-f-]{36})$/i)
+      if((adjustmentRoute||creditRoute)&&(request.method==='GET'||request.method==='POST')){
+        const access=await resolveTenantAccess(request,'admin'),pool=withTenantPool(access)
+        const result=adjustmentRoute
+          ? request.method==='GET'?await adjustmentRead(pool,access,adjustmentRoute[1]!):await adjustmentWrite(pool,access,adjustmentRoute[1]!,await readJsonBody(request))
+          : request.method==='GET'?await creditRead(pool,access,creditRoute![1]!):await creditWrite(pool,access,creditRoute![1]!,await readJsonBody(request))
+        respond(response,200,result,requestId);return
+      }
+      const ledgerSourceRoute=requestUrl.pathname.match(/^\/v1\/admin\/accounts\/ledgers\/([0-9a-f-]{36})\/sources\/(invoice|payment|opening_credit|opening_reversal|adjustment|refund)\/([0-9a-f-]{36})$/i)
       if(request.method==='GET'&&ledgerSourceRoute){
         const access=await resolveTenantAccess(request,'admin')
         respond(response,200,await ledgerSource(withTenantPool(access),access,ledgerSourceRoute[1],ledgerSourceRoute[2],ledgerSourceRoute[3]),requestId);return
