@@ -1,0 +1,14 @@
+---
+description: Forward-only SQL migrations
+globs: migrations/**
+alwaysApply: false
+---
+
+# Migrations
+
+- Schema is numbered SQL only: `migrations/platform_db`, `migrations/tenant_db`. Do not introduce Prisma migrations.
+- Add the next number; never rewrite an applied file. The runner does not track history — apply each file once, in order.
+- `scripts/run-migrations.sh tenant all-tenants …` updates `tenant_template` and every database in `platform_db.tenant_records`.
+- Postgres init scripts apply platform `001`–`009` and tenant `001`–`029` on a **new** volume only. Tenant `030`–`034` need the runner until init is extended.
+- Tenant product data stays out of `platform_db`. Do not expose database locators to clients.
+- Prefer idempotent-safe objects where practical; still document “run once” when a statement is not re-runnable.

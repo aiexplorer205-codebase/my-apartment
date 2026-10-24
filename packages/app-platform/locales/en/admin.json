@@ -1,5 +1,6 @@
 {
   "header": {
+    "shortRole": "Admin",
     "title": "Apartment Admin",
     "description": "Tenant-aware apartment administration",
     "role": "Administrator",

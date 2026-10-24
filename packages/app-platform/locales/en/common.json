@@ -22,13 +22,17 @@
     "inactive": "Inactive"
   },
   "navigation": {
-    "overview": "Overview",
+    "overview": "Dashboard",
     "buildings": "Blocks & Flats",
     "residents": "Residents",
     "flatsResidents": "Flats & Residents",
     "billing": "Billing",
     "collections": "Collections",
     "overdues": "Overdues",
+    "polls": "Polls",
+    "accounts": "Accounts",
+    "maintenance": "Maintenance",
+    "complaints": "Complaints",
     "reports": "Reports",
     "settings": "Settings",
     "announcements": "Announcements",

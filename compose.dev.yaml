@@ -1,6 +1,8 @@
 # Development override only. Always combine with compose.yaml, which defines the services.
 services:
   login-web:
+    build:
+      target: development
     restart: "no"
     environment:
       NODE_ENV: development
@@ -12,6 +14,8 @@ services:
       - ./packages/design-tokens:/workspace/packages/design-tokens
       - ./packages/ui:/workspace/packages/ui
   resident-web:
+    build:
+      target: development
     restart: "no"
     environment:
       NODE_ENV: development
@@ -23,6 +27,8 @@ services:
       - ./packages/design-tokens:/workspace/packages/design-tokens
       - ./packages/ui:/workspace/packages/ui
   admin-web:
+    build:
+      target: development
     restart: "no"
     environment:
       NODE_ENV: development
@@ -34,6 +40,8 @@ services:
       - ./packages/design-tokens:/workspace/packages/design-tokens
       - ./packages/ui:/workspace/packages/ui
   operator-web:
+    build:
+      target: development
     restart: "no"
     environment:
       NODE_ENV: development

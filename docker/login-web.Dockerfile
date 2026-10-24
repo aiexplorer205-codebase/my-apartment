@@ -1,28 +1,51 @@
+# syntax=docker/dockerfile:1
 FROM node:22-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH="${PNPM_HOME}:$PATH"
-RUN corepack enable
+RUN corepack enable && mkdir -p /workspace && chown node:node /workspace
 WORKDIR /workspace
+USER node
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY packages ./packages
-COPY infrastructure ./infrastructure
-COPY apps ./apps
-RUN pnpm install --frozen-lockfile
+# Keep dependency installation cached when only source files change.
+COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --chown=node:node apps/admin-web/package.json ./apps/admin-web/
+COPY --chown=node:node apps/api/package.json ./apps/api/
+COPY --chown=node:node apps/login-web/package.json ./apps/login-web/
+COPY --chown=node:node apps/operator-web/package.json ./apps/operator-web/
+COPY --chown=node:node apps/resident-web/package.json ./apps/resident-web/
+COPY --chown=node:node apps/worker/package.json ./apps/worker/
+COPY --chown=node:node infrastructure/adapters/package.json ./infrastructure/adapters/
+COPY --chown=node:node infrastructure/ports/package.json ./infrastructure/ports/
+COPY --chown=node:node packages/api-client/package.json ./packages/api-client/
+COPY --chown=node:node packages/app-platform/package.json ./packages/app-platform/
+COPY --chown=node:node packages/application/package.json ./packages/application/
+COPY --chown=node:node packages/auth-types/package.json ./packages/auth-types/
+COPY --chown=node:node packages/config/package.json ./packages/config/
+COPY --chown=node:node packages/contracts/package.json ./packages/contracts/
+COPY --chown=node:node packages/design-tokens/package.json ./packages/design-tokens/
+COPY --chown=node:node packages/domain/package.json ./packages/domain/
+COPY --chown=node:node packages/shared/package.json ./packages/shared/
+COPY --chown=node:node packages/ui/package.json ./packages/ui/
+RUN --mount=type=cache,id=nivasa-pnpm-store,target=/pnpm/store,uid=1000,gid=1000 \
+    pnpm install --frozen-lockfile --store-dir=/pnpm/store
 
-COPY . .
+COPY --chown=node:node . .
+
 RUN pnpm --filter @nivasa/config run build && \
     pnpm --filter @nivasa/domain run build && \
     pnpm --filter @nivasa/shared run build && \
     pnpm --filter @nivasa/contracts run build && \
     pnpm --filter @nivasa/application run build && \
     pnpm --filter @nivasa/ports run build && \
-    pnpm --filter @nivasa/adapters run build && \
-    pnpm --filter @nivasa/login-web run build
+    pnpm --filter @nivasa/adapters run build
 
-RUN chown -R node:node /workspace
-USER node
+FROM base AS development
 WORKDIR /workspace/apps/login-web
 
 EXPOSE 3000
+CMD ["node", "node_modules/next/dist/bin/next", "dev", "-H", "0.0.0.0", "-p", "3000"]
+
+FROM development AS production
+RUN pnpm --filter @nivasa/login-web run build
+
 CMD ["node", "node_modules/next/dist/bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]

@@ -43,10 +43,10 @@ async function complaintList(pool: Pool, access: Access, residentId: string | nu
     const where = `${scope} AND ($3='All' OR c.status=$3 OR ($3='Active' AND c.status IN ('Open','In progress','Awaiting resident')))
       AND ($4='All' OR c.category=$4) AND ($5='All' OR c.priority=$5)
       AND ($6='All' OR COALESCE(b.id::text,'unassigned')=$6)
-      AND ($7='' OR strpos(lower(concat_ws(' ',c.id::text,c.subject,c.category,u.number,r.full_name,b.name)),lower($7))>0)`
+      AND ($7='' OR strpos(lower(concat_ws(' ',c.id::text,c.reference,c.subject,c.category,u.number,r.full_name,b.name)),lower($7))>0)`
     const values = [access.tenantId,residentId,status,category,priority,block,search]
     const total = (await client.query(`SELECT COUNT(*)::int AS total ${where}`,values)).rows[0].total as number
-    const records = await client.query(`SELECT c.id,c.subject,c.description,c.category,c.location,c.status,c.priority,
+    const records = await client.query(`SELECT c.id,c.reference,c.subject,c.description,c.category,c.location,c.status,c.priority,
       c.assigned_subject AS "assignedSubject",c.version,c.created_at AS "createdAt",c.updated_at AS "updatedAt",
       r.full_name AS "residentName",u.number AS unit,b.name AS block ${where}
       ORDER BY c.updated_at DESC,c.id DESC LIMIT $8 OFFSET $9`,[...values,pageSize,(page-1)*pageSize])
@@ -61,7 +61,7 @@ export async function complaintRequest(pool: Pool, access: Access, method: 'GET'
   if (!admin && !resident) throw new ApiFault(403, 'forbidden', 'An active resident profile is required')
   if (method === 'GET') {
     if (!id) return complaintList(pool, access, resident?.id ?? null, params)
-    const records = await pool.query(`SELECT c.id, c.subject, c.description, c.category, c.location, c.status, c.priority,
+    const records = await pool.query(`SELECT c.id, c.reference, c.subject, c.description, c.category, c.location, c.status, c.priority,
       c.assigned_subject AS "assignedSubject", c.version, c.created_at AS "createdAt", c.updated_at AS "updatedAt",
       r.full_name AS "residentName", u.number AS unit, b.name AS block
       FROM complaints c JOIN residents r ON r.id=c.resident_id JOIN units u ON u.id=r.unit_id
@@ -72,7 +72,7 @@ export async function complaintRequest(pool: Pool, access: Access, method: 'GET'
       const complaint = records.rows[0]
       if (!complaint) throw new ApiFault(404, 'not_found', 'Complaint not found')
       const messages = await pool.query(`SELECT id, actor_role AS "actorRole", body, internal, created_at AS "createdAt" FROM complaint_messages WHERE complaint_id=$1 AND ($2::boolean OR NOT internal) ORDER BY created_at, id`, [id, admin])
-      const relatedTasks = admin ? (await pool.query(`SELECT id,title,status,due_date::text AS "dueDate" FROM maintenance_tasks WHERE tenant_id=$1 AND complaint_id=$2 ORDER BY due_date,id`,[access.tenantId,id])).rows : undefined
+      const relatedTasks = admin ? (await pool.query(`SELECT id,reference,title,status,due_date::text AS "dueDate" FROM maintenance_tasks WHERE tenant_id=$1 AND complaint_id=$2 ORDER BY due_date,id`,[access.tenantId,id])).rows : undefined
       const relatedExpenses = admin ? (await pool.query(`SELECT id,party,status,entry_type AS "entryType",amount_minor::text AS amount FROM account_entries WHERE tenant_id=$1 AND complaint_id=$2 ORDER BY created_at,id`,[access.tenantId,id])).rows.map(({amount,...row})=>({...row,amountMinor:Number(amount)})) : undefined
       const photos=(await pool.query(`SELECT id,name,width,height,octet_length(data) AS size FROM complaint_photos WHERE tenant_id=$1 AND complaint_id=$2 ORDER BY slot`,[access.tenantId,id])).rows
       return { ...complaint, assignedSubject:admin?complaint.assignedSubject:null, photos, messages: messages.rows, ...(admin ? {relatedTasks,relatedExpenses} : {}) }

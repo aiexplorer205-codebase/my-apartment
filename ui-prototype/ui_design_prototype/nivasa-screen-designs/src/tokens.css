@@ -1,0 +1,10 @@
+/* EDIT THESE TOKENS to rebrand both apps. Gradients are intentionally editable UI CSS. */
+:root {
+ --brand:#3946A5; --brand-dark:#A05c86; --brand-tint:#e7f4f5;
+ --hero:linear-gradient(115deg,var(--brand-dark),var(--brand));
+ --canvas:#f5f7fa; --surface:#fff; --ink:#152337; --muted:#647185;
+ --border:#e2e8f0; --focus:#246bc4; --success:#08754e; --success-tint:#e9f7ef;
+ --warning:#925300; --warning-tint:#fff3dd; --danger:#b52e40; --danger-tint:#fff0f2;
+ --radius:16px; --font:Inter,'Segoe UI',Arial,'Noto Sans Telugu',sans-serif;
+ --shadow:0 3px 14px #18345005;
+}

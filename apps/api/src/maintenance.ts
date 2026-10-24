@@ -11,7 +11,7 @@ const text = (value:unknown,name:string,min:number,max:number) => {
   if(typeof value!=='string'||value.trim().length<min||value.trim().length>max)throw new ApiFault(400,'invalid_request',`${name} must contain ${min}–${max} characters`)
   return value.trim()
 }
-const select = `SELECT t.id,t.title,t.location,t.due_date::text AS "dueDate",t.owner_subject AS "ownerSubject",t.notes,t.status,t.completion_note AS "completionNote",t.completed_at AS "completedAt",t.version,t.checklist,t.complaint_id AS "complaintId",c.subject AS "complaintSubject" FROM maintenance_tasks t LEFT JOIN complaints c ON c.id=t.complaint_id AND c.tenant_id=t.tenant_id`
+const select = `SELECT t.id,t.reference,t.title,t.location,t.due_date::text AS "dueDate",t.owner_subject AS "ownerSubject",t.notes,t.status,t.completion_note AS "completionNote",t.completed_at AS "completedAt",t.version,t.checklist,t.complaint_id AS "complaintId",c.subject AS "complaintSubject",c.reference AS "complaintReference" FROM maintenance_tasks t LEFT JOIN complaints c ON c.id=t.complaint_id AND c.tenant_id=t.tenant_id`
 function checkedItems(raw:unknown,current:Check[]):Check[]{
   if(raw===undefined)return current
   if(!Array.isArray(raw)||raw.length!==current.length)throw new ApiFault(400,'invalid_request','Submit the complete current checklist')
@@ -39,7 +39,7 @@ export async function maintenanceRequest(pool: Pool, access: Access, method: 'GE
       const pageText=params.get('page')??'1',status=params.get('status')??'All',search=(params.get('search')??'').trim()
       if(!/^[1-9][0-9]{0,5}$/.test(pageText)||!['All','Planned','Completed','Overdue'].includes(status)||search.length>160)throw new ApiFault(400,'invalid_request','Choose valid task filters and page')
       const page=Number(pageText),pageSize=20
-      const where=`WHERE t.tenant_id=$1 AND ($2='All' OR t.status=$2 OR ($2='Overdue' AND t.status='Planned' AND t.due_date<(NOW() AT TIME ZONE 'Asia/Kolkata')::date)) AND ($3='' OR strpos(lower(concat_ws(' ',t.title,t.location,c.subject)),lower($3))>0)`
+      const where=`WHERE t.tenant_id=$1 AND ($2='All' OR t.status=$2 OR ($2='Overdue' AND t.status='Planned' AND t.due_date<(NOW() AT TIME ZONE 'Asia/Kolkata')::date)) AND ($3='' OR strpos(lower(concat_ws(' ',t.id::text,t.reference,t.title,t.location,c.subject,c.reference)),lower($3))>0)`
       const total=(await client.query(`SELECT COUNT(*)::int AS total FROM maintenance_tasks t LEFT JOIN complaints c ON c.id=t.complaint_id AND c.tenant_id=t.tenant_id ${where}`,[access.tenantId,status,search])).rows[0].total
       const tasks=(await client.query(`${select} ${where} ORDER BY t.due_date,t.id LIMIT $4 OFFSET $5`,[access.tenantId,status,search,pageSize,(page-1)*pageSize])).rows
       await client.query('COMMIT');return{tasks,total,page,pageSize}

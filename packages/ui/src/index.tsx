@@ -45,6 +45,7 @@ export function useAppMessages() {
 
 export { PwaControls } from './pwa-controls'
 export { ComplaintHomeShortcut, Complaints, type ComplaintClient } from './complaints'
+export { WorkspaceBreadcrumb, WorkspaceStatusTabs, WorkspaceFilter } from './workspace-navigation'
 export { ReceiptReview } from './receipt-review'
 
 export { AdminAssignmentControl } from './admin-assignment'

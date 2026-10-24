@@ -1,18 +1,12 @@
 # Contributing
 
-## Before making changes
+Read [AGENTS.md](AGENTS.md) and, for behavior or isolation changes, [docs/architecture.md](docs/architecture.md). Do not deploy, create paid cloud resources, enable live payments, or apply production infrastructure without explicit approval.
 
-- Read the [master implementation prompt](docs/implementation-prompts/MASTER_PROMPT.md)
-  and relevant [architecture documents](docs/architecture/README.md).
-- Implement only the currently authorized phase. Do not deploy, create
-  external accounts, enable live payments, or apply infrastructure without
-  explicit approval.
-- Keep secrets and real customer data out of source, tests, logs, and pull
-  requests. `.env.example` must contain placeholders only.
+Keep secrets and real customer data out of source, tests, logs, and pull requests. `.env.example` stays placeholders only.
 
-## Local checks
+## Checks
 
-Use Node.js 22+ and pnpm 9.15.0. From the repository root:
+Node.js 22+ and pnpm 9.15.0. From the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -22,18 +16,11 @@ pnpm test
 pnpm build
 ```
 
-Run the checks relevant to your change before opening a pull request. Update
-tests and directly related documentation with behavior changes. Tenant
-isolation and authorization failures block progression to later phases.
+Update tests and the three files under `docs/` when behavior changes. Tenant isolation or authorization failures block the change.
 
 ## Pull requests
 
-- Keep changes focused and explain the behavior, security impact, and testing.
-- Link related issues or decisions without copying sensitive information.
-- Do not claim production readiness for placeholder adapters or unverified
-  infrastructure.
-- Confirm generated files and local configuration are not staged.
-- Wait for required CI checks and review before merging.
-
-Repository maintainers should configure the GitHub default branch and branch
-protection rules after the remote repository is created.
+- Keep the diff focused. Describe behavior, security impact, and how you tested.
+- Do not claim production readiness for unused adapters or unverified infrastructure.
+- Confirm generated files and `.env` are not staged.
+- Wait for required CI and review before merging.

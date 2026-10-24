@@ -1,8 +1,10 @@
 import './globals.css'
+import './admin-reference.css'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
 import { I18nProvider, getAppConfig } from '@nivasa/app-platform'
 import { AppMessagesProvider, PwaControls } from '@nivasa/ui'
+import { AdminFormFeedback } from '../lib/admin-form-feedback'
 
 const config = getAppConfig()
 
@@ -18,7 +20,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <I18nProvider namespaces={['common', 'admin', 'validation']}>
-          <AuthProvider><AppMessagesProvider><PwaControls appName={config.application.productName} />{children}</AppMessagesProvider></AuthProvider>
+          <AuthProvider><AppMessagesProvider><AdminFormFeedback /><PwaControls appName={config.application.productName} />{children}</AppMessagesProvider></AuthProvider>
         </I18nProvider>
       </body>
     </html>

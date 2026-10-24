@@ -1,3 +1,5 @@
+import { apartmentSetup } from './apartment-setup.js'
+import { propertySetupDeletion } from './property-setup-deletion.js'
 import { adjustmentRead, adjustmentWrite, adjustmentBatch, creditRead, creditWrite } from './billing-adjustments.js'
 import { overdueQueue } from './overdues.js'
 import { ledgerSource } from './ledger-sources.js'
@@ -596,11 +598,32 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
       get: { tags: ['tenant'], summary: 'List recent resident invitations', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped invitations' }, '403': { description: 'Administrator permission required' } } },
       post: { tags: ['tenant'], summary: 'Invite a resident to a unit by email', description: 'Requires fullName, email, optional phone, unitId, and occupancyType (owner or tenant). startDate is optional and defaults to the current date. Email OTP identity verification is required to accept. Resident access starts on startDate. The one-time link expires in seven days.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Invitation saved and email sent' }, '400': { description: 'Invalid invitation details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Resident already exists or another administrator owns the pending invitation' }, '503': { description: 'Invitation saved but email delivery failed' } } },
     },
+    '/v1/admin/apartment-setup/inventory': {
+      get: { tags: ['tenant'], summary: 'Read block allowances and all existing flats for apartment setup', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Scoped blocks, flat allowances and inventory' }, '403': { description: 'Administrator required' } } },
+    },
+    '/v1/admin/apartment-setup/review': {
+      post: { tags: ['tenant'], summary: 'Validate and save an immutable apartment structure review with optional resident details', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Field and CSV row errors, or saved review ID with building preview and totals. Errors block the entire import; no property structure or emails created.' }, '403': { description: 'Administrator required' } } },
+    },
+    '/v1/admin/apartment-setup/confirm': {
+      post: { tags: ['tenant'], summary: 'Recheck allowances and atomically create the reviewed apartment structure and durable invitation rows', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Saved result with invitation row IDs to send after commit; repeated confirmations return the original result' }, '403': { description: 'Administrator required' }, '404': { description: 'Review not found for this tenant and administrator' }, '409': { description: 'Allowances or structure changed; nothing created' } } },
+    },
+    '/v1/admin/apartment-setup/latest': {
+      get: { tags: ['tenant'], summary: 'Resume this administrator’s latest apartment setup invitations with current delivery statuses', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Confirmed setup result and invitation delivery statuses' }, '403': { description: 'Administrator required' } } },
+    },
+    '/v1/admin/resident-imports/{rowId}/send': {
+      post: { tags: ['tenant'], summary: 'Confirm and send one reviewed resident invitation, skipping completed rows', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Sent or failed result; failed rows can be retried' }, '404': { description: 'Import row not found for this administrator and tenant' } } },
+    },
     '/v1/admin/resident-invitations/{invitationId}/revoke': {
       post: { tags: ['tenant'], summary: 'Revoke a pending resident invitation', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Invitation revoked' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Invitation is no longer pending' } } },
     },
     '/v1/admin/units': {
       get: { tags: ['tenant'], summary: 'List tenant buildings and units', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped unit inventory' }, '403': { description: 'Administrator permission required' } } },
+    },
+    '/v1/admin/property-deletions/review': {
+      post: { tags: ['tenant'], summary: 'Review deletion eligibility and pending invitation cancellation for all unused property setup or an individual block or flat', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Dependency checks, counts and review token; no records deleted' }, '403': { description: 'Administrator required' }, '404': { description: 'Tenant-scoped target not found' } } },
+    },
+    '/v1/admin/property-deletions/confirm': {
+      post: { tags: ['tenant'], summary: 'Recheck and atomically delete reviewed unused setup with an audit record', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Deleted unused setup and unaccepted invitations' }, '400': { description: 'Exact name and invitation cancellation confirmation required' }, '409': { description: 'Linked records or review changed; nothing deleted' } } },
     },
     '/v1/admin/buildings': {
       get: { tags: ['tenant'], summary: 'List apartment blocks and allowance', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Building inventory and allowed block count' }, '403': { description: 'Administrator permission required' } } },
@@ -1456,7 +1479,7 @@ const getAdminResidents = async (access: TenantAccess) => {
 
 type ResidentInvitationInput = { fullName: string; email: string; phone: string | null; unitId: string; occupancyType: 'owner' | 'tenant'; startDate: string }
 
-const parseResidentInvitationInput = (input: unknown): ResidentInvitationInput => {
+export const parseResidentInvitationInput = (input: unknown): ResidentInvitationInput => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault(400, 'invalid_request', 'Resident invitation details are required')
   const value = input as Record<string, unknown>
   const fullName = typeof value.fullName === 'string' ? value.fullName.trim() : ''
@@ -1513,7 +1536,7 @@ const revokeAdminResidentInvitation = async (access: TenantAccess, invitationId:
   return { id: invitationId, status: 'revoked' as const }
 }
 
-const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unknown, requestId: string) => {
+const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unknown, requestId: string, bulkRowId?: string) => {
   requireRole(access, 'admin')
   await requireResidentInvitationSchema(access)
   const input = parseResidentInvitationInput(rawInput)
@@ -1525,6 +1548,7 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
   let unitLabel = ''
   try {
     await client.query('BEGIN')
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [access.tenantId + ':resident-invitations'])
     await client.query(
       `UPDATE resident_invitations SET status = 'expired', updated_at = NOW()
        WHERE tenant_id = $1 AND lower(email::text) = $2 AND status = 'pending' AND expires_at <= NOW()`,
@@ -1546,12 +1570,13 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     )
     if (activeResident.rowCount) throw new ApiFault(409, 'invalid_request', 'This unit already has an active resident. Refresh the unit list and choose another unit.')
     unitLabel = `${unit.rows[0].building_name} · ${unit.rows[0].number}`
-    const pending = await client.query<{ id: string; invited_by: string }>(
-      `SELECT id, invited_by FROM resident_invitations
+    const pending = await client.query<{ id: string; invited_by: string; bulk_row_id: string | null }>(
+      `SELECT id, invited_by, bulk_row_id FROM resident_invitations
        WHERE tenant_id = $1 AND lower(email::text) = $2 AND status = 'pending' FOR UPDATE`,
       [access.tenantId, input.email],
     )
     const existing = pending.rows[0]
+    if (bulkRowId && existing && existing.bulk_row_id !== bulkRowId) throw new ApiFault(409, 'invalid_request', 'This email already has a pending invitation')
     if (existing && existing.invited_by !== access.subject) {
       throw new ApiFault(409, 'invalid_request', 'A pending invitation for this email is already managed by another administrator')
     }
@@ -1582,6 +1607,7 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
       )
       invitationId = inserted.rows[0]?.id ?? ''
     }
+    if (bulkRowId) await client.query('UPDATE resident_invitations SET bulk_row_id = $2 WHERE id = $1', [invitationId, bulkRowId])
     if (!invitationId) throw new ApiFault(500, 'data_integrity_error', 'Invitation was not saved')
     await client.query('COMMIT')
   } catch (error) {
@@ -1616,6 +1642,31 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     throw new ApiFault(503, 'dependency_unavailable', 'The invitation was saved, but its email could not be sent. Check email delivery settings and retry the invitation.')
   }
   return { id: invitationId, email: input.email, fullName: input.fullName, unit: unitLabel, expiresAt, status: 'pending' as const }
+}
+
+export const sendBulkResidentRow = async (access: TenantAccess, id: string, requestId: string) => {
+  requireRole(access, 'admin')
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ApiFault(400, 'invalid_request', 'Invalid import row')
+  const client = await withTenantPool(access).connect()
+  try {
+    await client.query('BEGIN')
+    const result = await client.query<{ payload: ResidentInvitationInput; status: string }>(
+      'SELECT payload, status FROM resident_import_rows WHERE id = $1 AND tenant_id = $2 AND created_by = $3 FOR NO KEY UPDATE', [id, access.tenantId, access.subject])
+    const row = result.rows[0]
+    if (!row) throw new ApiFault(404, 'not_found', 'Import row not found')
+    if (row.status === 'sent') { await client.query('COMMIT'); return { status: 'sent' } }
+    try {
+      await createAdminResidentInvitation(access, row.payload, requestId, id)
+      await client.query("UPDATE resident_import_rows SET status = 'sent', error = NULL WHERE id = $1", [id])
+      await client.query('COMMIT')
+      return { status: 'sent' }
+    } catch (cause) {
+      const error = cause instanceof Error ? cause.message : 'Invitation could not be sent'
+      await client.query("UPDATE resident_import_rows SET status = 'failed', error = $2 WHERE id = $1", [id, error])
+      await client.query('COMMIT')
+      return { status: 'failed', error }
+    }
+  } catch (cause) { await client.query('ROLLBACK'); throw cause } finally { client.release() }
 }
 
 const recordResidentMoveOut = async (access: TenantAccess, residentId: string, rawInput: unknown) => {
@@ -1787,6 +1838,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
   let unitLabel = ''
   try {
     await client.query('BEGIN')
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [tenantId + ':resident-invitations'])
     const result = await client.query<{
       id: string; unit_id: string; full_name: string; email: string; phone: string | null;
       occupancy_type: 'owner' | 'tenant'; status: string; expires_at: Date; start_date: string;
@@ -1853,7 +1905,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
 const getAdminUnits = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   const result = await withTenantPool(access).query(
-    `SELECT u.id, u.apartment_building_id AS building_id, u.building_name AS building, u.number,
+    `SELECT u.id, u.apartment_building_id AS building_id, u.building_name AS building, u.number, u.floor_number,
             CASE WHEN EXISTS (
               SELECT 1 FROM residents current_resident
               WHERE current_resident.unit_id = u.id AND current_resident.status = 'active'
@@ -1879,6 +1931,7 @@ const getAdminUnits = async (access: TenantAccess) => {
   return result.rows.map((unit) => ({
     id: unit.id,
     buildingId: unit.building_id,
+    floorNumber: unit.floor_number,
     building: unit.building ?? 'Unassigned building',
     number: unit.number,
     occupancyStatus: unit.occupancy_status,
@@ -1937,10 +1990,11 @@ const requireApartmentSchema = async (access: TenantAccess): Promise<void> => {
        AND EXISTS (
          SELECT 1 FROM information_schema.columns
          WHERE table_schema = 'public' AND table_name = 'apartment_buildings' AND column_name = 'flat_limit'
-       ) AS ready`,
+       )
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'apartment_buildings' AND column_name = 'allowance_slot') AS ready`,
   )
   if (!result.rows[0]?.ready) {
-    throw new ApiFault(503, 'dependency_unavailable', 'Apartment setup is not up to date for this tenant database. Apply the tenant database migrations, including migrations/tenant_db/012_apartment_building_flat_limit.sql, then retry.')
+    throw new ApiFault(503, 'dependency_unavailable', 'Apartment setup is not up to date for this tenant database. Apply the tenant database migrations, including migrations/tenant_db/031_property_setup_deletion.sql, then retry.')
   }
 }
 
@@ -1960,9 +2014,11 @@ const createAdminBuilding = async (access: TenantAccess, rawInput: unknown) => {
   try {
     await client.query('BEGIN')
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [access.tenantId])
-    const countResult = await client.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM apartment_buildings WHERE tenant_id = $1', [access.tenantId])
-    const blockIndex = Number(countResult.rows[0]?.count ?? 0)
-    if (blockIndex >= allowedBlocks) throw new ApiFault(409, 'block_limit_reached', 'The allowed number of blocks has been reached')
+    const countResult = await client.query<{ count: string; slots: number[] }>('SELECT COUNT(*)::text AS count, COALESCE(array_agg(allowance_slot), ARRAY[]::int[]) AS slots FROM apartment_buildings WHERE tenant_id = $1', [access.tenantId])
+    const blockCount = Number(countResult.rows[0]?.count ?? 0)
+    const usedSlots = countResult.rows[0]?.slots ?? []
+    const blockIndex = Array.from({ length: allowedBlocks }, (_, index) => index).find((index) => !usedSlots.includes(index)) ?? allowedBlocks
+    if (blockCount >= allowedBlocks || blockIndex >= allowedBlocks) throw new ApiFault(409, 'block_limit_reached', 'The allowed number of blocks has been reached')
     const flatLimit = flatAllowances?.[blockIndex] ?? null
     const requestedFlats = input.flats.length
     if (flatLimit !== null && requestedFlats > flatLimit) {
@@ -1977,9 +2033,9 @@ const createAdminBuilding = async (access: TenantAccess, rawInput: unknown) => {
     const apartmentId = apartment.rows[0]?.id
     if (!apartmentId) throw new ApiFault(409, 'invalid_request', 'The apartment workspace is not initialized')
     const building = await client.query<{ id: string }>(
-      `INSERT INTO apartment_buildings (tenant_id, apartment_id, name, maintenance_rate_per_sqft, flat_limit)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [access.tenantId, apartmentId, input.buildingName, input.maintenanceRatePerSqft, flatLimit],
+      `INSERT INTO apartment_buildings (tenant_id, apartment_id, name, maintenance_rate_per_sqft, flat_limit, allowance_slot)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [access.tenantId, apartmentId, input.buildingName, input.maintenanceRatePerSqft, flatLimit, blockIndex],
     )
     const buildingId = building.rows[0]?.id
     if (!buildingId) throw new ApiFault(500, 'data_integrity_error', 'Building creation did not return an identifier')
@@ -2006,7 +2062,7 @@ const getAdminBuildings = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   await requireApartmentSchema(access)
   const result = await withTenantPool(access).query(
-    `SELECT b.id, b.name, a.name AS apartment, a.city, b.flat_limit,
+    `SELECT b.id, b.name, a.name AS apartment, a.city, b.flat_limit, b.allowance_slot,
             COUNT(u.id)::int AS unit_count
      FROM apartment_buildings b
      JOIN apartments a ON a.id = b.apartment_id AND a.tenant_id = b.tenant_id
@@ -2025,7 +2081,7 @@ const getAdminBuildings = async (access: TenantAccess) => {
     city: building.city,
     unitCount: Number(building.unit_count),
     flatLimit: building.flat_limit === null ? null : Number(building.flat_limit),
-  })), nextFlatLimit: flatAllowances?.[result.rows.length] ?? null }
+  })), nextFlatLimit: flatAllowances?.[Array.from({ length: Number(allowance.rows[0]?.allowed_blocks ?? 0) }, (_, index) => index).find((index) => !result.rows.some((building) => building.allowance_slot === index)) ?? -1] ?? null }
 }
 
 type BillingRules = {
@@ -2483,6 +2539,7 @@ const getAdminBilling = async (access: TenantAccess) => {
     invoice_number: string
     resident: string
     unit: string
+    building: string
     billing_period: string
     due_date: string
     status: string
@@ -2490,7 +2547,7 @@ const getAdminBilling = async (access: TenantAccess) => {
     currency: string
     items: string | null
     }>(
-      `SELECT i.id, i.invoice_number, r.full_name AS resident, u.number AS unit,
+      `SELECT i.id, i.invoice_number, r.full_name AS resident, u.number AS unit, u.building_name AS building,
               to_char(i.billing_period, 'YYYY-MM') AS billing_period,
               i.due_date::text AS due_date, i.status, (i.total_minor+invoice_adjustment_total(i.id))::text AS total_minor,
               i.currency, item_summary.items
@@ -2537,6 +2594,7 @@ const getAdminBilling = async (access: TenantAccess) => {
     number: invoice.invoice_number,
     resident: invoice.resident,
     unit: invoice.unit,
+    building: invoice.building,
     billingPeriod: invoice.billing_period,
     dueDate: invoice.due_date,
     status: invoice.status,
@@ -3508,6 +3566,12 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, await getAdminResidentInvitations(access), requestId)
         return
       }
+      const bulkResidentMatch = requestUrl.pathname.match(/^\/v1\/admin\/resident-imports\/([0-9a-f-]+)\/send$/i)
+      if (request.method === 'POST' && bulkResidentMatch) {
+        const access = await resolveTenantAccess(request)
+        respond(response, 200, await sendBulkResidentRow(access, bulkResidentMatch[1]!, requestId), requestId)
+        return
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/resident-invitations') {
         const access = await resolveTenantAccess(request)
         respond(response, 201, await createAdminResidentInvitation(access, await readJsonBody(request), requestId), requestId)
@@ -3517,6 +3581,18 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       if (request.method === 'POST' && residentInvitationRevokeMatch) {
         const access = await resolveTenantAccess(request)
         respond(response, 200, await revokeAdminResidentInvitation(access, residentInvitationRevokeMatch[1] ?? ''), requestId)
+        return
+      }
+      if (request.method === 'POST' && ['/v1/admin/property-deletions/review', '/v1/admin/property-deletions/confirm'].includes(requestUrl.pathname)) {
+        const access = await resolveTenantAccess(request)
+        respond(response, 200, await propertySetupDeletion(withTenantPool(access), access, await readJsonBody(request), requestUrl.pathname.endsWith('/confirm')), requestId)
+        return
+      }
+      const setupAction = requestUrl.pathname.match(/^\/v1\/admin\/apartment-setup\/(inventory|review|confirm|latest)$/)?.[1] as 'inventory' | 'review' | 'confirm' | 'latest' | undefined
+      if (setupAction && request.method === (['inventory', 'latest'].includes(setupAction) ? 'GET' : 'POST')) {
+        const access = await resolveTenantAccess(request)
+        respond(response, 200, await apartmentSetup(withTenantPool(access), getPlatformPool(), access, setupAction,
+          ['inventory', 'latest'].includes(setupAction) ? null : await readJsonBody(request, 8_000_000), parseResidentInvitationInput), requestId)
         return
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/admin/units') {
@@ -3614,7 +3690,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       const status = apiFault?.status ?? 503
       const errorObject = error && typeof error === 'object' ? error as { code?: unknown; cause?: { code?: unknown } } : undefined
       const causeCode = String(errorObject?.code ?? errorObject?.cause?.code ?? 'unknown')
-      const apartmentSchemaRequest = requestUrl.pathname === '/v1/admin/buildings' || requestUrl.pathname.startsWith('/v1/admin/residents') || requestUrl.pathname.startsWith('/v1/admin/resident-invitations') || requestUrl.pathname.startsWith('/v1/public/resident-invitations') || requestUrl.pathname.startsWith('/v1/tenant/')
+      const apartmentSchemaRequest = requestUrl.pathname === '/v1/admin/buildings' || requestUrl.pathname.startsWith('/v1/admin/residents') || requestUrl.pathname.startsWith('/v1/admin/resident-invitations') || requestUrl.pathname.startsWith('/v1/admin/resident-imports') || requestUrl.pathname.startsWith('/v1/public/resident-invitations') || requestUrl.pathname.startsWith('/v1/tenant/')
       const billingSchemaRequest = requestUrl.pathname.startsWith('/v1/admin/billing')
       const tenantSchemaRequest = apartmentSchemaRequest || billingSchemaRequest
       const tenantSchemaUnavailable = !apiFault && tenantSchemaRequest && ['42P01', '42703', '3F000'].includes(causeCode)
@@ -3636,7 +3712,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       const dependencyMessage = tenantSchemaUnavailable && billingSchemaRequest
         ? 'The selected tenant database is missing billing schema. Apply the required migrations/tenant_db/005_billing_runs.sql through migrations/tenant_db/009_billing_unit_exclusions.sql, then retry.'
         : tenantSchemaUnavailable && apartmentSchemaRequest
-          ? 'The selected tenant database is missing apartment or resident-lifecycle schema. Apply migrations/tenant_db/003_apartments.sql, migrations/tenant_db/004_resident_invitations.sql, and migrations/tenant_db/010_resident_lifecycle.sql to that tenant database, then rebuild and restart the API.'
+          ? 'The selected tenant database is missing apartment or resident-lifecycle schema. Apply migrations/tenant_db/003_apartments.sql, migrations/tenant_db/004_resident_invitations.sql, migrations/tenant_db/010_resident_lifecycle.sql, and migrations/tenant_db/030_bulk_resident_imports.sql to that tenant database, then rebuild and restart the API.'
           : tenantDatabaseMissing
           ? 'The selected tenant database does not exist. Check the tenant database_name in platform_db and complete tenant provisioning.'
           : 'A required data service is unavailable'

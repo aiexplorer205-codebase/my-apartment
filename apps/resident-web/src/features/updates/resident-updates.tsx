@@ -8,7 +8,7 @@ import { useApiPost, useApiQuery } from '../../lib/use-api'
 export type UpdatesState={page:number;search:string;status:'All'|'Live'|'Scheduled'|'Ended';kind:'All'|'announcement'|'poll';record:{kind:'announcement'|'poll';id:string}|null}
 type Update={id:string;kind:'announcement'|'poll';title:string;preview:string;description?:string;startsAt:string;endsAt:string|null;publishedAt:string;closedAt:string|null;status:string;isRead:boolean;isImportant:boolean;isBanner:boolean;anonymous:boolean;hasVoted:boolean}
 type Feed={records:Update[];total:number;pageSize:number;summary:{unreadLiveAnnouncements:number;livePollsAwaitingVote:number}}
-const date=(value:string)=>new Date(value).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'})+' IST'
+const date=(value:string)=>new Date(value).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'})
 export function ResidentUpdatesWorkspace({state,setState,onRead}:{state:UpdatesState;setState:Dispatch<SetStateAction<UpdatesState>>;onRead:()=>void}){
   const params=new globalThis.URLSearchParams({page:String(state.page),search:state.search,status:state.status,kind:state.kind})
   const feed=useApiQuery<Feed>(`/v1/tenant/updates?${params}`,{enabled:!state.record})

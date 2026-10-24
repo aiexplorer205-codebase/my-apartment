@@ -22,7 +22,7 @@
     "inactive": "ఇన్‌యాక్టివ్"
   },
   "navigation": {
-    "overview": "అవలోకనం",
+    "overview": "డ్యాష్‌బోర్డ్",
     "buildings": "భవనాలు & యూనిట్లు",
     "residents": "నివాసితులు",
     "flatsResidents": "ఫ్లాట్లు & నివాసితులు",
@@ -30,6 +30,10 @@
     "billing": "బిల్లింగ్",
     "collections": "వసూళ్లు",
     "overdues": "బకాయిలు",
+    "polls": "అభిప్రాయ సేకరణలు",
+    "accounts": "ఖాతాలు",
+    "maintenance": "నిర్వహణ",
+    "complaints": "ఫిర్యాదులు",
     "reports": "నివేదికలు",
     "settings": "సెట్టింగులు",
     "home": "హోమ్",

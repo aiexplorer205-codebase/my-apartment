@@ -1,0 +1,15 @@
+---
+description: Next.js app and shared UI conventions
+globs: apps/*-web/**,packages/ui/**,packages/app-platform/**
+alwaysApply: false
+---
+
+# Web UI
+
+- App Router. Authenticated apps hold Auth0 sessions server-side and call the API through `/api/backend`. No Management API, database URLs, or session secrets in `NEXT_PUBLIC_*` or client bundles.
+- Feature UI: `apps/admin-web/src/features`, `apps/resident-web/src/features`. Shared widgets: `packages/ui`.
+- User-visible copy goes in `packages/app-platform/locales/{en,te}` with matching keys. Do not hardcode product strings.
+- Reuse existing form validation and feedback helpers. Cover loading, empty, validation, success, and failure.
+- Login web has no Auth0 application. Operator UI must not bypass API operator allowlisting.
+- Do not add fake checkout, demo role switchers, or static operational metrics as live data.
+- Resident PWA: do not cache authenticated tenant payloads in the service worker.

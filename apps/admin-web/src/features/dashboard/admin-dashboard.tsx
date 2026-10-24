@@ -1,5 +1,7 @@
 'use client'
 
+import { ApartmentSetup } from '../residents/apartment-setup'
+import { DeletePropertySetup } from '../residents/delete-property-setup'
 import { InvoiceCorrections, BulkInvoiceCorrections } from '../accounts/billing-corrections'
 import { useCommunicationList, CommunicationFilters, CommunicationPagination } from '../communications/list-controls'
 import { PublicationReview } from '../communications/publication-review'
@@ -15,7 +17,7 @@ import { formValidationMessage } from '../../lib/form-validation'
 import { useApiPost, useApiQuery } from '../../lib/use-api'
 import { useAuth0 } from '../../app/auth-provider'
 import { getAppConfig, useTranslation, LanguageSwitcher } from '@nivasa/app-platform'
-import { ReceiptReview, useAppMessages } from '@nivasa/ui'
+import { ReceiptReview, useAppMessages, WorkspaceBreadcrumb } from '@nivasa/ui'
 
 type AdminOverview = {
   tenantId: string
@@ -48,24 +50,27 @@ const formatMoney = (minor: number, currency: string) => {
 }
 
 const adminNavigation = [
-  { label: 'Overview', navKey: 'overview', icon: 'grid' },
-  { label: 'Flats & Residents', navKey: 'flatsResidents', icon: 'users' },
-  { label: 'Billing', navKey: 'billing', icon: 'file' },
-  { label: 'Collections', navKey: 'collections', icon: 'wallet' },
-  { label: 'Overdues', navKey: 'overdues', icon: 'alert' },
-  { label: 'Announcements', navKey: 'announcements', icon: 'megaphone' },
-  { label: 'Polls', navKey: 'polls', icon: 'chart' },
-  { label: 'Accounts', navKey: 'accounts', icon: 'wallet' },
-  { label: 'Maintenance', navKey: 'maintenance', icon: 'building' },
-  { label: 'Complaints', navKey: 'complaints', icon: 'alert' },
-  { label: 'Reports', navKey: 'reports', icon: 'chart' },
-  { label: 'Settings', navKey: 'settings', icon: 'settings' },
+  { label: 'Dashboard', navKey: 'overview', icon: 'grid', group: 'Overview' },
+  { label: 'Flats & Residents', navKey: 'flatsResidents', icon: 'users', group: 'Operations' },
+  { label: 'Complaints', navKey: 'complaints', icon: 'alert', group: 'Operations' },
+  { label: 'Maintenance', navKey: 'maintenance', icon: 'building', group: 'Operations' },
+  { label: 'Billing', navKey: 'billing', icon: 'file', group: 'Finance' },
+  { label: 'Collections', navKey: 'collections', icon: 'wallet', group: 'Finance' },
+  { label: 'Overdues', navKey: 'overdues', icon: 'alert', group: 'Finance' },
+  { label: 'Accounts', navKey: 'accounts', icon: 'wallet', group: 'Finance' },
+  { label: 'Announcements', navKey: 'announcements', icon: 'megaphone', group: 'Community' },
+  { label: 'Polls', navKey: 'polls', icon: 'chart', group: 'Community' },
+  { label: 'Reports', navKey: 'reports', icon: 'chart', group: 'Administration' },
+  { label: 'Settings', navKey: 'settings', icon: 'settings', group: 'Administration' },
 ] as const
 
-type AdminIconName = typeof adminNavigation[number]['icon'] | 'building'
+type AdminIconName = typeof adminNavigation[number]['icon'] | 'building' | 'search' | 'bell' | 'logout'
 
 function AdminNavIcon({ name }: { name: AdminIconName }) {
   const paths: Record<AdminIconName, ReactNode> = {
+    logout: <><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M14 8l4 4-4 4M8 12h13" /></>,
+    search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></>,
+    bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
     grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
     users: <><circle cx="9" cy="7" r="4" /><path d="M2 21v-2a7 7 0 0 1 14 0v2m2-14a4 4 0 0 1 0 8m2 6v-2a6 6 0 0 0-3-5.2" /></>,
     file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M8 13h8m-8 4h6" /></>,
@@ -80,8 +85,9 @@ function AdminNavIcon({ name }: { name: AdminIconName }) {
 }
 
 function AdminContent() {
-  type Section = 'Accounts' | 'More' | 'Maintenance' | 'Complaints' | 'Overview' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
-  const [section, setSection] = useState<Section>('Overview')
+  type Section = 'Accounts' | 'More' | 'Maintenance' | 'Complaints' | 'Dashboard' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
+  const [section, setSection] = useState<Section>('Dashboard')
+  const [navigationSearch, setNavigationSearch] = useState('')
   const [expenseTaskId, setExpenseTaskId] = useState<string | undefined>(undefined)
   const [expenseComplaintId,setExpenseComplaintId]=useState<string|undefined>()
   const [expenseEntryId,setExpenseEntryId]=useState<string|undefined>()
@@ -90,13 +96,20 @@ function AdminContent() {
   const [complaintId,setComplaintId]=useState<string|undefined>()
   const openTask=(id:string)=>{setMaintenanceId(id);setMaintenanceComplaintId(undefined);setSection('Maintenance')}
   const openComplaint=(id:string)=>{setComplaintId(id);setSection('Complaints')}
-  const [firstBlockFlowOpen, setFirstBlockFlowOpen] = useState(false)
   const { data, loading, error, reload } = useApiQuery<AdminOverview>('/v1/admin/overview')
   const blockInventory = useApiQuery<{ allowedBlocks: number; buildings: Array<{ id: string }> }>('/v1/admin/buildings')
-  const { logout } = useAuth0()
+  const { logout, user } = useAuth0()
+  const accountName = user?.name?.trim() || user?.email?.trim() || 'User'
+  const nameParts = accountName.split('@')[0]!.split(/[\s._-]+/).filter(Boolean)
+  const accountInitials = (nameParts.length > 1 ? `${nameParts[0]![0]}${nameParts.at(-1)![0]}` : nameParts[0]?.slice(0, 2) ?? 'U').toUpperCase()
   const { t } = useTranslation(['common', 'admin'])
+  const multipleBlocks = (blockInventory.data?.allowedBlocks ?? 0) > 1
   const hasBlocks = !blockInventory.loading && !blockInventory.error && (blockInventory.data?.buildings.length ?? 0) > 0
   const needsInitialBlock = !blockInventory.loading && !blockInventory.error && blockInventory.data?.buildings.length === 0
+  const currentNavigation = adminNavigation.find((item) => item.label === section)
+  const pageTitle = !hasBlocks ? 'Apartment setup' : section === 'Dashboard' ? 'Dashboard' : currentNavigation ? t(`common:navigation.${currentNavigation.navKey}`, section) : section
+  const searchResults = adminNavigation.filter((item) => `${item.label} ${t(`common:navigation.${item.navKey}`, item.label)}`.toLowerCase().includes(navigationSearch.trim().toLowerCase()))
+  const openSearchResult = (destination: Section) => { setSection(destination); setNavigationSearch('') }
 
   const metrics = data ? [
     { label: t('admin:overview.totalBilled', 'Total billed'), value: data.billedMinor, detail: t('admin:overview.totalBilledDetail', 'Published charges, excluding carried duplicates'), tone: 'blue' },
@@ -106,46 +119,56 @@ function AdminContent() {
   ] : []
 
   return (
-    <main className="dashboard-shell admin-shell">
+    <main className="dashboard-shell admin-shell admin-reference">
       <aside className="sidebar">
-        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span><strong>{getAppConfig().application.productName}</strong><small>{t('admin:header.title', 'APARTMENT ADMIN')}</small></span></div>
-        {hasBlocks && <div style={{ padding: '0 12px 8px 12px' }}>
-          <LanguageSwitcher />
-        </div>}
-        {hasBlocks && <div className="workspace-box">
-          <span className="workspace-avatar">{data?.organization.slice(0, 1) ?? 'A'}</span>
-          <span className="workspace-details"><strong>{data?.organization ?? 'Your organization'}</strong><small>{t('common:labels.currentWorkspace', 'Current workspace')}</small></span>
-          <TenantWorkspacePicker />
-        </div>}
+        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span><strong>{getAppConfig().application.productName}</strong></span></div>
         {hasBlocks && <nav className="nav-list admin-nav" aria-label="Administrator navigation">
-          {adminNavigation.map(({ label, navKey, icon }) => {
-            const translatedLabel = navKey === 'flatsResidents' || navKey === 'announcements' || navKey === 'polls' ? label : t(`common:navigation.${navKey}`, label)
+          {adminNavigation.map(({ label, navKey, icon, group }, index) => {
+            const translatedLabel = navKey === 'overview' || navKey === 'flatsResidents' || navKey === 'announcements' || navKey === 'polls' ? label : t(`common:navigation.${navKey}`, label)
             return (
-              <button key={label} className={`nav-item${section === label ? ' active' : ''}`} type="button" aria-label={translatedLabel} title={translatedLabel} aria-current={section === label ? 'page' : undefined} onClick={() => setSection(label)}>
-                <AdminNavIcon name={icon} />
-                <span className="nav-label">{translatedLabel}</span>
-              </button>
+              <Fragment key={label}>
+                {group && adminNavigation[index - 1]?.group !== group && <span className="admin-nav-group">{group}</span>}
+                <button className={`nav-item${section === label ? ' active' : ''}`} type="button" aria-label={translatedLabel} title={translatedLabel} aria-current={section === label ? 'page' : undefined} onClick={() => setSection(label)}>
+                  <AdminNavIcon name={icon} />
+                  <span className="nav-label">{translatedLabel}</span>
+                </button>
+              </Fragment>
             )
           })}
         </nav>}
-        {hasBlocks && <div className="sidebar-help"><span className="sidebar-help-mark">?</span><span><strong>{t('common:labels.needHelp', 'Need a hand?')}</strong><small>{t('common:labels.contactSupport', 'Contact your workspace support')}</small></span></div>}
         <div className="sidebar-account admin-sidebar-footer">
-          <span className="account-avatar">A</span>
-          <span><strong>{t('admin:header.role', 'Administrator')}</strong><small>{t('admin:header.apartmentAdmin', 'Apartment admin')}</small></span>
-          <button className="secondary admin-sidebar-signout" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>{t('common:actions.signOut', 'Sign out')}</button>
+          <span className="account-avatar" aria-hidden="true">{accountInitials}</span>
+          <span className="admin-account-details"><strong title={accountName}>{accountName}</strong><small>{t('admin:header.shortRole', 'Admin')}</small></span>
+          <button className="admin-sidebar-signout" type="button" aria-label={t('common:actions.signOut', 'Sign out')} title={t('common:actions.signOut', 'Sign out')} onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}><AdminNavIcon name="logout" /></button>
         </div>
       </aside>
       <section className="content-panel">
         <header className="topbar">
-          <div><h1 className="admin-navbar-section">{hasBlocks ? ['flatsResidents', 'announcements'].includes(adminNavigation.find((n) => n.label === section)?.navKey ?? '') ? section : adminNavigation.find((n) => n.label === section) ? t(`common:navigation.${adminNavigation.find((n) => n.label === section)!.navKey}`, section) : section : 'Apartment setup'}</h1>{data?.apartmentCode && <small className="admin-apartment-code">Apartment ID: {data.apartmentCode}</small>}</div>
+          <div className="admin-header-search">
+            <AdminNavIcon name="search" />
+            <input type="search" aria-label="Search admin pages" placeholder="Search admin pages…" disabled={!hasBlocks} value={navigationSearch} aria-controls={navigationSearch.trim() ? 'admin-navigation-results' : undefined} onChange={(event) => setNavigationSearch(event.target.value)} onKeyDown={(event) => {
+              if (event.key === 'Escape') setNavigationSearch('')
+              if (event.key === 'Enter' && searchResults[0]) { event.preventDefault(); openSearchResult(searchResults[0].label) }
+            }} />
+            {navigationSearch.trim() && <div className="admin-search-results" id="admin-navigation-results" aria-label="Matching admin pages">
+              {searchResults.length ? searchResults.map((item) => <button type="button" key={item.label} onClick={() => openSearchResult(item.label)}><AdminNavIcon name={item.icon} /><span>{item.navKey === 'overview' ? 'Dashboard' : t(`common:navigation.${item.navKey}`, item.label)}</span></button>) : <p role="status">No matching pages.</p>}
+            </div>}
+          </div>
+          <details className="admin-header-notifications">
+            <summary aria-label="Notifications" title="Notifications"><AdminNavIcon name="bell" /></summary>
+            <div className="admin-notification-panel"><strong>Notifications</strong><p>A notification feed is not available yet.</p></div>
+          </details>
         </header>
         <div className="admin-content-body">
+          {!(hasBlocks && ['Complaints', 'Maintenance', 'Collections', 'Overdues', 'Accounts'].includes(section)) && <div className="admin-page-heading">
+            <h1>{pageTitle}</h1>
+            {data?.apartmentCode && <small className="admin-apartment-code">Apartment ID: {data.apartmentCode}</small>}
+          </div>}
         {blockInventory.loading && <LoadState loading error={null} onRetry={blockInventory.reload} />}
         {blockInventory.error && <LoadState loading={false} error={blockInventory.error} onRetry={blockInventory.reload} />}
-        {needsInitialBlock && !firstBlockFlowOpen && <section className="card empty-state"><h2>Set up your apartment</h2><p>Add the first block to unlock the rest of the admin workspace.</p><button className="primary" type="button" onClick={() => setFirstBlockFlowOpen(true)}>＋ Add block</button></section>}
-        {needsInitialBlock && firstBlockFlowOpen && <AdminBuildings onBlocksChanged={blockInventory.reload} selectedBlockId={null} onSelectBlock={() => {}} setupOnly initialModalOpen onSetupCancel={() => setFirstBlockFlowOpen(false)} />}
+        {needsInitialBlock && <ApartmentSetup initialSetup onComplete={() => { blockInventory.reload(); reload(); setSection('Flats & Residents') }} />}
         {hasBlocks && <>
-        {section === 'Overview' ? <>
+        {section === 'Dashboard' ? <>
           <div className="admin-overview-heading">
             <div>
               <span className="eyebrow">{t('admin:overview.eyebrow', 'APARTMENT OPERATIONS')}</span>
@@ -169,11 +192,11 @@ function AdminContent() {
             <ComplaintWorkspace onOpen={() => setSection('Complaints')} />
             <div className="grid-two admin-overview-grid">
               <section className="card">
-                <div className="admin-card-heading"><div><h2>Block payment status</h2><p>Occupancy and latest payment status</p></div><button type="button" className="text-action" onClick={() => setSection('Flats & Residents')}>View blocks <span aria-hidden="true">→</span></button></div>
-                {data.unitStatus.length === 0 ? <p>No blocks have been configured.</p> : data.unitStatus.map((unit) => (
+                <div className="admin-card-heading"><div><h2>{multipleBlocks ? 'Block payment status' : 'Flat payment status'}</h2><p>Occupancy and latest payment status</p></div><button type="button" className="text-action" onClick={() => setSection('Flats & Residents')}>{multipleBlocks ? 'View blocks' : 'View flats'} <span aria-hidden="true">→</span></button></div>
+                {data.unitStatus.length === 0 ? <p>No flats have been configured.</p> : data.unitStatus.map((unit) => (
                   <div className="unit-row" key={unit.name}>
                     <span className="unit-row-name"><span className="unit-row-icon" aria-hidden="true"><AdminNavIcon name="building" /></span><strong>{unit.name}</strong></span>
-                    <span className="unit-row-meta">{unit.occupancyStatus}<span className={`status-pill ${unit.paymentStatus === 'overdue' ? 'warning' : unit.paymentStatus === 'paid' ? 'success' : ''}`}>{unit.paymentStatus.replaceAll('_', ' ')}</span></span>
+                    <span className="unit-row-meta">{unit.occupancyStatus}<span className={`status-pill ${unit.paymentStatus === 'overdue' ? 'warning' : unit.paymentStatus === 'paid' ? 'success' : ''}`} data-status={unit.paymentStatus}>{unit.paymentStatus.replaceAll('_', ' ')}</span></span>
                   </div>
                 ))}
               </section>
@@ -182,7 +205,7 @@ function AdminContent() {
                 {data.recentTransactions.length === 0 ? <p>No payment records are available.</p> : data.recentTransactions.map((item) => (
                   <div className="transaction-item" key={item.id}>
                     <div className="transaction-person"><span className="transaction-avatar">{item.resident.split(/\s+/).map((part) => part[0]).slice(0, 2).join('')}</span><span><strong>{item.resident}</strong><small>{item.unit} · {new Date(item.createdAt).toLocaleString('en-IN')}</small></span></div>
-                    <div className="align-right"><strong>{formatMoney(item.amountMinor, item.currency)}</strong><span className={`status-pill ${item.status === 'confirmed' || item.status === 'paid' ? 'success' : item.status === 'pending' ? 'warning' : ''}`}>{item.status.replaceAll('_', ' ')}</span></div>
+                    <div className="align-right"><strong>{formatMoney(item.amountMinor, item.currency)}</strong><span className={`status-pill ${item.status === 'confirmed' || item.status === 'paid' ? 'success' : item.status === 'pending' ? 'warning' : ''}`} data-status={item.status}>{item.status.replaceAll('_', ' ')}</span></div>
                   </div>
                 ))}
               </section>
@@ -190,21 +213,21 @@ function AdminContent() {
             <div className="admin-quick-actions"><div><strong>Quick actions</strong><span>Jump into common workspace tasks.</span></div><button className="secondary" type="button" onClick={() => setSection('Flats & Residents')}>Manage residents</button><button className="primary" type="button" onClick={() => setSection('Billing')}>Generate monthly invoices</button></div>
           </>
           )}
-        </> : section === 'Flats & Residents' ? <AdminResidents />
+        </> : section === 'Flats & Residents' ? <AdminResidents onStructureChanged={blockInventory.reload} />
           : section === 'Announcements' ? <AdminAnnouncements />
           : section === 'Polls' ? <AdminPolls />
           : section === 'Billing' ? <AdminBilling />
             : section === 'Collections' ? <AdminCollections />
               : section === 'Overdues' ? <AdminOverdue />
-                  : section === 'More' ? <section className="section-stack"><h2>More</h2><div className="admin-more-grid">{adminNavigation.filter((item) => !['Overview', 'Flats & Residents', 'Billing', 'Collections'].includes(item.label)).map((item) => <button type="button" className="card complaint-record" key={item.label} onClick={() => setSection(item.label)}><AdminNavIcon name={item.icon} /><strong>{item.label}</strong></button>)}</div><div className="card"><TenantWorkspacePicker /><LanguageSwitcher /><button className="secondary" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>Sign out</button></div></section>
+                  : section === 'More' ? <section className="section-stack"><h2>More</h2><div className="admin-more-grid">{adminNavigation.filter((item) => !['Dashboard', 'Flats & Residents', 'Billing', 'Collections'].includes(item.label)).map((item) => <button type="button" className="card complaint-record" key={item.label} onClick={() => setSection(item.label)}><AdminNavIcon name={item.icon} /><strong>{item.label}</strong></button>)}</div><div className="card"><TenantWorkspacePicker /><LanguageSwitcher /><button className="secondary" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.origin } })}>Sign out</button></div></section>
                   : section === 'Accounts' ? <AccountsWorkspace key={`${expenseTaskId??expenseComplaintId??'accounts'}:${expenseEntryId??'new'}`} initialTaskId={expenseTaskId} initialComplaintId={expenseComplaintId} initialEntryId={expenseEntryId} onCollections={()=>setSection('Collections')} onTask={openTask} onComplaint={openComplaint} onBack={expenseTaskId ? () => openTask(expenseTaskId) : expenseComplaintId ? () => openComplaint(expenseComplaintId) : undefined} />
-                  : section === 'Maintenance' ? <MaintenanceWorkspace key={`${maintenanceId??'list'}:${maintenanceComplaintId??''}`} initialId={maintenanceId} initialComplaintId={maintenanceComplaintId} onComplaint={openComplaint} onExpense={(taskId,entryId) => { setExpenseTaskId(taskId);setExpenseComplaintId(undefined);setExpenseEntryId(entryId);setMaintenanceId(taskId);setSection('Accounts') }} />
-                  : section === 'Complaints' ? <ComplaintWorkspace key={complaintId??'list'} initialId={complaintId} onTask={openTask} onExpense={(id,entryId)=>{setExpenseTaskId(undefined);setExpenseComplaintId(id);setExpenseEntryId(entryId);setSection('Accounts')}} onPlanMaintenance={(id)=>{setMaintenanceId(undefined);setMaintenanceComplaintId(id);setSection('Maintenance')}} />
+                  : section === 'Maintenance' ? <MaintenanceWorkspace onHome={() => setSection('Dashboard')} key={`${maintenanceId??'list'}:${maintenanceComplaintId??''}`} initialId={maintenanceId} initialComplaintId={maintenanceComplaintId} onComplaint={openComplaint} onExpense={(taskId,entryId) => { setExpenseTaskId(taskId);setExpenseComplaintId(undefined);setExpenseEntryId(entryId);setMaintenanceId(taskId);setSection('Accounts') }} />
+                  : section === 'Complaints' ? <ComplaintWorkspace onHome={() => setSection('Dashboard')} key={complaintId??'list'} initialId={complaintId} onTask={openTask} onExpense={(id,entryId)=>{setExpenseTaskId(undefined);setExpenseComplaintId(id);setExpenseEntryId(entryId);setSection('Accounts')}} onPlanMaintenance={(id)=>{setMaintenanceId(undefined);setMaintenanceComplaintId(id);setSection('Maintenance')}} />
                   : section === 'Reports' ? <AdminReports /> : <AdminSettings />}
         </>}
         </div>
       </section>
-      {hasBlocks && <nav className="admin-mobile-tabs" aria-label="Main destinations">{(['Overview', 'Flats & Residents', 'Billing', 'Collections', 'More'] as const).map((destination) => <button type="button" key={destination} className={section === destination || (destination === 'More' && !['Overview', 'Flats & Residents', 'Billing', 'Collections'].includes(section)) ? 'active' : ''} aria-current={section === destination ? 'page' : undefined} onClick={() => setSection(destination)}><AdminNavIcon name={destination === 'More' ? 'grid' : adminNavigation.find((item) => item.label === destination)!.icon} /><span>{destination === 'Flats & Residents' ? 'Flats' : destination}</span></button>)}</nav>}
+      {hasBlocks && <nav className="admin-mobile-tabs" aria-label="Main destinations">{(['Dashboard', 'Flats & Residents', 'Billing', 'Collections', 'More'] as const).map((destination) => <button type="button" key={destination} className={section === destination || (destination === 'More' && !['Dashboard', 'Flats & Residents', 'Billing', 'Collections'].includes(section)) ? 'active' : ''} aria-current={section === destination ? 'page' : undefined} onClick={() => setSection(destination)}><AdminNavIcon name={destination === 'More' ? 'grid' : adminNavigation.find((item) => item.label === destination)!.icon} /><span>{destination === 'Flats & Residents' ? 'Flats' : destination}</span></button>)}</nav>}
     </main>
   )
 }
@@ -240,7 +263,7 @@ function AdminAnnouncements() {
     event.preventDefault();setValidationError(null)
     try{
       if(title.trim().length<3||!body.trim())throw new Error('Enter a title of at least 3 characters and a non-empty message.')
-      if(!context.data)throw new Error('Load the community timezone before reviewing.')
+      if(!context.data)throw new Error('Load community settings before reviewing.')
       const start=communityDateTimeToIso(startsAt,context.data.timezone),end=communityDateTimeToIso(endsAt,context.data.timezone)
       if(end<=start)throw new Error('End time must be after the start time.')
       setReview({title:title.trim(),body:body.trim(),startsAt:start,endsAt:end,isImportant,isBanner,requestKey:globalThis.crypto.randomUUID()})
@@ -269,17 +292,18 @@ function AdminAnnouncements() {
       setEndingAnnouncementId(null)
     }
   }
+  const breadcrumb = <WorkspaceBreadcrumb section="Announcements" record={review ? 'Review announcement' : creatingAnnouncement ? 'New announcement' : selectedAnnouncementId ? 'Announcement details' : undefined} disabled={saving} onBack={() => { list.back();setSelectedAnnouncementId(null);setCreatingAnnouncement(false);setReview(null);setValidationError(null) }} />
   const now = Date.now()
-  if(selectedAnnouncementId&&!selectedAnnouncement)return <section className="section-stack"><button className="secondary" type="button" onClick={()=>setSelectedAnnouncementId(null)}>Back to announcements</button><LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/></section>
-  if(review&&context.data)return <PublicationReview title="Review announcement" timeZone={context.data.timezone} startsAt={review.startsAt} endsAt={review.endsAt} busy={saving} error={validationError} onConfirm={()=>void publish()} onBack={()=>{setReview(null);setValidationError(null)}}><h2>{review.title}</h2><p className="complaint-text">{review.body}</p><p>{review.isImportant?'Important':'Standard'} · {review.isBanner?'Resident banner enabled':'No resident banner'}</p></PublicationReview>
+  if(selectedAnnouncementId&&!selectedAnnouncement)return <section className="section-stack">{breadcrumb}<button className="secondary" type="button" onClick={()=>setSelectedAnnouncementId(null)}>Back to announcements</button><LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/></section>
+  if(review&&context.data)return <section className="section-stack">{breadcrumb}<PublicationReview title="Review announcement" timeZone={context.data.timezone} startsAt={review.startsAt} endsAt={review.endsAt} busy={saving} error={validationError} onConfirm={()=>void publish()} onBack={()=>{setReview(null);setValidationError(null)}}><h2>{review.title}</h2><p className="complaint-text">{review.body}</p><p>{review.isImportant?'Important':'Standard'} · {review.isBanner?'Resident banner enabled':'No resident banner'}</p></PublicationReview></section>
   if (selectedAnnouncement) {
     const start = new Date(selectedAnnouncement.startsAt).getTime()
     const end = selectedAnnouncement.endsAt ? new Date(selectedAnnouncement.endsAt).getTime() : null
     const state = selectedAnnouncement.status==='draft'?'Draft':selectedAnnouncement.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live'
-    return <section className="section-stack admin-announcements">
+    return <section className="section-stack admin-announcements">{breadcrumb}
       <div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => {list.back();setSelectedAnnouncementId(null)}}>← Back to announcements</button><span>Announcement details</span></div>
       <LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/><article className="card admin-full-detail">
-        <div className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{selectedAnnouncement.isImportant && <span className="status-pill warning">Important</span>}{selectedAnnouncement.isBanner && <span className="status-pill">Banner</span>}</div>
+        <div className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`} data-status={state}>{state}</span>{selectedAnnouncement.isImportant && <span className="status-pill warning">Important</span>}{selectedAnnouncement.isBanner && <span className="status-pill">Banner</span>}</div>
         <h2>{selectedAnnouncement.isImportant && !/^important:\s*/i.test(selectedAnnouncement.title) ? `IMPORTANT: ${selectedAnnouncement.title}` : selectedAnnouncement.title}</h2>
         <div className="admin-detail-meta"><span>Starts <strong>{new Date(selectedAnnouncement.startsAt).toLocaleString('en-IN')}</strong></span><span>{selectedAnnouncement.endsAt ? <>Ends <strong>{new Date(selectedAnnouncement.endsAt).toLocaleString('en-IN')}</strong></> : 'No end time'}</span><span>Published <strong>{new Date(selectedAnnouncement.publishedAt).toLocaleString('en-IN')}</strong></span></div>
         <div className="admin-full-detail-body">{selectedAnnouncement.body}</div>
@@ -287,20 +311,30 @@ function AdminAnnouncements() {
       </article>
     </section>
   }
-  if (creatingAnnouncement) return <section className="section-stack admin-announcements">
-    <div className="admin-detail-toolbar"><button className="secondary" type="button" disabled={saving} onClick={() => { setValidationError(null); setCreatingAnnouncement(false) }}>← Back to announcements</button><span>Create announcement · {context.data?.timezone}</span></div>
-    <form className="card apartment-form-grid" onSubmit={(event) => void submit(event)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}>
-      <label className="admin-field full"><span>Title</span><input required minLength={3} maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Water supply maintenance" /></label>
-      <label className="admin-field full"><span>Message</span><textarea required maxLength={5000} rows={5} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write the announcement for residents" /></label>
-      <label className="admin-field"><span>Start time</span><input type="datetime-local" required value={startsAt} onChange={(event) => setStartsAt(event.target.value)} /></label>
-      <label className="admin-field"><span>End time</span><input type="datetime-local" min={startsAt} value={endsAt} onChange={(event) => setEndsAt(event.target.value)} required /></label>
-      <label className="admin-announcement-important"><input type="checkbox" checked={isImportant} onChange={(event) => setIsImportant(event.target.checked)} /><span><strong>Important announcement</strong><small>Add an Important tag and an IMPORTANT: prefix to the title.</small></span></label>
-      <label className="admin-announcement-important"><input type="checkbox" checked={isBanner} onChange={(event) => setIsBanner(event.target.checked)} /><span><strong>Banner announcement</strong><small>Show this announcement at the top of the resident app.</small></span></label>
-      {validationError && <p className="field-validation-error full" role="alert">{validationError}</p>}
-      <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving||!context.data}>Review announcement</button></div>
+  if (creatingAnnouncement) return <section className="section-stack admin-announcements">{breadcrumb}
+    <header className="admin-create-heading"><h2>New announcement</h2><p>Share an update with your residents.</p></header>
+    <form className="admin-create-layout" onSubmit={(event) => void submit(event)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}>
+      <section className="card admin-create-panel" aria-labelledby="announcement-details-heading">
+        <div className="admin-create-panel-heading"><h3 id="announcement-details-heading">Announcement details</h3><p>Write your message and choose when it appears.</p></div>
+        <label className="admin-field"><span>Title</span><input required minLength={3} maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Water supply maintenance" /></label>
+        <label className="admin-field"><span>Message</span><textarea required maxLength={5000} rows={6} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write the announcement for residents" /></label>
+        <div className="admin-create-field-row">
+          <label className="admin-field"><span>Start time</span><input type="datetime-local" required value={startsAt} onChange={(event) => setStartsAt(event.target.value)} /></label>
+          <label className="admin-field"><span>End time</span><input type="datetime-local" min={startsAt} value={endsAt} onChange={(event) => setEndsAt(event.target.value)} required /></label>
+        </div>
+      </section>
+      <div className="admin-create-sidebar">
+        <section className="card admin-create-panel" aria-labelledby="announcement-settings-heading">
+          <div className="admin-create-panel-heading"><h3 id="announcement-settings-heading">Display settings</h3><p>Choose how residents see this update.</p></div>
+          <label className="admin-announcement-important"><input type="checkbox" checked={isImportant} onChange={(event) => setIsImportant(event.target.checked)} /><span><strong>Important announcement</strong><small>Add an Important tag and an IMPORTANT: prefix to the title.</small></span></label>
+          <label className="admin-announcement-important"><input type="checkbox" checked={isBanner} onChange={(event) => setIsBanner(event.target.checked)} /><span><strong>Banner announcement</strong><small>Show this announcement at the top of the resident app.</small></span></label>
+        </section>
+        {validationError && <p className="field-validation-error" role="alert">{validationError}</p>}
+        <div className="admin-create-actions"><button className="primary" type="submit" disabled={saving||!context.data}>Review announcement</button><button className="secondary" type="button" disabled={saving} onClick={() => { setValidationError(null); setCreatingAnnouncement(false) }}>Cancel</button></div>
+      </div>
     </form>
   </section>
-  return <section className="section-stack admin-announcements">
+  return <section className="section-stack admin-announcements">{breadcrumb}
     <div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" disabled={context.loading||Boolean(context.error)} onClick={() => { if(!context.data)return;const now=new Date();setStartsAt(communityDateTimeInput(now,context.data.timezone));setEndsAt(communityDateTimeInput(new Date(now.getTime()+86400000),context.data.timezone));setValidationError(null);setCreatingAnnouncement(true) }}>＋ Create announcement</button></div></div>
     <LoadState loading={context.loading} error={context.error} onRetry={context.reload}/><CommunicationFilters drafts search={list.search} status={list.status} onChange={list.change}/><div className="card"><div className="admin-card-heading"><div><h2>All announcements</h2><p>Scheduled and past announcements stay here for reference.</p></div></div><LoadState loading={loading} error={error} onRetry={reload} />
       {!loading && !error && data?.length === 0 && <p>No announcements match this view.</p>}
@@ -308,7 +342,7 @@ function AdminAnnouncements() {
         const start = new Date(item.startsAt).getTime()
         const end = item.endsAt ? new Date(item.endsAt).getTime() : null
         const state = item.displayStatus ?? (item.status==='draft'?'Draft':item.status === 'archived' || end !== null && end <= now ? 'Ended' : start > now ? 'Scheduled' : 'Live')
-        return <article className="admin-announcement-item" key={item.id}><div><button type="button" className="admin-announcement-open" onClick={() => {list.remember();setSelectedAnnouncementId(item.id)}}><span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span>{item.isImportant && <span className="status-pill warning">Important</span>}{item.isBanner && <span className="status-pill">Banner</span>}</span><h3>{item.isImportant && !/^important:\s*/i.test(item.title) ? `IMPORTANT: ${item.title}` : item.title}</h3><p>{item.body}</p><small>{new Date(item.startsAt).toLocaleString('en-IN')}{item.endsAt ? ` – ${new Date(item.endsAt).toLocaleString('en-IN')}` : ' · No end time'} · Click to view details</small></button>{state !== 'Ended' && state !== 'Draft' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(item.id)}>{endingAnnouncementId === item.id ? 'Ending…' : 'Mark ended'}</button></div>}</div></article>
+        return <article className="admin-announcement-item" key={item.id}><div><button type="button" className="admin-announcement-open" onClick={() => {list.remember();setSelectedAnnouncementId(item.id)}}><span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`} data-status={state}>{state}</span>{item.isImportant && <span className="status-pill warning">Important</span>}{item.isBanner && <span className="status-pill">Banner</span>}</span><h3>{item.isImportant && !/^important:\s*/i.test(item.title) ? `IMPORTANT: ${item.title}` : item.title}</h3><p>{item.body}</p><small>{new Date(item.startsAt).toLocaleString('en-IN')}{item.endsAt ? ` – ${new Date(item.endsAt).toLocaleString('en-IN')}` : ' · No end time'} · Click to view details</small></button>{state !== 'Ended' && state !== 'Draft' && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={endingAnnouncementId !== null} onClick={() => void endAnnouncement(item.id)}>{endingAnnouncementId === item.id ? 'Ending…' : 'Mark ended'}</button></div>}</div></article>
       })}</div>
     </div>
     {!loading&&!error&&pageData&&<CommunicationPagination page={list.page} pageSize={pageData.pageSize} total={pageData.total} onPage={list.setPage}/>}
@@ -354,7 +388,7 @@ function AdminPolls() {
       return
     }
     try{
-      if(!context.data)throw new Error('Load the community timezone before reviewing.')
+      if(!context.data)throw new Error('Load community settings before reviewing.')
       const start=communityDateTimeToIso(startsAt,context.data.timezone),end=communityDateTimeToIso(endsAt,context.data.timezone)
       if(end<=start)throw new Error('End time must be after the start time.')
       setReview({question:question.trim(),options:normalizedOptions,startsAt:start,endsAt:end,anonymous,showResultsLive,resultsRetentionDays,requestKey:globalThis.crypto.randomUUID()})
@@ -376,21 +410,34 @@ function AdminPolls() {
     catch(e){pushMessage(`${e instanceof Error?e.message:'Could not end poll.'} Refresh the poll after an interrupted request to check its status.`,'error')}
     finally{endingLock.current=false;setEndingId(null)}
   }
-  const createForm = <form className="card apartment-form-grid" onSubmit={(e)=>void submit(e)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}><label className="admin-field full"><span>Question</span><input required minLength={3} maxLength={500} value={question} onChange={e=>setQuestion(e.target.value)} placeholder="What should we improve next?"/></label>
-      {options.map((value,i)=><label className="admin-field full" key={i}><span>Option {i+1}</span><input data-poll-option required maxLength={200} value={value} onChange={e=>setOptions(options.map((x,j)=>j===i?e.target.value:x))}/></label>)}
-      {options.length<10&&<button className="secondary" type="button" onClick={()=>setOptions([...options,''])}>＋ Add option</button>}{options.length>2&&<button className="secondary" type="button" onClick={()=>setOptions(options.slice(0,-1))}>Remove last option</button>}
-      <div className="admin-poll-date-row full"><label className="admin-field"><span>Starts</span><input type="datetime-local" name="poll-starts-at" required value={startsAt} onChange={e=>setStartsAt(e.target.value)}/></label><label className="admin-field"><span>Ends</span><input type="datetime-local" name="poll-ends-at" required min={startsAt} value={endsAt} onChange={e=>setEndsAt(e.target.value)}/></label></div>
-      <label className="admin-announcement-important"><input type="checkbox" checked={anonymous} onChange={e=>setAnonymous(e.target.checked)}/><span><strong>Anonymous poll</strong><small>Admin and resident results show totals only; no named choices are exposed.</small></span></label>
-      <label className="admin-announcement-important"><input type="checkbox" checked={showResultsLive} onChange={e=>setShowResultsLive(e.target.checked)}/><span><strong>Show results while live</strong><small>Residents can see totals before voting closes.</small></span></label>
-      <label className="admin-field full"><span>Show results to residents after the poll ends</span><select value={resultsRetentionDays} onChange={e=>setResultsRetentionDays(Number(e.target.value))}><option value={7}>7 days</option><option value={30}>30 days (recommended)</option><option value={90}>90 days</option></select><small>Results are removed from the resident app after this period. Admins retain poll results.</small></label>
-      {validationError && <p className="field-validation-error full" role="alert">{validationError}</p>}
-      <div className="admin-modal-actions full"><button className="primary" type="submit" disabled={saving||!context.data}>Review poll</button></div>
+  const breadcrumb = <WorkspaceBreadcrumb section="Polls" record={review ? 'Review poll' : creatingPoll ? 'New poll' : selectedPollId ? 'Poll results' : undefined} disabled={saving} onBack={() => { list.back();setSelectedPollId(null);setCreatingPoll(false);setReview(null);setValidationError(null) }} />
+  const createForm = <>
+    <header className="admin-create-heading"><h2>New poll</h2><p>Gather feedback from your residents.</p></header>
+    <form className="admin-create-layout" onSubmit={(e)=>void submit(e)} onInvalidCapture={(event) => formValidationMessage(event, setValidationError)} onChangeCapture={() => setValidationError(null)}>
+      <section className="card admin-create-panel" aria-labelledby="poll-details-heading">
+        <div className="admin-create-panel-heading"><h3 id="poll-details-heading">Poll details</h3><p>Add your question and the choices residents can vote on.</p></div>
+        <label className="admin-field"><span>Question</span><input required minLength={3} maxLength={500} value={question} onChange={e=>setQuestion(e.target.value)} placeholder="What should we improve next?"/></label>
+        <div className="admin-create-field-row">{options.map((value,i)=><label className="admin-field" key={i}><span>Option {i+1}</span><input data-poll-option required maxLength={200} value={value} onChange={e=>setOptions(options.map((x,j)=>j===i?e.target.value:x))}/></label>)}</div>
+        <div className="admin-toolbar-actions">{options.length<10&&<button className="secondary" type="button" onClick={()=>setOptions([...options,''])}>＋ Add option</button>}{options.length>2&&<button className="secondary" type="button" onClick={()=>setOptions(options.slice(0,-1))}>Remove last option</button>}</div>
+        <div className="admin-create-field-row"><label className="admin-field"><span>Start time</span><input type="datetime-local" name="poll-starts-at" required value={startsAt} onChange={e=>setStartsAt(e.target.value)}/></label><label className="admin-field"><span>End time</span><input type="datetime-local" name="poll-ends-at" required min={startsAt} value={endsAt} onChange={e=>setEndsAt(e.target.value)}/></label></div>
+      </section>
+      <div className="admin-create-sidebar">
+        <section className="card admin-create-panel" aria-labelledby="poll-settings-heading">
+          <div className="admin-create-panel-heading"><h3 id="poll-settings-heading">Privacy &amp; results</h3><p>Choose how votes and results are shared.</p></div>
+          <label className="admin-announcement-important"><input type="checkbox" checked={anonymous} onChange={e=>setAnonymous(e.target.checked)}/><span><strong>Anonymous poll</strong><small>Admin and resident results show totals only; no named choices are exposed.</small></span></label>
+          <label className="admin-announcement-important"><input type="checkbox" checked={showResultsLive} onChange={e=>setShowResultsLive(e.target.checked)}/><span><strong>Show results while live</strong><small>Residents can see totals before voting closes.</small></span></label>
+          <label className="admin-field"><span>Results visible after the poll ends</span><select value={resultsRetentionDays} onChange={e=>setResultsRetentionDays(Number(e.target.value))}><option value={7}>7 days</option><option value={30}>30 days (recommended)</option><option value={90}>90 days</option></select><small>Results are removed from the resident app after this period. Admins retain poll results.</small></label>
+        </section>
+        {validationError && <p className="field-validation-error" role="alert">{validationError}</p>}
+        <div className="admin-create-actions"><button className="primary" type="submit" disabled={saving||!context.data}>Review poll</button><button className="secondary" type="button" disabled={saving} onClick={() => { setValidationError(null); setCreatingPoll(false) }}>Cancel</button></div>
+      </div>
     </form>
-  if(selectedPollId&&!selectedPoll)return <section className="section-stack"><button className="secondary" type="button" onClick={()=>{list.back();setSelectedPollId(null)}}>Back to polls</button><LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/></section>
-  if(review&&context.data)return <PublicationReview title="Review poll privacy and schedule" timeZone={context.data.timezone} startsAt={review.startsAt} endsAt={review.endsAt} busy={saving} error={validationError} onConfirm={()=>void publish()} onBack={()=>{setReview(null);setValidationError(null)}}><h2>{review.question}</h2><ol>{review.options.map((label,index)=><li key={index}>{label}</li>)}</ol><p>{review.anonymous?'Anonymous · no named choices in results':'Named · individual choices may be visible'}</p><p>{review.showResultsLive?'Residents can see live totals':'Results stay hidden until close'} · Visible to residents for {review.resultsRetentionDays} days after close.</p></PublicationReview>
-  if (selectedPoll) return <section className="section-stack admin-announcements"><LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/><AdminPollDetails poll={selectedPoll} onBack={() => {list.back();setSelectedPollId(null)}} onEnd={end} ending={endingId!==null}/></section>
-  if (creatingPoll) return <section className="section-stack admin-announcements"><div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={() => { setValidationError(null); setCreatingPoll(false) }}>← Back to polls</button><span>Create poll · {context.data?.timezone}</span></div>{createForm}</section>
-  return <section className="section-stack admin-announcements"><div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" disabled={context.loading||Boolean(context.error)} onClick={() => { if(!context.data)return;const now=new Date();setStartsAt(communityDateTimeInput(now,context.data.timezone));setEndsAt(communityDateTimeInput(new Date(now.getTime()+7*86400000),context.data.timezone));setValidationError(null);setCreatingPoll(true) }}>＋ Create poll</button></div></div><LoadState loading={context.loading} error={context.error} onRetry={context.reload}/><CommunicationFilters search={list.search} status={list.status} onChange={list.change}/><div className="card">
+  </>
+  if(selectedPollId&&!selectedPoll)return <section className="section-stack">{breadcrumb}<button className="secondary" type="button" onClick={()=>{list.back();setSelectedPollId(null)}}>Back to polls</button><LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/></section>
+  if(review&&context.data)return <section className="section-stack">{breadcrumb}<PublicationReview title="Review poll privacy and schedule" timeZone={context.data.timezone} startsAt={review.startsAt} endsAt={review.endsAt} busy={saving} error={validationError} onConfirm={()=>void publish()} onBack={()=>{setReview(null);setValidationError(null)}}><h2>{review.question}</h2><ol>{review.options.map((label,index)=><li key={index}>{label}</li>)}</ol><p>{review.anonymous?'Anonymous · no named choices in results':'Named · individual choices may be visible'}</p><p>{review.showResultsLive?'Residents can see live totals':'Results stay hidden until close'} · Visible to residents for {review.resultsRetentionDays} days after close.</p></PublicationReview></section>
+  if (selectedPoll) return <section className="section-stack admin-announcements">{breadcrumb}<LoadState loading={detail.loading} error={detail.error} onRetry={detail.reload}/><AdminPollDetails poll={selectedPoll} onBack={() => {list.back();setSelectedPollId(null)}} onEnd={end} ending={endingId!==null}/></section>
+  if (creatingPoll) return <section className="section-stack admin-announcements">{breadcrumb}{createForm}</section>
+  return <section className="section-stack admin-announcements">{breadcrumb}<div className="admin-detail-toolbar"><div className="admin-toolbar-actions"><button className="secondary" type="button" onClick={reload} disabled={loading}>Refresh</button><button className="primary" type="button" disabled={context.loading||Boolean(context.error)} onClick={() => { if(!context.data)return;const now=new Date();setStartsAt(communityDateTimeInput(now,context.data.timezone));setEndsAt(communityDateTimeInput(new Date(now.getTime()+7*86400000),context.data.timezone));setValidationError(null);setCreatingPoll(true) }}>＋ Create poll</button></div></div><LoadState loading={context.loading} error={context.error} onRetry={context.reload}/><CommunicationFilters search={list.search} status={list.status} onChange={list.change}/><div className="card">
       <div className="admin-card-heading"><div><h2>All polls</h2><p>Live, scheduled and completed polls. Select a poll to view full results.</p></div></div>
       <LoadState loading={loading} error={error} onRetry={reload}/>
       {!loading && !error && data?.length === 0 && <p>No polls match this view.</p>}
@@ -399,7 +446,7 @@ function AdminPolls() {
         const total = poll.results.reduce((sum, option) => sum + option.votes, 0)
         return <article className="admin-poll-list-item" key={poll.id}>
           <button type="button" className="admin-poll-list-open" onClick={() => {list.remember();setSelectedPollId(poll.id)}}>
-            <span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`}>{state}</span><span className="status-pill">{poll.anonymous ? 'Anonymous' : 'Open'}</span></span>
+            <span className="admin-announcement-badges"><span className={`status-pill ${state === 'Live' ? 'success' : state === 'Scheduled' ? 'warning' : ''}`} data-status={state}>{state}</span><span className="status-pill">{poll.anonymous ? 'Anonymous' : 'Open'}</span></span>
             <strong>{poll.question}</strong>
             <small>{new Date(poll.startsAt).toLocaleString('en-IN')} – {new Date(poll.endsAt).toLocaleString('en-IN')}{poll.closedAt?` · Closed ${new Date(poll.closedAt).toLocaleString('en-IN')}`:''} · {total} {total === 1 ? 'vote' : 'votes'} · View full results →</small>
           </button>
@@ -423,7 +470,7 @@ function AdminPollDetails({ poll, onBack, onEnd, ending }: { poll: AdminPoll; on
   return <section className="section-stack admin-poll-detail-page">
     <div className="admin-detail-toolbar"><button className="secondary" type="button" onClick={onBack}>← Back to polls</button><span>Poll results</span></div>
     <article className="card admin-full-detail admin-poll-detail-heading">
-      <div className="admin-announcement-badges"><span className={`status-pill ${status === 'Live' ? 'success' : status === 'Scheduled' ? 'warning' : ''}`}>{status}</span><span className="status-pill">{poll.anonymous ? 'Anonymous poll' : 'Open poll'}</span></div>
+      <div className="admin-announcement-badges"><span className={`status-pill ${status === 'Live' ? 'success' : status === 'Scheduled' ? 'warning' : ''}`} data-status={status}>{status}</span><span className="status-pill">{poll.anonymous ? 'Anonymous poll' : 'Open poll'}</span></div>
       <h2>{poll.question}</h2>
       <div className="admin-detail-meta"><span>Starts <strong>{new Date(poll.startsAt).toLocaleString('en-IN')}</strong></span><span>Ends <strong>{new Date(poll.endsAt).toLocaleString('en-IN')}</strong></span><span>Resident results <strong>{poll.resultsRetentionDays} days after close</strong></span>{poll.closedAt&&<span>{new Date(poll.closedAt)<new Date(poll.startsAt)?'Cancelled before start':'Closed'} <strong>{new Date(poll.closedAt).toLocaleString('en-IN')}</strong></span>}</div>
       {!ended && <div className="admin-announcement-actions"><button className="secondary" type="button" disabled={ending} onClick={() => void onEnd(poll.id)}>{ending?'Ending…':'End poll'}</button></div>}
@@ -455,184 +502,6 @@ function AdminPollDetails({ poll, onBack, onEnd, ending }: { poll: AdminPoll; on
   </section>
 }
 
-function AdminBuildings({ onBlocksChanged, selectedBlockId, onSelectBlock, setupOnly = false, initialModalOpen = false, onSetupCancel }: { onBlocksChanged: () => void; selectedBlockId: string | null; onSelectBlock: (blockId: string) => void; setupOnly?: boolean; initialModalOpen?: boolean; onSetupCancel?: () => void }) {
-  type Building = { id: string; name: string; apartment: string; city: string; unitCount: number; flatLimit: number | null }
-  type BuildingInventory = { allowedBlocks: number; nextFlatLimit: number | null; buildings: Building[] }
-  type DraftFlat = { id: number; floorNumber: number; number: string }
-  type Stage = 'details' | 'edit' | 'review'
-  const [modalOpen, setModalOpen] = useState(initialModalOpen)
-  const [stage, setStage] = useState<Stage>('details')
-  const [blockValidationError, setBlockValidationError] = useState<string | null>(null)
-  const [blockForm, setBlockForm] = useState({ name: '', floors: '', unitPrefix: '' })
-  const [draftFlats, setDraftFlats] = useState<DraftFlat[]>([])
-  const [editingFlatId, setEditingFlatId] = useState<number | null>(null)
-  const [editingFlatNumber, setEditingFlatNumber] = useState('')
-  const [creating, setCreating] = useState(false)
-  const nextDraftId = useRef(0)
-  const post = useApiPost()
-  const { pushMessage } = useAppMessages()
-  const buildings = useApiQuery<BuildingInventory>('/v1/admin/buildings')
-  const blocks = buildings.data?.buildings ?? []
-  const atBlockLimit = Boolean(buildings.data && blocks.length >= buildings.data.allowedBlocks)
-  const flatLimit = buildings.data?.nextFlatLimit ?? null
-  const prefixRequired = (buildings.data?.allowedBlocks ?? 1) > 1
-  const buildingNameForApi = blockForm.name.trim() || 'Block 1'
-  const closeModal = () => {
-    setModalOpen(false)
-    if (setupOnly) onSetupCancel?.()
-  }
-  const resetForm = () => {
-    setBlockForm({ name: '', floors: '', unitPrefix: '' })
-    setDraftFlats([])
-    setStage('details')
-    setBlockValidationError(null)
-    setEditingFlatId(null)
-  }
-  const openBlockFlow = () => {
-    resetForm()
-    setModalOpen(true)
-  }
-  const generatedFlatNumber = (floor: number, sequence: number) => {
-    const floorDigits = String(Math.max(1, Number(blockForm.floors))).length
-    const floorCode = String(floor).padStart(Math.max(2, floorDigits), '0')
-    const flatCode = String(sequence).padStart(2, '0')
-    return blockForm.unitPrefix.trim() ? `${blockForm.unitPrefix.trim()}-${floorCode}${flatCode}` : `${floorCode}-${flatCode}`
-  }
-  const showFlatPreview = (event: FormEvent) => {
-    event.preventDefault()
-    const floors = Number(blockForm.floors)
-    if (!Number.isInteger(floors) || floors < 1 || floors > 200) {
-      setBlockValidationError('Number of floors must be a whole number between 1 and 200.')
-      return
-    }
-    if (prefixRequired && !blockForm.name.trim()) {
-      setBlockValidationError('A block name is required when this apartment has multiple blocks.')
-      return
-    }
-    if (prefixRequired && !blockForm.unitPrefix.trim()) {
-      setBlockValidationError('A flat prefix is required when this apartment has multiple blocks.')
-      return
-    }
-    setDraftFlats([])
-    setEditingFlatId(null)
-    setStage('edit')
-    setBlockValidationError(null)
-  }
-  const addFlat = (floorNumber: number) => {
-    if (flatLimit !== null && draftFlats.length >= flatLimit) {
-      setBlockValidationError(`This block allows at most ${flatLimit} flats. Delete a flat before adding another.`)
-      return
-    }
-    const existing = new Set(draftFlats.map((flat) => flat.number.toLocaleLowerCase('en')))
-    let sequence = 1
-    let number = generatedFlatNumber(floorNumber, sequence)
-    while (existing.has(number.toLocaleLowerCase('en'))) {
-      sequence += 1
-      number = generatedFlatNumber(floorNumber, sequence)
-    }
-    nextDraftId.current += 1
-    setDraftFlats((current) => [...current, { id: nextDraftId.current, floorNumber, number }])
-    setBlockValidationError(null)
-  }
-  const deleteFlat = (flatId: number) => {
-    setDraftFlats((current) => current.filter((flat) => flat.id !== flatId))
-    if (editingFlatId === flatId) setEditingFlatId(null)
-    setBlockValidationError(null)
-  }
-  const saveFlatNumber = (flatId: number) => {
-    const number = editingFlatNumber.trim()
-    if (!/^[\p{L}\p{N}][\p{L}\p{N} ./_#-]{0,39}$/u.test(number)) {
-      setBlockValidationError('Flat numbers must start with a letter or number and use only letters, numbers, spaces, or . / _ # -.')
-      return
-    }
-    if (draftFlats.some((flat) => flat.id !== flatId && flat.number.toLocaleLowerCase('en') === number.toLocaleLowerCase('en'))) {
-      setBlockValidationError('Each flat number must be unique within this block.')
-      return
-    }
-    setDraftFlats((current) => current.map((flat) => flat.id === flatId ? { ...flat, number } : flat))
-    setEditingFlatId(null)
-    setBlockValidationError(null)
-  }
-  const savePreview = () => {
-    if (draftFlats.length < 1) {
-      setBlockValidationError('Add at least one flat before saving this preview.')
-      return
-    }
-    if (flatLimit !== null && draftFlats.length > flatLimit) {
-      setBlockValidationError(`This block allows at most ${flatLimit} flats. Delete ${draftFlats.length - flatLimit} flat${draftFlats.length - flatLimit === 1 ? '' : 's'} to continue.`)
-      return
-    }
-    const numbers = draftFlats.map((flat) => flat.number.toLocaleLowerCase('en'))
-    if (new Set(numbers).size !== numbers.length) {
-      setBlockValidationError('Each flat number must be unique within this block.')
-      return
-    }
-    if (editingFlatId !== null) {
-      setBlockValidationError('Save or cancel the current flat number edit before continuing.')
-      return
-    }
-    setBlockValidationError(null)
-    setStage('review')
-  }
-  const createBlock = async () => {
-    if (creating) return
-    if (flatLimit !== null && draftFlats.length > flatLimit) {
-      setBlockValidationError(`This block allows at most ${flatLimit} flats.`)
-      setStage('edit')
-      return
-    }
-    if (!globalThis.confirm('Once created, these flats cannot be edited or deleted from the admin app. Create them now?')) return
-    setCreating(true)
-    try {
-      await post('/v1/admin/buildings', {
-        buildingName: buildingNameForApi,
-        floors: Number(blockForm.floors),
-        unitPrefix: blockForm.unitPrefix,
-        maintenanceRatePerSqft: null,
-        flats: draftFlats.map(({ floorNumber, number }) => ({ floorNumber, number })),
-      })
-      buildings.reload()
-      onBlocksChanged()
-      setModalOpen(false)
-      resetForm()
-    } catch (cause) {
-      pushMessage(cause instanceof Error ? cause.message : 'Could not add this block. Please try again.', 'error')
-      buildings.reload()
-    } finally {
-      setCreating(false)
-    }
-  }
-  const hasFlatAllowanceError = flatLimit !== null && draftFlats.length > flatLimit
-  return <section className="section-stack">
-    {!setupOnly && <>
-      <div className="card card-title-row"><div><h2>Blocks</h2><p>Manage property structure, occupancy, and rates.</p>{buildings.data && <p>{blocks.length} of {buildings.data.allowedBlocks} allowed blocks added</p>}</div><div className="admin-action-row"><button className="secondary" type="button" onClick={buildings.reload}>Refresh</button><button className="primary" type="button" disabled={atBlockLimit || buildings.loading || Boolean(buildings.error)} title={atBlockLimit ? 'All allowed blocks have been added' : undefined} onClick={openBlockFlow}>＋ Add block</button></div></div>
-      {blocks.length > 0 && <div className="building-grid" aria-label="Select a block">{blocks.map((building) => <button type="button" className={`card building-summary building-summary-button${selectedBlockId === building.id ? ' is-selected' : ''}`} aria-pressed={selectedBlockId === building.id} onClick={() => onSelectBlock(building.id)} key={building.id}><span className="building-summary-icon" aria-hidden="true">▤</span><span><span className="eyebrow">{building.apartment} · {building.city}</span><strong className="building-summary-name">{building.name}</strong><span className="building-summary-count">{building.unitCount} {building.unitCount === 1 ? 'Flat' : 'Flats'}</span></span></button>)}</div>}
-      <LoadState loading={buildings.loading} error={buildings.error} onRetry={buildings.reload} />
-    </>}
-    {modalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !creating) closeModal() }}><section className="admin-modal card block-setup-modal" role="dialog" aria-modal="true" aria-labelledby="create-block-title"><div className="admin-modal-header"><div><span className="eyebrow">PROPERTY SETUP</span><h2 id="create-block-title">{stage === 'details' ? 'Add block' : stage === 'edit' ? 'Preview and edit flats' : 'Review flats'}</h2><p>{blocks.length} of {buildings.data?.allowedBlocks ?? '—'} allowed blocks used. {flatLimit !== null && `This block allows up to ${flatLimit} flats.`}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={creating} onClick={closeModal}>×</button></div>
-      {stage === 'details' && <form onSubmit={showFlatPreview} onInvalidCapture={(event) => formValidationMessage(event, setBlockValidationError)} onChangeCapture={() => setBlockValidationError(null)}><div className="unit-setup-panel"><div className="unit-setup-heading"><div><strong>{prefixRequired ? blockForm.name || 'New block' : 'Apartment floors'}</strong><span>{flatLimit === null ? 'Add flats on the next screen' : `Up to ${flatLimit} flats can be added`}</span></div></div><div className="apartment-form-grid">
-        {prefixRequired && <label className="admin-field"><span>Block name</span><input autoFocus value={blockForm.name} onChange={(event) => setBlockForm((current) => ({ ...current, name: event.target.value }))} required maxLength={80} pattern="[\p{L}\p{N}][\p{L}\p{N}\p{M} .,'’()&amp;/#-]{0,79}" title="Use letters, numbers, spaces, or common punctuation (., ' ’ ( ) &amp; / # -)." placeholder="e.g. Block A" /></label>}
-        <label className="admin-field"><span>Number of floors</span><input autoFocus={!prefixRequired} type="number" min="1" max="200" value={blockForm.floors} placeholder="e.g. 12" onChange={(event) => setBlockForm((current) => ({ ...current, floors: event.target.value }))} required /></label>
-        {prefixRequired && <label className="admin-field"><span>Flat prefix (required)</span><input value={blockForm.unitPrefix} placeholder="e.g. A" onChange={(event) => setBlockForm((current) => ({ ...current, unitPrefix: event.target.value }))} required maxLength={8} pattern="[A-Za-z0-9]{1,8}" /></label>}
-        {prefixRequired && <div className="admin-field"><span>Flat number preview</span><output className="flat-number-format">{Number(blockForm.floors) > 0 ? generatedFlatNumber(1, 1) : ''}</output></div>}
-      </div></div>
-      {blockValidationError && <p className="field-validation-error" role="alert">{blockValidationError}</p>}
-      <p className="form-hint">{prefixRequired ? 'The flat prefix is required when your apartment has multiple blocks. You can add, edit, or remove flats on the next screen.' : 'You can add, edit, or remove flats on each floor on the next screen.'}</p><div className="admin-modal-actions"><button className="secondary" type="button" onClick={closeModal}>Cancel</button><button className="primary" type="submit">Next</button></div></form>}
-      {(stage === 'edit' || stage === 'review') && <>
-        <div className="unit-setup-heading"><div><strong>{prefixRequired ? blockForm.name : 'Flat setup'}</strong><span>{draftFlats.length} flats across {blockForm.floors} floors</span></div><span className="unit-setup-badge">{flatLimit === null ? `${draftFlats.length} flats` : `${draftFlats.length} / ${flatLimit} flats`}</span></div>
-        <div className="table-scroll block-preview-scroll"><table className="data-table block-preview-table"><thead><tr><th>Floor</th><th>Flat number</th><th>Actions</th></tr></thead><tbody>{Array.from({ length: Number(blockForm.floors) }, (_, floorIndex) => {
-          const floorNumber = floorIndex + 1
-          const floorFlats = draftFlats.filter((flat) => flat.floorNumber === floorNumber)
-          return <Fragment key={floorNumber}><tr className="block-preview-floor"><th colSpan={3}>Floor {floorNumber}{stage === 'edit' && <button type="button" className="secondary block-add-flat" disabled={editingFlatId !== null || (flatLimit !== null && draftFlats.length >= flatLimit)} onClick={() => addFlat(floorNumber)}>＋ Add flat</button>}</th></tr>{floorFlats.length === 0 ? <tr><td colSpan={3} className="block-empty-floor">No flats on this floor yet.</td></tr> : floorFlats.map((flat) => <tr key={flat.id}><td>{floorNumber}</td><td>{stage === 'edit' && editingFlatId === flat.id ? <div className="block-flat-edit"><input aria-label={`Flat number on floor ${floorNumber}`} autoFocus maxLength={40} value={editingFlatNumber} onChange={(event) => { setEditingFlatNumber(event.target.value); setBlockValidationError(null) }} /><button type="button" className="secondary" onClick={() => saveFlatNumber(flat.id)}>Save</button><button type="button" className="secondary" onClick={() => { setEditingFlatId(null); setBlockValidationError(null) }}>Cancel</button></div> : flat.number}</td><td>{stage === 'edit' && editingFlatId !== flat.id && <div className="block-flat-actions"><button type="button" className="secondary" disabled={editingFlatId !== null} onClick={() => { setEditingFlatId(flat.id); setEditingFlatNumber(flat.number); setBlockValidationError(null) }}>Edit</button><button type="button" className="secondary danger-button" disabled={editingFlatId !== null} onClick={() => deleteFlat(flat.id)}>Delete</button></div>}</td></tr>)}</Fragment>
-        })}</tbody></table></div>
-        {blockValidationError && <p className="field-validation-error" role="alert">{blockValidationError}</p>}
-        {hasFlatAllowanceError && <p className="field-validation-error" role="alert">This block allows at most {flatLimit} flats. Delete {draftFlats.length - (flatLimit ?? 0)} before saving.</p>}
-        {stage === 'edit' ? <div className="admin-modal-actions"><button className="secondary" type="button" disabled={editingFlatId !== null} onClick={() => { setStage('details'); setBlockValidationError(null) }}>Back to details</button><button className="primary" type="button" disabled={hasFlatAllowanceError || draftFlats.length === 0 || editingFlatId !== null} onClick={savePreview}>Save preview</button></div> : <div className="admin-modal-actions"><button className="secondary" type="button" disabled={creating} onClick={() => setStage('edit')}>Edit flats</button><button className="primary" type="button" disabled={creating || hasFlatAllowanceError || draftFlats.length === 0} onClick={() => void createBlock()}>{creating ? 'Creating flats…' : `Create ${draftFlats.length} flats`}</button></div>}
-      </>}
-    </section></div>}
-  </section>
-}
-
 function AdminReports() {
   const { data, loading, error, reload } = useApiQuery<AdminOverview>('/v1/admin/overview')
   return <section className="section-stack"><div className="card card-title-row"><div><p>Current billing and collection summary from persisted records.</p></div><button className="secondary" type="button" onClick={reload}>Refresh</button></div><LoadState loading={loading} error={error} onRetry={reload} />
@@ -645,7 +514,7 @@ function AdminReports() {
 
 function AdminSettings() {
   const { data, loading, error, reload } = useApiQuery<AdminOverview>('/v1/admin/overview')
-  return <section className="section-stack"><section className="card"><div className="card-title-row"><div><p>Workspace profile and current access context.</p></div><button className="secondary" type="button" onClick={reload}>Refresh</button></div><LoadState loading={loading} error={error} onRetry={reload} />{data && <div className="settings-grid"><div><span>Organization</span><strong>{data.organization}</strong></div><div><span>Currency</span><strong>{data.currency}</strong></div><div><span>Tenant access</span><strong>Verified for this account</strong></div></div>}</section><section className="card availability-card"><h2>Profile changes are not enabled</h2><p>Organization profile, team permissions, billing rules, and payment integrations are read-only until their management APIs are configured.</p></section></section>
+  return <section className="section-stack"><section className="card admin-settings-controls"><h2>Workspace & language</h2><div className="admin-settings-workspace"><TenantWorkspacePicker /></div><LanguageSwitcher /></section><section className="card"><div className="card-title-row"><div><p>Workspace profile and current access context.</p></div><button className="secondary" type="button" onClick={reload}>Refresh</button></div><LoadState loading={loading} error={error} onRetry={reload} />{data && <div className="settings-grid"><div><span>Organization</span><strong>{data.organization}</strong></div><div><span>Currency</span><strong>{data.currency}</strong></div><div><span>Tenant access</span><strong>Verified for this account</strong></div></div>}</section><section className="card availability-card"><h2>Profile changes are not enabled</h2><p>Organization profile, team permissions, billing rules, and payment integrations are read-only until their management APIs are configured.</p></section></section>
 }
 
 type AdminResident = {
@@ -666,7 +535,7 @@ type AdminResident = {
   finalMeterReading: number | null
 }
 
-function AdminResidents() {
+function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void }) {
   type ResidentUnit = { id: string; buildingId: string | null; building: string; number: string; occupancyStatus: string; paymentStatus: string }
   type BuildingOption = { id: string; name: string; apartment: string; city: string; unitCount: number }
   type PendingResidentInvitation = { id: string; unitId: string; fullName: string; email: string; phone: string | null; occupancyType: 'owner' | 'tenant'; displayStatus: string; expiresAt: string; startDate: string; unit: string; building: string; canManage: boolean }
@@ -677,7 +546,7 @@ function AdminResidents() {
   const tomorrowString = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
   const [search, setSearch] = useState('')
   const [residentPage, setResidentPage] = useState(0)
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
+  const [chosenBlockId, setSelectedBlockId] = useState<string | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [quickAddResident, setQuickAddResident] = useState(false)
   const [inviteError, setInviteError] = useState<string | null>(null)
@@ -705,6 +574,10 @@ function AdminResidents() {
   const buildings = useApiQuery<{ allowedBlocks: number; buildings: BuildingOption[] }>('/v1/admin/buildings')
   const invitations = useApiQuery<PendingResidentInvitation[]>('/v1/admin/resident-invitations')
   const billing = useApiQuery<{ rules: { template: BillingTemplate } }>('/v1/admin/billing')
+  const multipleBlocks = (buildings.data?.allowedBlocks ?? 0) > 1
+  const soleBlock = buildings.data?.buildings.length === 1 ? buildings.data.buildings[0] : undefined
+  const selectedBlockId = soleBlock?.id ?? (buildings.data?.buildings.some((block) => block.id === chosenBlockId) ? chosenBlockId : null)
+  const inviteBlockId = soleBlock?.id ?? inviteForm.blockId
   const occupiedUnitIds = new Set((data ?? []).filter((resident) => resident.status === 'active' || resident.status === 'scheduled').map((resident) => resident.unitId))
   const pendingInvitationUnitIds = new Set((invitations.data ?? [])
     .filter((invitation) => invitation.displayStatus === 'pending')
@@ -712,7 +585,7 @@ function AdminResidents() {
   const availableUnits = loading || error || units.loading || units.error || invitations.loading || invitations.error
     ? []
     : (units.data ?? []).filter((unit) => !occupiedUnitIds.has(unit.id) && !pendingInvitationUnitIds.has(unit.id))
-  const selectedInviteBlock = buildings.data?.buildings.find((building) => building.id === inviteForm.blockId)
+  const selectedInviteBlock = buildings.data?.buildings.find((building) => building.id === inviteBlockId)
   const availableFlats = selectedInviteBlock ? availableUnits.filter((unit) => unit.buildingId === selectedInviteBlock.id || unit.building === selectedInviteBlock.name) : []
   const searchQuery = search.trim().toLowerCase()
   const selectedBlock = buildings.data?.buildings.find((block) => block.id === selectedBlockId) ?? null
@@ -739,7 +612,7 @@ function AdminResidents() {
     setInviteValidationError(null)
     setSentInvitation(null)
     const invitedBlockId = targetUnit?.buildingId ?? buildings.data?.buildings.find((building) => building.name === targetUnit?.building)?.id ?? ''
-    setInviteForm({ fullName: '', email: '', phone: '', blockId: targetUnit ? invitedBlockId : '', unitId: targetUnit?.id ?? '', startDate: todayString, occupancyType: 'owner' })
+    setInviteForm({ fullName: '', email: '', phone: '', blockId: targetUnit ? invitedBlockId : soleBlock?.id ?? '', unitId: targetUnit?.id ?? '', startDate: todayString, occupancyType: 'owner' })
     setInviteOpen(true)
   }
   const resendInvitation = async (invitation: PendingResidentInvitation) => {
@@ -783,7 +656,7 @@ function AdminResidents() {
     try {
       const invitationRequest = { fullName: inviteForm.fullName, email: inviteForm.email, phone: inviteForm.phone, unitId: inviteForm.unitId, occupancyType: inviteForm.occupancyType, ...(!quickAddResident ? { startDate: inviteForm.startDate } : {}) }
       const result = await post<{ fullName: string; email: string; unit: string; expiresAt: string }>('/v1/admin/resident-invitations', invitationRequest)
-      setSentInvitation(result)
+      setSentInvitation({ ...result, unit: multipleBlocks ? result.unit : units.data?.find((unit) => unit.id === inviteForm.unitId)?.number ?? result.unit })
       reload()
       invitations.reload()
     } catch (cause) {
@@ -860,18 +733,18 @@ function AdminResidents() {
     return date.toLocaleDateString('en-IN')
   }
   return <section className="section-stack">
-    <AdminBuildings onBlocksChanged={() => { units.reload(); buildings.reload() }} selectedBlockId={selectedBlockId} onSelectBlock={(blockId) => { setSelectedBlockId(blockId); setResidentPage(0) }} />
+    <ApartmentSetup onComplete={() => { units.reload(); buildings.reload(); invitations.reload(); reload(); onStructureChanged() }} selectedBlockId={selectedBlockId} onSelectBlock={(blockId) => { setSelectedBlockId(blockId); setResidentPage(0) }} />
     <section className="card">
     <div className="card-title-row"><div><h2>Flats &amp; Residents</h2><p>Each flat shows its residents, invitations, occupancy, invoice status, and actions.</p></div><div className="admin-action-row"><button className="secondary" type="button" onClick={() => { reload(); units.reload(); buildings.reload(); invitations.reload(); billing.reload() }}>Refresh</button></div></div>
     {lifecycleMessage && <p className="billing-success" role="status">{lifecycleMessage}</p>}
     {duesSettlementError && <p className="form-error" role="alert">{duesSettlementError}</p>}
-    <label className="resident-search"><span aria-hidden="true">⌕</span><input aria-label="Search flats and residents" placeholder="Search residents, blocks, flats…" value={search} onChange={(event) => { setSearch(event.target.value); setResidentPage(0) }} /></label>
+    <label className="resident-search"><span aria-hidden="true">⌕</span><input aria-label="Search flats and residents" placeholder={multipleBlocks ? "Search residents, blocks, flats…" : "Search residents and flats…"} value={search} onChange={(event) => { setSearch(event.target.value); setResidentPage(0) }} /></label>
     <LoadState loading={loading} error={error} onRetry={reload} />
     <LoadState loading={units.loading} error={units.error} onRetry={units.reload} />
     <LoadState loading={invitations.loading} error={invitations.error} onRetry={invitations.reload} />
-    {!units.loading && !units.error && units.data?.length === 0 && <p className="form-hint" role="status">Add a block above before inviting residents.</p>}
+    {!units.loading && !units.error && units.data?.length === 0 && <p className="form-hint" role="status">Add flats above before inviting residents.</p>}
     {!selectedBlockId && !buildings.loading && !buildings.error && (buildings.data?.buildings.length ?? 0) > 0 && <p className="form-hint" role="status">Select a block above to view its flats and residents.</p>}
-    {!loading && !error && !units.loading && !units.error && !invitations.loading && !invitations.error && selectedBlockId && flatRows.length === 0 && <p role="status">{search ? 'No flats or residents match this search in the selected block.' : 'No flats are configured in this block.'}</p>}
+    {!loading && !error && !units.loading && !units.error && !invitations.loading && !invitations.error && selectedBlockId && flatRows.length === 0 && <p role="status">{search ? multipleBlocks ? 'No flats or residents match this search in the selected block.' : 'No flats or residents match this search.' : multipleBlocks ? 'No flats are configured in this block.' : 'No flats are configured yet.'}</p>}
     {selectedBlockId && pageFlats.length > 0 && <div className="table-scroll"><table className="data-table"><thead><tr><th>Flat</th><th>Residents</th><th>Invoice</th><th>Actions</th></tr></thead><tbody>{pageFlats.map((flat) => {
       const flatResidents = (data ?? []).filter((resident) => resident.unitId === flat.id)
       const flatInvitations = (invitations.data ?? []).filter((invitation) => invitation.unitId === flat.id && invitation.displayStatus !== 'revoked')
@@ -884,11 +757,11 @@ function AdminResidents() {
           {flatResidents.length === 0 && flatInvitations.length === 0 && <span>{flat.occupancyStatus.toLowerCase() === 'vacant' ? 'Vacant' : flat.occupancyStatus}</span>}
           {flatResidents.map((resident) => {
             const residentStatusTone = resident.status === 'active' ? 'success' : resident.status === 'scheduled' ? 'warning' : 'neutral'
-            return <div className="flat-resident-entry" key={`resident:${resident.id}`}><strong>{resident.name}</strong><small>{resident.occupancyType} · {resident.email}{resident.phone ? ` · ${resident.phone}` : ''}</small><small>Status: <span className={`status-pill ${residentStatusTone}`}>{resident.status.replaceAll('_', ' ')}</span>{resident.moveOutDate && <> · Moves out {new Date(`${resident.moveOutDate}T00:00:00`).toLocaleDateString('en-IN')}</>}</small></div>
+            return <div className="flat-resident-entry" key={`resident:${resident.id}`}><strong>{resident.name}</strong><small>{resident.occupancyType} · {resident.email}{resident.phone ? ` · ${resident.phone}` : ''}</small><small>Status: <span className={`status-pill ${residentStatusTone}`} data-status={resident.status}>{resident.status.replaceAll('_', ' ')}</span>{resident.moveOutDate && <> · Moves out {new Date(`${resident.moveOutDate}T00:00:00`).toLocaleDateString('en-IN')}</>}</small></div>
           })}
           {flatInvitations.map((invitation) => <div className="flat-resident-entry" key={`invitation:${invitation.id}`}><strong>{invitation.fullName} <span className="status-pill warning">Invitation sent · {invitation.displayStatus}</span></strong><small>{invitation.occupancyType} · {invitation.email}{invitation.phone ? ` · ${invitation.phone}` : ''}</small><small>Starts {formatCalendarDate(invitation.startDate)} · Expires {formatExpiry(invitation.expiresAt)}</small></div>)}
         </td>
-        <td><span className={`status-pill ${flat.paymentStatus === 'overdue' ? 'warning' : flat.paymentStatus === 'paid' ? 'success' : ''}`}>{flat.paymentStatus.replaceAll('_', ' ')}</span></td>
+        <td><span className={`status-pill ${flat.paymentStatus === 'overdue' ? 'warning' : flat.paymentStatus === 'paid' ? 'success' : ''}`} data-status={flat.paymentStatus}>{flat.paymentStatus.replaceAll('_', ' ')}</span></td>
         <td><div className="flat-resident-actions">
           {flatResidents.map((resident) => resident.status === 'active' ? (resident.moveOutDate && pendingInvitationUnitIds.has(resident.unitId) ? <small key={resident.id}>Invitation pending</small> : <button type="button" className="secondary" key={resident.id} onClick={() => startNewResidentTransition(resident)}>{resident.moveOutDate ? 'Continue new resident' : '＋ New resident'}</button>) : resident.outstandingMinor > 0 && <button type="button" className="secondary" key={resident.id} disabled={settlingResidentId === resident.id} onClick={() => settleFormerDues(resident)}>{settlingResidentId === resident.id ? 'Recording…' : 'Record receipt'}</button>)}
           {flatInvitations.map((invitation) => <span className="invitation-row-actions" key={invitation.id}>{invitation.canManage && invitation.displayStatus !== 'revoked' && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => void resendInvitation(invitation)}>{invitationActionId === invitation.id ? 'Sending…' : invitation.displayStatus === 'expired' ? 'Send again' : 'Resend'}</button>}{invitation.canManage && invitation.displayStatus === 'pending' && <button className="secondary danger-button" type="button" disabled={invitationActionId === invitation.id} onClick={() => void revokeInvitation(invitation)}>{invitationActionId === invitation.id ? 'Working…' : 'Cancel'}</button>}</span>)}
@@ -901,7 +774,7 @@ function AdminResidents() {
     {invitationActionError && <p className="form-error" role="alert">{invitationActionError}</p>}
     {invitationActionMessage && <p className="billing-success" role="status">{invitationActionMessage}</p>}
     {settlementReview && <ReceiptReview key={settlementReview.id} title="Record former resident receipt" amountMinor={settlementReview.outstandingMinor} busy={settlingResidentId !== null} error={duesSettlementError} onCancel={() => setSettlementReview(null)} onConfirm={(account,reference) => void confirmFormerDues(settlementReview,account,reference)}><h2>{settlementReview.name} · {settlementReview.unit}</h2><p>This verifies money received. It does not waive or transfer debt to the next resident.</p></ReceiptReview>}
-    {transitionResident && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !transitionBusy) setTransitionResident(null) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="new-resident-transition-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT CHANGE · {transitionResident.building} · {transitionResident.unit}</span><h2 id="new-resident-transition-title">Move out and invite new resident</h2><p>Current resident: {transitionResident.name} · {transitionResident.email}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={transitionBusy} onClick={() => setTransitionResident(null)}>×</button></div>
+    {transitionResident && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !transitionBusy) setTransitionResident(null) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="new-resident-transition-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT CHANGE · {multipleBlocks && `${transitionResident.building} · `}{transitionResident.unit}</span><h2 id="new-resident-transition-title">Move out and invite new resident</h2><p>Current resident: {transitionResident.name} · {transitionResident.email}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={transitionBusy} onClick={() => setTransitionResident(null)}>×</button></div>
       <form onSubmit={submitNewResidentTransition} onInvalidCapture={(event) => formValidationMessage(event, setTransitionError)}>
         <div className="unit-setup-panel"><strong>Current resident move-out</strong><div className="apartment-form-grid"><label className="admin-field"><span>Move-out date</span><input type="date" value={transitionForm.moveOutDate} disabled={transitionMoveOutRecorded} onChange={(event) => setTransitionForm((current) => ({ ...current, moveOutDate: event.target.value, startDate: current.startDate <= event.target.value ? dayAfter(event.target.value) : current.startDate }))} required /></label><div className="admin-field"><span>Outstanding dues</span><strong>{formatMoney(transitionResident.outstandingMinor, 'INR')}</strong><small>Unpaid invoices stay with {transitionResident.name} unless you record a settlement.</small></div>
           {transitionResident.outstandingMinor > 0 && <p>Outstanding dues stay with the departing resident. Record any verified receipt separately with an account and reference.</p>}
@@ -912,11 +785,12 @@ function AdminResidents() {
         <div className="admin-modal-actions"><button className="secondary" type="button" disabled={transitionBusy} onClick={() => setTransitionResident(null)}>Cancel</button><button className="primary" type="submit" disabled={transitionBusy || billing.loading || Boolean(billing.error) || (billing.data?.rules.template === 'metered_water' && !transitionForm.finalMeterReading.trim()) || !transitionForm.moveOutDate || !transitionForm.startDate || transitionForm.startDate <= transitionForm.moveOutDate}>{transitionBusy ? 'Saving…' : transitionMoveOutRecorded ? 'Send new resident invitation' : 'Record move-out and invite'}</button></div>
       </form>
     </section></div>}
-    {inviteOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) setInviteOpen(false) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="resident-invitation-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT ACCESS</span><h2 id="resident-invitation-title">{sentInvitation ? 'Invitation sent' : quickAddResident ? 'Add resident' : 'Invite resident'}</h2><p>{sentInvitation ? 'The resident can accept after verifying their email.' : quickAddResident ? 'Add a resident to this vacant flat. The invitation will be sent to their email.' : 'Invite a resident to join the selected block.'}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={submitting} onClick={() => setInviteOpen(false)}>×</button></div>
-      {sentInvitation ? <div className="completion-panel"><strong>{sentInvitation.fullName} has been invited</strong><p>An activation link was sent to {sentInvitation.email} for {sentInvitation.unit}. It expires {formatExpiry(sentInvitation.expiresAt)}.</p><p className="invitation-policy-note">Access is limited to this apartment and block. The resident must use Email OTP with the invited address.</p><div className="admin-modal-actions"><button className="primary" type="button" onClick={() => setInviteOpen(false)}>Done</button></div></div> : <form onSubmit={createInvitation} onInvalidCapture={(event) => formValidationMessage(event, setInviteValidationError)} onChangeCapture={() => setInviteValidationError(null)}><div className="apartment-form-grid"><label className="admin-field invite-block-field"><span>Block</span>{quickAddResident ? <strong>{buildings.data?.buildings.find((block) => block.id === inviteForm.blockId)?.name ?? '—'}</strong> : <select value={inviteForm.blockId} onChange={(event) => setInviteForm((current) => ({ ...current, blockId: event.target.value, unitId: '' }))} required disabled={buildings.loading || Boolean(buildings.error)}><option value="">{buildings.loading ? 'Loading blocks…' : buildings.error ? 'Could not load blocks' : buildings.data?.buildings.length ? 'Select a block' : 'No blocks available'}</option>{(buildings.data?.buildings ?? []).map((block) => <option value={block.id} key={block.id}>{block.name}</option>)}</select>}</label><label className="admin-field invite-flat-field"><span>Flat</span>{quickAddResident ? <strong>{units.data?.find((flat) => flat.id === inviteForm.unitId)?.number ?? '—'}</strong> : <select value={inviteForm.unitId} onChange={(event) => setInviteForm((current) => ({ ...current, unitId: event.target.value }))} required disabled={!inviteForm.blockId || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || availableFlats.length === 0}><option value="">{!inviteForm.blockId ? 'Select a block first' : units.loading || invitations.loading || loading ? 'Loading flats…' : units.error || invitations.error || error ? 'Could not load flats' : availableFlats.length ? 'Select a flat' : 'No available flats (occupied or already invited)'}</option>{availableFlats.map((flat) => <option value={flat.id} key={flat.id}>{flat.number}</option>)}</select>}</label><label className="admin-field"><span>Full name</span><input autoFocus value={inviteForm.fullName} onChange={(event) => setInviteForm((current) => ({ ...current, fullName: event.target.value }))} required minLength={2} maxLength={120} autoComplete="name" placeholder="Resident name" /></label><label className="admin-field"><span>Mobile number <small>(optional)</small></span><input type="tel" value={inviteForm.phone} onChange={(event) => setInviteForm((current) => ({ ...current, phone: event.target.value }))} maxLength={24} autoComplete="tel" placeholder="+91 98765 43210" /></label><label className="admin-field full"><span>Email address</span><input type="email" value={inviteForm.email} onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))} required maxLength={254} autoComplete="email" placeholder="resident@example.com" /></label>{!quickAddResident && <label className="admin-field"><span>Resident start date</span><input type="date" value={inviteForm.startDate} min={todayString} onChange={(event) => setInviteForm((current) => ({ ...current, startDate: event.target.value }))} required /></label>}<label className="admin-field"><span>Occupancy type</span><select value={inviteForm.occupancyType} onChange={(event) => setInviteForm((current) => ({ ...current, occupancyType: event.target.value as 'owner' | 'tenant' }))}><option value="owner">Owner</option><option value="tenant">Tenant</option></select></label></div>
+    {inviteOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) setInviteOpen(false) }}><section className="admin-modal card" role="dialog" aria-modal="true" aria-labelledby="resident-invitation-title"><div className="admin-modal-header"><div><span className="eyebrow">RESIDENT ACCESS</span><h2 id="resident-invitation-title">{sentInvitation ? 'Invitation sent' : quickAddResident ? 'Add resident' : 'Invite resident'}</h2><p>{sentInvitation ? 'The resident can accept after verifying their email.' : quickAddResident ? 'Add a resident to this vacant flat. The invitation will be sent to their email.' : multipleBlocks ? 'Invite a resident to join the selected block.' : 'Invite a resident to join your apartment.'}</p></div><button className="modal-close" type="button" aria-label="Close" disabled={submitting} onClick={() => setInviteOpen(false)}>×</button></div>
+      {sentInvitation ? <div className="completion-panel"><strong>{sentInvitation.fullName} has been invited</strong><p>An activation link was sent to {sentInvitation.email} for {sentInvitation.unit}. It expires {formatExpiry(sentInvitation.expiresAt)}.</p><p className="invitation-policy-note">Access is limited to {multipleBlocks ? 'this apartment and block' : 'this apartment'}. The resident must use Email OTP with the invited address.</p><div className="admin-modal-actions"><button className="primary" type="button" onClick={() => setInviteOpen(false)}>Done</button></div></div> : <form onSubmit={createInvitation} onInvalidCapture={(event) => formValidationMessage(event, setInviteValidationError)} onChangeCapture={() => setInviteValidationError(null)}><div className="apartment-form-grid">{multipleBlocks && <label className="admin-field invite-block-field"><span>Block</span>{quickAddResident || soleBlock ? <strong>{buildings.data?.buildings.find((block) => block.id === inviteBlockId)?.name ?? '—'}</strong> : <select value={inviteBlockId} onChange={(event) => setInviteForm((current) => ({ ...current, blockId: event.target.value, unitId: '' }))} required disabled={buildings.loading || Boolean(buildings.error)}><option value="">{buildings.loading ? 'Loading blocks…' : buildings.error ? 'Could not load blocks' : buildings.data?.buildings.length ? 'Select a block' : 'No blocks available'}</option>{(buildings.data?.buildings ?? []).map((block) => <option value={block.id} key={block.id}>{block.name}</option>)}</select>}</label>}<label className="admin-field invite-flat-field"><span>Flat</span>{quickAddResident ? <strong>{units.data?.find((flat) => flat.id === inviteForm.unitId)?.number ?? '—'}</strong> : <select value={inviteForm.unitId} onChange={(event) => setInviteForm((current) => ({ ...current, unitId: event.target.value }))} required disabled={!inviteBlockId || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || availableFlats.length === 0}><option value="">{!inviteBlockId ? 'Select a block first' : units.loading || invitations.loading || loading ? 'Loading flats…' : units.error || invitations.error || error ? 'Could not load flats' : availableFlats.length ? 'Select a flat' : 'No available flats (occupied or already invited)'}</option>{availableFlats.map((flat) => <option value={flat.id} key={flat.id}>{flat.number}</option>)}</select>}</label><label className="admin-field"><span>Full name</span><input autoFocus value={inviteForm.fullName} onChange={(event) => setInviteForm((current) => ({ ...current, fullName: event.target.value }))} required minLength={2} maxLength={120} autoComplete="name" placeholder="Resident name" /></label><label className="admin-field"><span>Mobile number <small>(optional)</small></span><input type="tel" value={inviteForm.phone} onChange={(event) => setInviteForm((current) => ({ ...current, phone: event.target.value }))} maxLength={24} autoComplete="tel" placeholder="+91 98765 43210" /></label><label className="admin-field full"><span>Email address</span><input type="email" value={inviteForm.email} onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))} required maxLength={254} autoComplete="email" placeholder="resident@example.com" /></label>{!quickAddResident && <label className="admin-field"><span>Resident start date</span><input type="date" value={inviteForm.startDate} min={todayString} onChange={(event) => setInviteForm((current) => ({ ...current, startDate: event.target.value }))} required /></label>}<label className="admin-field"><span>Occupancy type</span><select value={inviteForm.occupancyType} onChange={(event) => setInviteForm((current) => ({ ...current, occupancyType: event.target.value as 'owner' | 'tenant' }))}><option value="owner">Owner</option><option value="tenant">Tenant</option></select></label></div>
         <div className="invitation-policy-note"><strong>Email invitation</strong><span>We’ll send a one-time link that expires in 7 days. The resident must verify this email with Email OTP. SMS and WhatsApp invitations are not enabled.</span></div>
-        {inviteError && <p className="form-error" role="alert">{inviteError}</p>}{inviteValidationError && <p className="field-validation-error" role="alert">{inviteValidationError}</p>}<div className="admin-modal-actions"><button className="secondary" type="button" disabled={submitting} onClick={() => setInviteOpen(false)}>Cancel</button><button className="primary" type="submit" disabled={submitting || buildings.loading || Boolean(buildings.error) || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || !inviteForm.blockId || availableFlats.length === 0}>{submitting ? 'Sending…' : quickAddResident ? 'Add resident' : 'Send invitation'}</button></div></form>}
+        {inviteError && <p className="form-error" role="alert">{inviteError}</p>}{inviteValidationError && <p className="field-validation-error" role="alert">{inviteValidationError}</p>}<div className="admin-modal-actions"><button className="secondary" type="button" disabled={submitting} onClick={() => setInviteOpen(false)}>Cancel</button><button className="primary" type="submit" disabled={submitting || buildings.loading || Boolean(buildings.error) || units.loading || Boolean(units.error) || invitations.loading || Boolean(invitations.error) || loading || Boolean(error) || !inviteBlockId || availableFlats.length === 0}>{submitting ? 'Sending…' : quickAddResident ? 'Add resident' : 'Send invitation'}</button></div></form>}
     </section></div>}
+    {(buildings.data?.buildings.length ?? 0) > 0 && <footer><DeletePropertySetup multipleBlocks={multipleBlocks} kind="setup" onDeleted={() => { setSelectedBlockId(null); setResidentPage(0); units.reload(); buildings.reload(); invitations.reload(); reload(); onStructureChanged() }} /></footer>}
   </section>
 }
 
@@ -925,6 +799,7 @@ type AdminInvoice = {
   number: string
   resident: string
   unit: string
+  building: string
   billingPeriod: string
   dueDate: string
   status: string
@@ -1085,7 +960,9 @@ function AdminBilling() {
   const [publishError, setPublishError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const { data, loading, error, reload } = useApiQuery<AdminBillingData>('/v1/admin/billing')
+  const buildingInventory = useApiQuery<{ allowedBlocks: number }>('/v1/admin/buildings')
   const billingInputs = useApiQuery<AdminBillingInput[]>(`/v1/admin/billing/inputs?period=${encodeURIComponent(billingPeriod)}`)
+  const multipleBlocks = (buildingInventory.data?.allowedBlocks ?? 0) > 1
   const billingInputPageSize = 20
   const billingInputPageCount = Math.max(1, Math.ceil((billingInputs.data?.length ?? 0) / billingInputPageSize))
   const currentBillingInputPage = Math.min(billingInputPage, billingInputPageCount - 1)
@@ -1351,7 +1228,7 @@ function AdminBilling() {
         </div>}
         {rulesForm.template === 'area_based' && <section className="billing-input-panel">
           <div className="billing-section-heading"><div><h3>One-time flat area setup</h3><p>Enter each flat’s area once. Saved areas are locked here to prevent accidental changes.</p></div></div>
-          {!data.units.length ? <p className="billing-empty">Add units before setting up area-based maintenance.</p> : <div className="table-scroll"><table className="data-table billing-input-table"><thead><tr><th>Building / flat</th><th>Occupancy</th><th>Area · sq. ft.</th></tr></thead><tbody>{data.units.map((unit) => <tr key={unit.id}><td>{unit.building} · {unit.unit}</td><td>{unit.residentCount === 1 ? 'Occupied' : unit.residentCount === 0 ? 'Vacant' : 'Multiple residents'}</td><td>{unit.areaSqft !== null ? <strong>{unit.areaSqft} sq. ft. · Saved</strong> : <input aria-label={`Area in square feet for ${unit.unit}`} type="number" min="1" max="100000" step="1" value={areaForm[unit.id] ?? ''} onChange={(event) => setAreaForm((current) => ({ ...current, [unit.id]: event.target.value }))} />}</td></tr>)}</tbody></table></div>}
+          {!data.units.length ? <p className="billing-empty">Add units before setting up area-based maintenance.</p> : <div className="table-scroll"><table className="data-table billing-input-table"><thead><tr><th>{multipleBlocks ? 'Building / flat' : 'Flat'}</th><th>Occupancy</th><th>Area · sq. ft.</th></tr></thead><tbody>{data.units.map((unit) => <tr key={unit.id}><td>{multipleBlocks ? `${unit.building} · ` : ''}{unit.unit}</td><td>{unit.residentCount === 1 ? 'Occupied' : unit.residentCount === 0 ? 'Vacant' : 'Multiple residents'}</td><td>{unit.areaSqft !== null ? <strong>{unit.areaSqft} sq. ft. · Saved</strong> : <input aria-label={`Area in square feet for ${unit.unit}`} type="number" min="1" max="100000" step="1" value={areaForm[unit.id] ?? ''} onChange={(event) => setAreaForm((current) => ({ ...current, [unit.id]: event.target.value }))} />}</td></tr>)}</tbody></table></div>}
           {areaError && <p className="form-error" role="alert">{areaError}</p>}
           {!!data.units.length && data.units.some((unit) => unit.areaSqft === null) && <div className="billing-form-footer"><p className="form-hint">Area is requested once and is required for all blocks in this template.</p><button className="primary" type="button" onClick={() => void saveAreas()} disabled={savingAreas}>{savingAreas ? 'Saving areas…' : 'Save flat areas'}</button></div>}
         </section>}
@@ -1372,12 +1249,12 @@ function AdminBilling() {
                 const fields = periodInputs[unit.unitId] ?? { opening: '', closing: '', extraCharge: '0', description: '', excludedFromBilling: false }
                 const setFields = (changes: Partial<BillingInputForm>) => setPeriodInputs((current) => ({ ...current, [unit.unitId]: { ...fields, ...changes } }))
                 const unitRates = data.units.find((item) => item.id === unit.unitId)
-                return <tr key={unit.unitId}><td>{unit.building} · {unit.unit}</td><td>{unit.residentCount === 1 ? 'Occupied' : unit.residentCount === 0 ? 'Vacant' : 'Multiple residents'}</td><td><label className="billing-exclusion-toggle"><input type="checkbox" checked={!fields.excludedFromBilling} onChange={(event) => setFields({ excludedFromBilling: !event.target.checked })} /><span>{fields.excludedFromBilling ? 'Excluded' : 'Included'}</span></label></td><td>{formatMoney(unitRates?.maintenanceMinor || data.rules.maintenanceMinor, 'INR')}{!!unitRates?.maintenanceMinor && <small className="billing-unit-override">Block-specific</small>}</td><td>{formatMoney(data.rules.waterMinor, 'INR')}</td><td>{formatMoney(data.rules.sinkingFundMinor, 'INR')}</td><td><input aria-label={`Extra charge for ${unit.unit}`} type="number" min="0" step="1" value={fields.extraCharge} disabled={fields.excludedFromBilling} onChange={(event) => setFields({ extraCharge: integerInputValue(event.target.value) })} /></td><td><input aria-label={`Extra charge description for ${unit.unit}`} value={fields.description} disabled={fields.excludedFromBilling} onChange={(event) => setFields({ description: event.target.value })} maxLength={120} placeholder="Optional" /></td></tr>
+                return <tr key={unit.unitId}><td>{multipleBlocks ? `${unit.building} · ` : ''}{unit.unit}</td><td>{unit.residentCount === 1 ? 'Occupied' : unit.residentCount === 0 ? 'Vacant' : 'Multiple residents'}</td><td><label className="billing-exclusion-toggle"><input type="checkbox" checked={!fields.excludedFromBilling} onChange={(event) => setFields({ excludedFromBilling: !event.target.checked })} /><span>{fields.excludedFromBilling ? 'Excluded' : 'Included'}</span></label></td><td>{formatMoney(unitRates?.maintenanceMinor || data.rules.maintenanceMinor, 'INR')}{!!unitRates?.maintenanceMinor && <small className="billing-unit-override">Block-specific</small>}</td><td>{formatMoney(data.rules.waterMinor, 'INR')}</td><td>{formatMoney(data.rules.sinkingFundMinor, 'INR')}</td><td><input aria-label={`Extra charge for ${unit.unit}`} type="number" min="0" step="1" value={fields.extraCharge} disabled={fields.excludedFromBilling} onChange={(event) => setFields({ extraCharge: integerInputValue(event.target.value) })} /></td><td><input aria-label={`Extra charge description for ${unit.unit}`} value={fields.description} disabled={fields.excludedFromBilling} onChange={(event) => setFields({ description: event.target.value })} maxLength={120} placeholder="Optional" /></td></tr>
               })}</tbody></table>
                 {!billingInputs.data?.length && <p className="billing-empty">No flats are available for this billing period.</p>}</div>
               <span>Saved fixed charges are calculated for eligible occupied flats. Invoice eligibility is checked again during preview.</span>
             </div>}
-            {rulesForm.template === 'metered_water' && !billingInputs.loading && !billingInputs.error && <div className="table-scroll"><table className="data-table billing-input-table"><thead><tr><th>Building / flat</th><th>Occupancy</th><th>Include in billing</th><th>Opening reading · kL</th><th>Current reading · kL</th><th>Extra charge · ₹</th><th>Description</th><th>Total charge · ₹</th></tr></thead><tbody>{pageBillingInputs.map((unit) => {
+            {rulesForm.template === 'metered_water' && !billingInputs.loading && !billingInputs.error && <div className="table-scroll"><table className="data-table billing-input-table"><thead><tr><th>{multipleBlocks ? 'Building / flat' : 'Flat'}</th><th>Occupancy</th><th>Include in billing</th><th>Opening reading · kL</th><th>Current reading · kL</th><th>Extra charge · ₹</th><th>Description</th><th>Total charge · ₹</th></tr></thead><tbody>{pageBillingInputs.map((unit) => {
               const fields = periodInputs[unit.unitId] ?? { opening: '', closing: '', extraCharge: '0', description: '', excludedFromBilling: false }
               const setFields = (changes: Partial<BillingInputForm>) => {
                 setPeriodInputs((current) => ({ ...current, [unit.unitId]: { ...fields, ...changes } }))
@@ -1396,12 +1273,12 @@ function AdminBilling() {
               const totalChargeMinor = fields.excludedFromBilling
                 ? 0
                 : waterChargeMinor === null ? null : data.rules.maintenanceMinor + waterChargeMinor + Number(fields.extraCharge || 0) * 100
-              return <tr key={unit.unitId}><td>{unit.building} · {unit.unit}</td><td>{unit.residentCount === 1 ? 'Occupied' : unit.residentCount === 0 ? 'Vacant' : 'Multiple residents'}</td><td><label className="billing-exclusion-toggle"><input type="checkbox" checked={!fields.excludedFromBilling} onChange={(event) => setFields({ excludedFromBilling: !event.target.checked })} /><span>{fields.excludedFromBilling ? 'Excluded' : 'Included'}</span></label></td><td>{unit.hasPreviousMeterReading ? `${unit.openingMeterReading} kL · Prior` : <div><input aria-label={`Opening water meter reading for ${unit.unit}`} type="number" min="0" step="0.001" value={fields.opening} disabled={fields.excludedFromBilling} aria-invalid={Boolean(meterReadingErrors[unit.unitId]?.opening)} onChange={(event) => setFields({ opening: meterReadingInputValue(event.target.value) })} placeholder="First reading" />{meterReadingErrors[unit.unitId]?.opening && <small className="billing-field-error" role="alert">{meterReadingErrors[unit.unitId]?.opening}</small>}</div>}</td><td><div><input aria-label={`Current water meter reading for ${unit.unit}`} type="number" min={unit.hasPreviousMeterReading ? unit.openingMeterReading ?? 0 : 0} step="0.001" value={fields.closing} disabled={fields.excludedFromBilling} aria-invalid={Boolean(meterReadingErrors[unit.unitId]?.closing)} onWheel={(event) => event.currentTarget.blur()} onChange={(event) => setFields({ closing: meterReadingInputValue(event.target.value) })} />{meterReadingErrors[unit.unitId]?.closing && <small className="billing-field-error" role="alert">{meterReadingErrors[unit.unitId]?.closing}</small>}</div></td><td><input aria-label={`Extra charge for ${unit.unit}`} type="number" min="0" step="1" value={fields.extraCharge} disabled={fields.excludedFromBilling} onWheel={(event) => event.currentTarget.blur()} onChange={(event) => setFields({ extraCharge: integerInputValue(event.target.value) })} /></td><td><input aria-label={`Extra charge description for ${unit.unit}`} value={fields.description} disabled={fields.excludedFromBilling} onChange={(event) => setFields({ description: event.target.value })} maxLength={120} placeholder="Optional" /></td><td><output aria-label={`Total charge for ${unit.unit}`}>{totalChargeMinor === null ? '—' : formatMoney(totalChargeMinor, 'INR')}</output></td></tr>
+              return <tr key={unit.unitId}><td>{multipleBlocks ? `${unit.building} · ` : ''}{unit.unit}</td><td>{unit.residentCount === 1 ? 'Occupied' : unit.residentCount === 0 ? 'Vacant' : 'Multiple residents'}</td><td><label className="billing-exclusion-toggle"><input type="checkbox" checked={!fields.excludedFromBilling} onChange={(event) => setFields({ excludedFromBilling: !event.target.checked })} /><span>{fields.excludedFromBilling ? 'Excluded' : 'Included'}</span></label></td><td>{unit.hasPreviousMeterReading ? `${unit.openingMeterReading} kL · Prior` : <div><input aria-label={`Opening water meter reading for ${unit.unit}`} type="number" min="0" step="0.001" value={fields.opening} disabled={fields.excludedFromBilling} aria-invalid={Boolean(meterReadingErrors[unit.unitId]?.opening)} onChange={(event) => setFields({ opening: meterReadingInputValue(event.target.value) })} placeholder="First reading" />{meterReadingErrors[unit.unitId]?.opening && <small className="billing-field-error" role="alert">{meterReadingErrors[unit.unitId]?.opening}</small>}</div>}</td><td><div><input aria-label={`Current water meter reading for ${unit.unit}`} type="number" min={unit.hasPreviousMeterReading ? unit.openingMeterReading ?? 0 : 0} step="0.001" value={fields.closing} disabled={fields.excludedFromBilling} aria-invalid={Boolean(meterReadingErrors[unit.unitId]?.closing)} onWheel={(event) => event.currentTarget.blur()} onChange={(event) => setFields({ closing: meterReadingInputValue(event.target.value) })} />{meterReadingErrors[unit.unitId]?.closing && <small className="billing-field-error" role="alert">{meterReadingErrors[unit.unitId]?.closing}</small>}</div></td><td><input aria-label={`Extra charge for ${unit.unit}`} type="number" min="0" step="1" value={fields.extraCharge} disabled={fields.excludedFromBilling} onWheel={(event) => event.currentTarget.blur()} onChange={(event) => setFields({ extraCharge: integerInputValue(event.target.value) })} /></td><td><input aria-label={`Extra charge description for ${unit.unit}`} value={fields.description} disabled={fields.excludedFromBilling} onChange={(event) => setFields({ description: event.target.value })} maxLength={120} placeholder="Optional" /></td><td><output aria-label={`Total charge for ${unit.unit}`}>{totalChargeMinor === null ? '—' : formatMoney(totalChargeMinor, 'INR')}</output></td></tr>
             })}</tbody></table>{!billingInputs.data?.length && <p className="billing-empty">No flats are available for this billing period.</p>}</div>}
-            {rulesForm.template === 'area_based' && !billingInputs.loading && !billingInputs.error && <div className="table-scroll"><table className="data-table billing-input-table"><thead><tr><th>Building / flat</th><th>Occupancy</th><th>Include in billing</th><th>Area · sq. ft.</th><th>Maintenance calculation</th><th>Extra charge · ₹</th><th>Description</th></tr></thead><tbody>{pageBillingInputs.map((unit) => {
+            {rulesForm.template === 'area_based' && !billingInputs.loading && !billingInputs.error && <div className="table-scroll"><table className="data-table billing-input-table"><thead><tr><th>{multipleBlocks ? 'Building / flat' : 'Flat'}</th><th>Occupancy</th><th>Include in billing</th><th>Area · sq. ft.</th><th>Maintenance calculation</th><th>Extra charge · ₹</th><th>Description</th></tr></thead><tbody>{pageBillingInputs.map((unit) => {
               const fields = periodInputs[unit.unitId] ?? { opening: '', closing: '', extraCharge: '0', description: '', excludedFromBilling: false }
               const setFields = (changes: Partial<BillingInputForm>) => setPeriodInputs((current) => ({ ...current, [unit.unitId]: { ...fields, ...changes } }))
-              return <tr key={unit.unitId}><td>{unit.building} · {unit.unit}</td><td>{unit.residentCount === 1 ? 'Occupied' : unit.residentCount === 0 ? 'Vacant' : 'Multiple residents'}</td><td><label className="billing-exclusion-toggle"><input type="checkbox" checked={!fields.excludedFromBilling} onChange={(event) => setFields({ excludedFromBilling: !event.target.checked })} /><span>{fields.excludedFromBilling ? 'Excluded' : 'Included'}</span></label></td><td>{unit.areaSqft ? `${unit.areaSqft} sq. ft.` : 'Area required'}</td><td>{unit.areaSqft ? `${unit.areaSqft} × ₹${rulesForm.maintenanceRatePerSqft} / sq. ft.` : 'Set area first'}</td><td><input aria-label={`Extra charge for ${unit.unit}`} type="number" min="0" step="1" value={fields.extraCharge} disabled={fields.excludedFromBilling} onWheel={(event) => event.currentTarget.blur()} onChange={(event) => setFields({ extraCharge: integerInputValue(event.target.value) })} /></td><td><input aria-label={`Extra charge description for ${unit.unit}`} value={fields.description} disabled={fields.excludedFromBilling} onChange={(event) => setFields({ description: event.target.value })} maxLength={120} placeholder="Optional" /></td></tr>
+              return <tr key={unit.unitId}><td>{multipleBlocks ? `${unit.building} · ` : ''}{unit.unit}</td><td>{unit.residentCount === 1 ? 'Occupied' : unit.residentCount === 0 ? 'Vacant' : 'Multiple residents'}</td><td><label className="billing-exclusion-toggle"><input type="checkbox" checked={!fields.excludedFromBilling} onChange={(event) => setFields({ excludedFromBilling: !event.target.checked })} /><span>{fields.excludedFromBilling ? 'Excluded' : 'Included'}</span></label></td><td>{unit.areaSqft ? `${unit.areaSqft} sq. ft.` : 'Area required'}</td><td>{unit.areaSqft ? `${unit.areaSqft} × ₹${rulesForm.maintenanceRatePerSqft} / sq. ft.` : 'Set area first'}</td><td><input aria-label={`Extra charge for ${unit.unit}`} type="number" min="0" step="1" value={fields.extraCharge} disabled={fields.excludedFromBilling} onWheel={(event) => event.currentTarget.blur()} onChange={(event) => setFields({ extraCharge: integerInputValue(event.target.value) })} /></td><td><input aria-label={`Extra charge description for ${unit.unit}`} value={fields.description} disabled={fields.excludedFromBilling} onChange={(event) => setFields({ description: event.target.value })} maxLength={120} placeholder="Optional" /></td></tr>
             })}</tbody></table>{!billingInputs.data?.length && <p className="billing-empty">No flats are available for this billing period.</p>}</div>}
             {!billingInputs.loading && !billingInputs.error && (billingInputs.data?.length ?? 0) > billingInputPageSize && <footer className="collections-pagination"><span>Showing {currentBillingInputPage * billingInputPageSize + 1}–{Math.min((currentBillingInputPage + 1) * billingInputPageSize, billingInputs.data?.length ?? 0)} of {billingInputs.data?.length ?? 0} flats</span><div><button type="button" className="secondary" disabled={currentBillingInputPage === 0} onClick={() => setBillingInputPage((current) => Math.max(0, current - 1))}>Previous</button><span>Page {currentBillingInputPage + 1} of {billingInputPageCount}</span><button type="button" className="secondary" disabled={currentBillingInputPage >= billingInputPageCount - 1} onClick={() => setBillingInputPage((current) => Math.min(billingInputPageCount - 1, current + 1))}>Next</button></div></footer>}
             {inputsError && (periodInputsLocked
@@ -1417,7 +1294,7 @@ function AdminBilling() {
     <section className="card">
       <div className="billing-section-heading"><div><h3>Invoices</h3><p>Resident invoices, status, and charge breakdown.</p></div></div>
       {!loading && !error && !data?.invoices.length && <p className="billing-empty" role="status">No invoices have been created yet.</p>}
-      {data&&<BulkInvoiceCorrections invoices={data.invoices} onPosted={reload}/>}{correctionInvoice&&<section className="card section-stack"><button className="secondary" type="button" onClick={()=>setCorrectionInvoice(null)}>Close adjustments</button><InvoiceCorrections key={correctionInvoice} invoiceId={correctionInvoice} onPosted={reload}/></section>}{!!data?.invoices.length && <div className="table-scroll"><table className="data-table"><thead><tr><th>Invoice</th><th>Resident / block</th><th>Period / due date</th><th>Charges</th><th>Status</th><th>Total</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number}</strong><button className="text-action" type="button" onClick={()=>setCorrectionInvoice(invoice.id)}>Adjust charges / history</button></td><td>{invoice.resident}<small>Block {invoice.unit}</small></td><td>{invoice.billingPeriod}<small>Due {invoice.dueDate}</small></td><td>{invoice.items ?? '—'}</td><td><span className={`status-pill ${invoice.status === 'void' ? 'warning' : ''}`}>{invoice.status.replaceAll('_', ' ')}</span></td><td>{formatMoney(invoice.totalMinor, invoice.currency)}</td></tr>)}</tbody></table></div>}
+      {data&&<BulkInvoiceCorrections invoices={data.invoices} onPosted={reload}/>}{correctionInvoice&&<section className="card section-stack"><button className="secondary" type="button" onClick={()=>setCorrectionInvoice(null)}>Close adjustments</button><InvoiceCorrections key={correctionInvoice} invoiceId={correctionInvoice} onPosted={reload}/></section>}{!!data?.invoices.length && <div className="table-scroll"><table className="data-table"><thead><tr><th>Invoice</th><th>{multipleBlocks ? 'Resident / block / flat' : 'Resident / flat'}</th><th>Period / due date</th><th>Charges</th><th>Status</th><th>Total</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number}</strong><button className="text-action" type="button" onClick={()=>setCorrectionInvoice(invoice.id)}>Adjust charges / history</button></td><td>{invoice.resident}<small>{multipleBlocks ? `${invoice.building} · ` : ''}Flat {invoice.unit}</small></td><td>{invoice.billingPeriod}<small>Due {invoice.dueDate}</small></td><td>{invoice.items ?? '—'}</td><td><span className={`status-pill ${invoice.status === 'void' ? 'warning' : ''}`} data-status={invoice.status}>{invoice.status.replaceAll('_', ' ')}</span></td><td>{formatMoney(invoice.totalMinor, invoice.currency)}</td></tr>)}</tbody></table></div>}
     </section>
     {previewOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !publishing) setPreviewOpen(false) }}><section className="admin-modal card billing-preview-modal" role="dialog" aria-modal="true" aria-labelledby="billing-preview-title">
       <div className="admin-modal-header"><div><span className="eyebrow">BILLING RUN · PREVIEW</span><h2 id="billing-preview-title">Preview {billingPeriod}</h2><p>Review the invoice total and any blocks needing attention.</p></div><button className="modal-close" type="button" aria-label="Close preview" disabled={publishing} onClick={() => setPreviewOpen(false)}>×</button></div>
@@ -1509,7 +1386,7 @@ function AdminCollections() {
 
   return <section className="admin-collections" aria-busy={Boolean(confirmingId)}>
     <header className="collections-page-heading">
-      <div><span className="eyebrow">PAYMENTS & SETTLEMENTS</span><h2 ref={heading} tabIndex={-1}>Collections</h2><p>Review resident payments and confirm offline amounts received.</p></div>
+      <div><h1 ref={heading} tabIndex={-1}>Collections</h1><p>Review resident payments and confirm offline amounts received.</p></div>
       <button type="button" className="secondary" onClick={reload} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh records'}</button>
     </header>
     {actionMessage && <p className="payment-feedback success" role="status">{actionMessage}</p>}
@@ -1538,7 +1415,7 @@ function AdminCollections() {
             <td><strong className="collections-amount">{formatMoney(payment.amountMinor, payment.currency)}</strong></td>
             <td><span className="collections-date">{new Date(payment.createdAt).toLocaleDateString('en-IN', { timeZone:'Asia/Kolkata',day: 'numeric', month: 'short', year: 'numeric' })}</span><small className="collections-time">{new Date(payment.createdAt).toLocaleTimeString('en-IN', { timeZone:'Asia/Kolkata',hour: 'numeric', minute: '2-digit' })}</small></td>
             <td><span className="collections-method">{payment.method === 'offline_manual' ? 'Manual / offline' : payment.method.replaceAll('_', ' ')}</span></td>
-            <td><span className={`collections-status ${statusTone}`}><i />{status === 'confirmed' ? 'Confirmed' : status.replaceAll('_', ' ')}</span></td>
+            <td><span className={`collections-status ${statusTone}`} data-status={status}><i />{status === 'confirmed' ? 'Confirmed' : status.replaceAll('_', ' ')}</span></td>
             <td>{payment.canConfirm
               ? <button className="collections-confirm" type="button" disabled={confirmingId !== null} onClick={() => { remember(); setActionError(null); setReviewPayment(payment) }}>{confirmingId === payment.id ? 'Confirming…' : 'Confirm payment'}</button>
               : payment.confirmedAt
