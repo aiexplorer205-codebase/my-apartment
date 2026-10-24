@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, type ReactNode } from 'react'
-import { getAppConfig } from '@nivasa/app-platform'
+import { getAppConfig } from '@block9/app-platform'
 export function PublicationReview({title,timeZone,startsAt,endsAt,busy,error,children,onConfirm,onBack}:{title:string;timeZone:string;startsAt:string;endsAt:string;busy:boolean;error:string|null;children:ReactNode;onConfirm:()=>void;onBack:()=>void}){
   const heading=useRef<globalThis.HTMLHeadingElement>(null),errorPanel=useRef<globalThis.HTMLParagraphElement>(null)
   const format=(value:string)=>new Date(value).toLocaleString('en-IN',{timeZone,dateStyle:'full',timeStyle:'short'})

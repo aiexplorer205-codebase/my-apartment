@@ -358,8 +358,8 @@ const demoAccounts: Record<Role, {
   },
   operator: {
     label: "System operator",
-    email: "kavya@nivasa.in",
-    context: "Nivasa platform operations",
+    email: "operator@example.test",
+    context: "MyApartment platform operations",
     icon: "shield",
   },
 }
@@ -455,7 +455,7 @@ function SignInScreen({
               </span>
               <input
                 type="password"
-                defaultValue="nivasa-demo"
+                defaultValue="myapartment-demo"
                 autoComplete="current-password"
               />
             </label>
@@ -468,7 +468,7 @@ function SignInScreen({
         </div>
       </div>
       <div className="auth-footer">
-        <span>© 2025 Nivasa Technologies</span>
+        <span>© 2025 BLOCK9</span>
         <span>Privacy · Terms · Help</span>
       </div>
     </div>
@@ -2463,7 +2463,7 @@ function OperatorOverview({ setPage }: { setPage: (p: string) => void }) {
     <>
       <PageTitle
         title="Platform overview"
-        subtitle="Operational and revenue health across Nivasa."
+        subtitle="Operational and revenue health across MyApartment."
         actions={
           <>
             <Badge tone="success">All systems operational</Badge>

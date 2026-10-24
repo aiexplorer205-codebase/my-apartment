@@ -5,8 +5,8 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import type { ReactNode } from 'react'
 import { useApiQuery } from './use-api'
-import type { TenantMembership } from '@nivasa/auth-types'
-import { getAppConfig, getFormattedCopyright } from '@nivasa/app-platform'
+import type { TenantMembership } from '@block9/auth-types'
+import { getAppConfig, getFormattedCopyright } from '@block9/app-platform'
 
 
 export function AuthBoundary({ children }: { children: ReactNode }) {

@@ -12,9 +12,9 @@ Usage:
   scripts/run-migrations.sh tenant all-tenants MIGRATION.sql [MIGRATION.sql ...]
 
 Examples:
-  scripts/run-migrations.sh platform platform_db 009_per_block_flat_allowances.sql
+  scripts/run-migrations.sh platform myapartment_platform_db 009_per_block_flat_allowances.sql
   scripts/run-migrations.sh tenant all-tenants 014_polls.sql
-  scripts/run-migrations.sh tenant tenant_local 014_polls.sql
+  scripts/run-migrations.sh tenant myapartment_tenant_local 014_polls.sql
 USAGE
 }
 
@@ -31,7 +31,7 @@ case "$kind" in
   platform|tenant) ;;
   *) echo "Migration group must be 'platform' or 'tenant'." >&2; usage >&2; exit 2 ;;
 esac
-migration_dir="${kind}_db"
+migration_dir="myapartment_${kind}_db"
 
 if [[ "$target" != all-tenants && ! "$target" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,62}$ ]]; then
   echo "Database name contains unsupported characters." >&2
@@ -57,10 +57,10 @@ apply_migrations() {
 }
 
 if [[ "$kind" == tenant && "$target" == all-tenants ]]; then
-  apply_migrations tenant_template
+  apply_migrations myapartment_tenant_template
   while IFS= read -r database; do
     [[ -n "$database" ]] && apply_migrations "$database"
-  done < <(docker compose exec -T postgres psql -U postgres -d platform_db -At \
+  done < <(docker compose exec -T postgres psql -U postgres -d myapartment_platform_db -At \
     -v ON_ERROR_STOP=1 -c "SELECT database_name FROM tenant_records WHERE database_name IS NOT NULL ORDER BY database_name")
 else
   if [[ "$target" == all-tenants ]]; then

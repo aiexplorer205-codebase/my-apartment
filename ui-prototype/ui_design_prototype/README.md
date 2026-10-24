@@ -13,8 +13,8 @@ Keep the screen IDs in generated designs so implementation can be traced back to
 ## Confirmed direction and remaining assumptions
 
 - Confirmed: launch designs cover implemented features, complaints, admin ledgers, and important accounts/maintenance workflows. New modules are specified in RELEASE-ADDITIONS.md and need implementation.
-- Confirmed: use ChatGPT with Product Design; let the design tool propose visual directions. Final branding will be supplied later.
-- **MyApartment by Block5** and green `#174c43` are current configuration evidence only, not a locked visual direction. Repository/package references to Nivasa are internal naming, not a second user-facing brand.
+- Confirmed: use ChatGPT with Product Design; let the design tool propose visual directions.
+- **MyApartment by BLOCK9** is the configured product identity. Green `#174c43` is current configuration evidence, not a locked visual direction. Internal dependency names remain unchanged and are not user-facing branding.
 - English and Telugu are the initial design languages because both are configured today. Translation completeness and typography still need verification.
 - Resident usage is primarily on phones; admin usage spans phones and desktop. These are design assumptions, not findings from user research.
 - Separate Resident and Apartment Admin installable experiences, consistent with the existing app split.

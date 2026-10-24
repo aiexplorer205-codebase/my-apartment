@@ -8,6 +8,6 @@ export const auth0 = new Auth0Client({
   session: {
     absoluteDuration: 60 * 60 * 8,
     inactivityDuration: 60 * 60 * 4,
-    cookie: { name: 'nivasa-admin-session', sameSite: 'lax' },
+    cookie: { name: 'myapartment-admin-session', sameSite: 'lax' },
   },
 })

@@ -1,7 +1,7 @@
 export type AppEnvironment = 'development' | 'test' | 'staging' | 'production'
 
 const VALID_ENVIRONMENTS = new Set<AppEnvironment>(['development', 'test', 'staging', 'production'])
-const PLACEHOLDER_VALUES = new Set(['placeholder', 'replace', 'replace-with-resend-key', 'example.auth0.com', 'https://api.nivasa.local'])
+const PLACEHOLDER_VALUES = new Set(['placeholder', 'replace', 'replace-with-resend-key', 'example.auth0.com', 'https://api.myapartment.local'])
 
 export interface PlatformConfig {
   env: AppEnvironment
@@ -33,7 +33,7 @@ export const loadPlatformConfig = (env: NodeJS.ProcessEnv): PlatformConfig => {
     nodeEnv: env.NODE_ENV ?? 'development',
     auth0Domain: env.AUTH0_DOMAIN ?? 'example.auth0.com',
     auth0Issuer: env.AUTH0_ISSUER ?? `https://${env.AUTH0_DOMAIN ?? 'example.auth0.com'}/`,
-    auth0Audience: env.AUTH0_AUDIENCE ?? 'https://api.nivasa.local',
+    auth0Audience: env.AUTH0_AUDIENCE ?? 'https://api.myapartment.local',
     auth0OtpEnabled: env.AUTH0_OTP_ENABLED === 'true',
     resendApiKey: env.RESEND_API_KEY ?? 'placeholder',
     retryLimit: Number(env.QUEUE_RETRY_LIMIT ?? 3),

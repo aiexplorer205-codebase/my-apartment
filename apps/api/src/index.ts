@@ -23,8 +23,8 @@ import { pathToFileURL } from 'node:url'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import type { PoolClient } from 'pg'
 
-import type { HealthResponse, ApiErrorResponse, OpenApiBootstrap } from '@nivasa/contracts'
-import { AuthorizationError, ValidationError } from '@nivasa/shared'
+import type { HealthResponse, ApiErrorResponse, OpenApiBootstrap } from '@block9/contracts'
+import { AuthorizationError, ValidationError } from '@block9/shared'
 import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from './billing-calculations.js'
 import { createAdminInvitationToken, hashAdminInvitationToken, sendAdminInvitationEmail } from './admin-invitations.js'
 import { createResidentInvitationToken, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
@@ -488,8 +488,8 @@ export const createRequestId = (prefix = 'req'): string => `${prefix}_${randomUU
 
 export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
   openapi: '3.1.0',
-  info: { title: 'Nivasa API', version: '0.1.0' },
-  servers: [{ url: '/', description: 'Nivasa API' }],
+  info: { title: 'MyApartment API', version: '0.1.0' },
+  servers: [{ url: '/', description: 'MyApartment API' }],
   tags: [
     { name: 'health', description: 'Liveness and readiness checks' },
     { name: 'tenant', description: 'Tenant-scoped authenticated endpoints' },
@@ -1503,7 +1503,7 @@ const requireResidentInvitationSchema = async (access: TenantAccess): Promise<vo
        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'residents' AND column_name = 'move_out_date')
        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'resident_invitations' AND column_name = 'start_date') AS ready`,
   )
-  if (!result.rows[0]?.ready) throw new ApiFault(503, 'dependency_unavailable', 'Resident lifecycle support is not installed for this tenant database. Apply migrations/tenant_db/010_resident_lifecycle.sql, then retry.')
+  if (!result.rows[0]?.ready) throw new ApiFault(503, 'dependency_unavailable', 'Resident lifecycle support is not installed for this tenant database. Apply migrations/myapartment_tenant_db/010_resident_lifecycle.sql, then retry.')
 }
 
 const getAdminResidentInvitations = async (access: TenantAccess) => {
@@ -1994,7 +1994,7 @@ const requireApartmentSchema = async (access: TenantAccess): Promise<void> => {
        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'apartment_buildings' AND column_name = 'allowance_slot') AS ready`,
   )
   if (!result.rows[0]?.ready) {
-    throw new ApiFault(503, 'dependency_unavailable', 'Apartment setup is not up to date for this tenant database. Apply the tenant database migrations, including migrations/tenant_db/031_property_setup_deletion.sql, then retry.')
+    throw new ApiFault(503, 'dependency_unavailable', 'Apartment setup is not up to date for this tenant database. Apply the tenant database migrations, including migrations/myapartment_tenant_db/031_property_setup_deletion.sql, then retry.')
   }
 }
 
@@ -3184,7 +3184,7 @@ const createOrganizationOnboarding = async (request: IncomingMessage, requestId:
   const input = parseOrganizationOnboardingInput(await readJsonBody(request))
   const id = randomUUID()
   const tenantId = id
-  const databaseName = `tenant_${id.replaceAll('-', '')}`
+  const databaseName = `myapartment_tenant_${id.replaceAll('-', '')}`
   const slugBase = input.name
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -3710,11 +3710,11 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         }))
       }
       const dependencyMessage = tenantSchemaUnavailable && billingSchemaRequest
-        ? 'The selected tenant database is missing billing schema. Apply the required migrations/tenant_db/005_billing_runs.sql through migrations/tenant_db/009_billing_unit_exclusions.sql, then retry.'
+        ? 'The selected tenant database is missing billing schema. Apply the required migrations/myapartment_tenant_db/005_billing_runs.sql through migrations/myapartment_tenant_db/009_billing_unit_exclusions.sql, then retry.'
         : tenantSchemaUnavailable && apartmentSchemaRequest
-          ? 'The selected tenant database is missing apartment or resident-lifecycle schema. Apply migrations/tenant_db/003_apartments.sql, migrations/tenant_db/004_resident_invitations.sql, migrations/tenant_db/010_resident_lifecycle.sql, and migrations/tenant_db/030_bulk_resident_imports.sql to that tenant database, then rebuild and restart the API.'
+          ? 'The selected tenant database is missing apartment or resident-lifecycle schema. Apply migrations/myapartment_tenant_db/003_apartments.sql, migrations/myapartment_tenant_db/004_resident_invitations.sql, migrations/myapartment_tenant_db/010_resident_lifecycle.sql, and migrations/myapartment_tenant_db/030_bulk_resident_imports.sql to that tenant database, then rebuild and restart the API.'
           : tenantDatabaseMissing
-          ? 'The selected tenant database does not exist. Check the tenant database_name in platform_db and complete tenant provisioning.'
+          ? 'The selected tenant database does not exist. Check the tenant database_name in myapartment_platform_db and complete tenant provisioning.'
           : 'A required data service is unavailable'
       const body = apiFault
         ? { error: apiFault.code, message: apiFault.message, requestId }

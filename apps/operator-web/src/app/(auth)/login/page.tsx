@@ -3,8 +3,8 @@
 import { useAuth0 } from '../../auth-provider'
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button } from '@nivasa/ui'
-import { getAppConfig } from '@nivasa/app-platform'
+import { Button } from '@block9/ui'
+import { getAppConfig } from '@block9/app-platform'
 
 export default function OperatorLoginPage() {
   const { isAuthenticated, isLoading, loginWithRedirect } = useAuth0()

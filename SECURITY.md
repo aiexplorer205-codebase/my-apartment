@@ -1,6 +1,6 @@
 # Security policy
 
-Nivasa is under active development. There are no production-supported releases.
+MyApartment by BLOCK9 is under active development. There are no production-supported releases.
 
 ## Reporting a vulnerability
 

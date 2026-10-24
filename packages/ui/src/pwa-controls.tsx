@@ -8,7 +8,7 @@ type InstallPrompt = globalThis.Event & {
 }
 
 /** Network-only private app: never caches authenticated pages or queues writes. */
-export function PwaControls({ appName = 'Nivasa' }: { appName?: string }) {
+export function PwaControls({ appName = 'MyApartment' }: { appName?: string }) {
   const controls=useRef<globalThis.HTMLDetailsElement>(null)
   const [online, setOnline] = useState(true)
   const [reconnected, setReconnected] = useState(false)
@@ -38,7 +38,7 @@ export function PwaControls({ appName = 'Nivasa' }: { appName?: string }) {
       candidate?.addEventListener('statechange', stateChanged)
     }
     const openInstall=()=>{if(controls.current){controls.current.open=true;controls.current.scrollIntoView({block:'start'});controls.current.querySelector('summary')?.focus()}}
-    window.addEventListener('nivasa:open-install',openInstall)
+    window.addEventListener('myapartment:open-install',openInstall)
     window.addEventListener('offline', offline)
     window.addEventListener('online', connected)
     window.addEventListener('beforeinstallprompt', prompt)
@@ -54,7 +54,7 @@ export function PwaControls({ appName = 'Nivasa' }: { appName?: string }) {
     }
     return () => {
       disposed = true
-      window.removeEventListener('nivasa:open-install',openInstall)
+      window.removeEventListener('myapartment:open-install',openInstall)
       window.removeEventListener('offline', offline)
       window.removeEventListener('online', connected)
       window.removeEventListener('beforeinstallprompt', prompt)

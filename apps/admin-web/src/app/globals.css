@@ -1,5 +1,5 @@
-@import '@nivasa/design-tokens/tokens.css';
-@import '@nivasa/design-tokens/prototype.css';
+@import '@block9/design-tokens/tokens.css';
+@import '@block9/design-tokens/prototype.css';
 
 :root {
   --bg: #f4f7fb;
@@ -1414,7 +1414,7 @@ body { max-width: 100%; overflow-x: clip; }
 body { font-family: var(--font); background: var(--canvas); color: var(--ink); font-size: 16px; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 button, input, select, textarea { font: inherit; }
-.primary, .admin-shell .primary, .nivasa-button-primary { background: var(--brand); color: white; min-height: 44px; }
+.primary, .admin-shell .primary, .myapartment-button-primary { background: var(--brand); color: white; min-height: 44px; }
 .secondary, .admin-shell .secondary { min-height: 44px; }
 .dashboard-shell.admin-shell, .dashboard-shell.resident-shell { background: var(--canvas); }
 .admin-shell .card, .resident-shell .card { border-color: var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }

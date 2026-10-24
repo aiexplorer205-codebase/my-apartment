@@ -1,5 +1,5 @@
 {
-  "name": "@nivasa/worker",
+  "name": "@block9/worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,9 +14,9 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@nivasa/application": "workspace:*",
-    "@nivasa/config": "workspace:*",
-    "@nivasa/shared": "workspace:*"
+    "@block9/application": "workspace:*",
+    "@block9/config": "workspace:*",
+    "@block9/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

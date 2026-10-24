@@ -1,0 +1,30 @@
+CREATE SCHEMA IF NOT EXISTS block9_tenant;
+SET search_path TO block9_tenant, public;
+CREATE TABLE IF NOT EXISTS organizations (
+  id UUID PRIMARY KEY,
+  tenant_id TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  locale TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  timezone TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS units (
+  id UUID PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  number TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS notices (
+  id UUID PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -1,8 +1,8 @@
 import './globals.css'
 import type { ReactNode } from 'react'
 import { OperatorAuthProvider } from './auth-provider'
-import { getAppConfig } from '@nivasa/app-platform'
-import { AppMessagesProvider } from '@nivasa/ui'
+import { getAppConfig } from '@block9/app-platform'
+import { AppMessagesProvider } from '@block9/ui'
 
 const config = getAppConfig()
 

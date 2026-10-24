@@ -6,7 +6,7 @@ import { ReconciliationWorkspace } from './reconciliation'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { LoadState } from '../../lib/auth-ui'
 import { useApiPost, useApiQuery } from '../../lib/use-api'
-import { WorkspaceBreadcrumb } from '@nivasa/ui'
+import { WorkspaceBreadcrumb } from '@block9/ui'
 
 type Entry = { id:string; entryType:string; account:'Cash'|'Bank'; date:string; amountMinor:number; category:string; party:string; description:string; status:'draft'|'posted'; version:number; reportId:string|null; reversesId:string|null; replacesId:string|null; reversedBy:string|null; replacedBy:string|null; reason:string|null; createdBy:string; createdAt:string; maintenanceTaskId:string|null; complaintId:string|null; openingBatchId:string|null }
 type Account = { account:string; reconciliationStatus:string; openingMinor:number; receiptsMinor:number; incomeMinor:number; expensesMinor:number; refundsMinor:number; closingMinor:number }

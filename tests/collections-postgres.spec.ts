@@ -13,20 +13,20 @@ import { confirmPaymentReport, financialOverview, listPaymentReports, settleForm
 
 // Opt in only: creates its own disposable database on the isolated schema-check
 // container. Never runs against an application tenant or the template itself.
-const enabled = process.env.NIVASA_DATABASE_TESTS === '1'
+const enabled = process.env.MYAPARTMENT_DATABASE_TESTS === '1'
 describe.skipIf(!enabled)('PostgreSQL collection and account invariants', () => {
-  const database = `nivasa_collections_test_${randomUUID().replaceAll('-','')}`
+  const database = `myapartment_collections_test_${randomUUID().replaceAll('-','')}`
   let control: ReturnType<typeof getTenantPool>
   let pool: ReturnType<typeof getTenantPool>
   let previousUrl: string | undefined
   beforeAll(async () => {
     previousUrl = process.env.POSTGRES_TENANT_URL
-    const password = execFileSync('docker',['compose','-p','nivasa-schema-check','exec','-T','postgres','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
+    const password = execFileSync('docker',['compose','-p','myapartment-schema-check','exec','-T','postgres','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
     const connection = new URL('postgresql://postgres@127.0.0.1:55434/postgres')
     connection.password = password
     process.env.POSTGRES_TENANT_URL = connection.toString()
     control=getTenantPool('postgres')
-    await control.query(`CREATE DATABASE "${database}" TEMPLATE tenant_template`)
+    await control.query(`CREATE DATABASE "${database}" TEMPLATE myapartment_tenant_template`)
     pool=getTenantPool(database)
   },15000)
   afterAll(async () => {

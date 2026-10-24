@@ -27,7 +27,7 @@ export function BrandLogo({
       alt={altText}
       width={size}
       height={size}
-      className={`nivasa-brand-logo ${className}`.trim()}
+      className={`myapartment-brand-logo ${className}`.trim()}
       style={{ display: 'inline-block', verticalAlign: 'middle' }}
     />
   )

@@ -62,7 +62,7 @@ describe('foundation security and tenant resolution', () => {
   })
 
   it('provisions tenant database idempotently and safely', () => {
-    expect(provisionTenantDatabase('tenant-123', 'ready')).toMatchObject({ status: 'created', databaseLocator: 'tenant_tenant-123' })
+    expect(provisionTenantDatabase('tenant-123', 'ready')).toMatchObject({ status: 'created', databaseLocator: 'myapartment_tenant_tenant-123' })
     expect(() => provisionTenantDatabase('tenant_conflict', 'init')).toThrowError(/already exists/)
   })
 

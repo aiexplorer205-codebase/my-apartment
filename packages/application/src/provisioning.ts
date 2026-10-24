@@ -1,4 +1,4 @@
-import { ConflictError, ValidationError } from '@nivasa/shared'
+import { ConflictError, ValidationError } from '@block9/shared'
 
 export interface ProvisioningJobResult {
   tenantId: string
@@ -25,7 +25,7 @@ export const provisionTenantDatabase = (tenantId: string, phase: 'init' | 'migra
     return {
       tenantId,
       status: 'created',
-      databaseLocator: `tenant_${tenantId}`,
+      databaseLocator: `myapartment_tenant_${tenantId}`,
     }
   }
 
@@ -33,7 +33,7 @@ export const provisionTenantDatabase = (tenantId: string, phase: 'init' | 'migra
     return {
       tenantId,
       status: 'created',
-      databaseLocator: `tenant_${tenantId}`,
+      databaseLocator: `myapartment_tenant_${tenantId}`,
     }
   }
 
@@ -44,6 +44,6 @@ export const provisionTenantDatabase = (tenantId: string, phase: 'init' | 'migra
   return {
     tenantId,
     status: 'created',
-    databaseLocator: `tenant_${tenantId}`,
+    databaseLocator: `myapartment_tenant_${tenantId}`,
   }
 }

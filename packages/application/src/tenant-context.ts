@@ -1,6 +1,6 @@
-import type { TenantContext, TenantMembership, TenantEntitlement, TenantState } from '@nivasa/domain'
-import { roleCatalog } from '@nivasa/domain'
-import { AuthorizationError, ValidationError } from '@nivasa/shared'
+import type { TenantContext, TenantMembership, TenantEntitlement, TenantState } from '@block9/domain'
+import { roleCatalog } from '@block9/domain'
+import { AuthorizationError, ValidationError } from '@block9/shared'
 
 export interface TenantContextResolverInput {
   subject: string

@@ -11,9 +11,9 @@ import type {
   ResidentHomeSummary,
   ResidentNotice,
   TenantBranding,
-} from '@nivasa/domain'
-import type { TenantContext } from '@nivasa/domain'
-import { AuthorizationError } from '@nivasa/shared'
+} from '@block9/domain'
+import type { TenantContext } from '@block9/domain'
+import { AuthorizationError } from '@block9/shared'
 
 const featureToPermission: Record<string, string> = {
   'resident.home': 'tenant.read',

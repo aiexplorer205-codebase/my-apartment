@@ -12,7 +12,7 @@ Read all three attached specifications before proposing screens:
 2. RELEASE-ADDITIONS.md: requested new complaints, ledgers, accounts and maintenance features.
 3. RESPONSIVE-PWA-REQUIREMENTS.md: adaptive layouts, installation, connection states, accessibility and localization.
 
-The existing configured name is MyApartment by Block5. Final branding will come later. Please suggest the visual identity; do not lock yourself to existing colors. Keep logo, name, accent colors and typography replaceable through tokens.
+The configured product identity is MyApartment by BLOCK9. Please suggest a visual identity without locking the design to existing colors. Keep logo, accent colors and typography replaceable through tokens.
 
 Audience: residents with mixed digital confidence, primarily on Android/iPhone, and apartment administrators doing operational and financial work on both phones and desktops. Initial release is a browser/home-screen PWA; a later native app should retain familiar navigation and component patterns. English and Telugu are provisional launch languages.
 

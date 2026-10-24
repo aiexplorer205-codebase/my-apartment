@@ -1,7 +1,7 @@
 :root {
-  --nivasa-focus-ring: 0 0 0 3px rgba(29, 78, 216, 0.28);
-  --nivasa-radius-control: 10px;
-  --nivasa-font-sans: Inter, 'Segoe UI', Arial, sans-serif;
+  --myapartment-focus-ring: 0 0 0 3px rgba(29, 78, 216, 0.28);
+  --myapartment-radius-control: 10px;
+  --myapartment-font-sans: Inter, 'Segoe UI', Arial, sans-serif;
 }
 
 :focus-visible {
@@ -9,14 +9,14 @@
   outline-offset: 2px;
 }
 
-.nivasa-button {
+.myapartment-button {
   min-height: 42px;
   padding: 10px 16px;
-  border-radius: var(--nivasa-radius-control);
+  border-radius: var(--myapartment-radius-control);
   font: inherit;
   font-weight: 650;
   cursor: pointer;
 }
-.nivasa-button-primary { color: #fff; background: #1d4ed8; }
-.nivasa-button-secondary { color: #1f2937; background: #edf3ff; }
-.nivasa-button-quiet { color: #1d4ed8; background: transparent; }
+.myapartment-button-primary { color: #fff; background: #1d4ed8; }
+.myapartment-button-secondary { color: #1f2937; background: #edf3ff; }
+.myapartment-button-quiet { color: #1d4ed8; background: transparent; }

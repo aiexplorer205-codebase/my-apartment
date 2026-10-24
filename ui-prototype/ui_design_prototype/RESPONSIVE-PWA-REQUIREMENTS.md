@@ -4,9 +4,9 @@ Apply to existing workflows and the proposed additions in RELEASE-ADDITIONS.md. 
 
 ## Visual exploration and system
 
-The user wants the design AI to suggest the visual direction; branding will be updated later. Explore exactly three coherent alternatives on the same representative screens: resident Home, admin Overview, and one complaint or ledger screen. Suggested exploration territories are warm community, precise professional, and friendly minimal; the tool may propose better names/directions. Vary typography, density, color, shape and hierarchy, not just accent color. Compare readability, financial clarity, phone usability, and admin productivity before choosing.
+The user wants the design AI to suggest the visual direction. Explore exactly three coherent alternatives on the same representative screens: resident Home, admin Overview, and one complaint or ledger screen. Suggested exploration territories are warm community, precise professional, and friendly minimal; the tool may propose better names/directions. Vary typography, density, color, shape and hierarchy, not just accent color. Compare readability, financial clarity, phone usability, and admin productivity before choosing.
 
-Use the provisional product name MyApartment by Block5. Current configured green `#174c43` is an option, not a constraint. Keep wordmark/icon/color/font tokens replaceable. Avoid stock apartment photographs dominating operational screens, excessive gradients, low-contrast glass panels, or decorative charts without data.
+Use the product name MyApartment and company name BLOCK9. Current configured green `#174c43` is an option, not a constraint. Keep wordmark/icon/color/font tokens replaceable. Avoid stock apartment photographs dominating operational screens, excessive gradients, low-contrast glass panels, or decorative charts without data.
 
 After selection deliver semantic color tokens (brand, canvas, surface, text, border, focus, success, warning, danger, info), typography, spacing, radius, elevation, icons and interaction states. Suggested starting sizes: 16px body, 14px secondary text, 24–32px page headings, 4/8px spacing rhythm, 44–48px primary controls. Final choices must pass contrast checks. Use tabular numerals for money and aligned decimal/currency formatting.
 

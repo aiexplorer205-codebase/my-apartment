@@ -7,14 +7,14 @@ const root = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
   resolve: {
     alias: {
-      '@nivasa/shared': path.resolve(root, 'packages/shared/src/index.ts'),
-      '@nivasa/config': path.resolve(root, 'packages/config/src/index.ts'),
-      '@nivasa/domain': path.resolve(root, 'packages/domain/src/index.ts'),
-      '@nivasa/application': path.resolve(root, 'packages/application/src/index.ts'),
-      '@nivasa/contracts': path.resolve(root, 'packages/contracts/src/index.ts'),
-      '@nivasa/app-platform': path.resolve(root, 'packages/app-platform/src/index.ts'),
-      '@nivasa/ports': path.resolve(root, 'infrastructure/ports/src/index.ts'),
-      '@nivasa/adapters': path.resolve(root, 'infrastructure/adapters/src/index.ts'),
+      '@block9/shared': path.resolve(root, 'packages/shared/src/index.ts'),
+      '@block9/config': path.resolve(root, 'packages/config/src/index.ts'),
+      '@block9/domain': path.resolve(root, 'packages/domain/src/index.ts'),
+      '@block9/application': path.resolve(root, 'packages/application/src/index.ts'),
+      '@block9/contracts': path.resolve(root, 'packages/contracts/src/index.ts'),
+      '@block9/app-platform': path.resolve(root, 'packages/app-platform/src/index.ts'),
+      '@block9/ports': path.resolve(root, 'infrastructure/ports/src/index.ts'),
+      '@block9/adapters': path.resolve(root, 'infrastructure/adapters/src/index.ts'),
     },
   },
   test: {

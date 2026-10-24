@@ -1,5 +1,5 @@
-import type { TenantContext } from '@nivasa/domain'
-import { AuthorizationError } from '@nivasa/shared'
+import type { TenantContext } from '@block9/domain'
+import { AuthorizationError } from '@block9/shared'
 
 export const requireTenantContext = (context: TenantContext | undefined): TenantContext => {
   if (!context) {

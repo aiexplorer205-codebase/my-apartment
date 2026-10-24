@@ -1,7 +1,7 @@
 'use client'
 
 import { useAuth0 } from '../app/auth-provider'
-import { apiFetch } from '@nivasa/api-client'
+import { apiFetch } from '@block9/api-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 

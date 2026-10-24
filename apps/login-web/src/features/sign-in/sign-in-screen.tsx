@@ -1,4 +1,4 @@
-import { getAppConfig, getFormattedCopyright } from '@nivasa/app-platform'
+import { getAppConfig, getFormattedCopyright } from '@block9/app-platform'
 
 type SignInScreenProps = {
   residentSignInUrl: string

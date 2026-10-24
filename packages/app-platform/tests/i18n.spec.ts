@@ -37,7 +37,7 @@ describe('i18n Localization', () => {
 
   it('interpolates variables correctly in en and te', () => {
     const i18nEn = createI18nInstance('en', ['common'])
-    expect(i18nEn.t('messages.welcome', { ns: 'common', productName: 'Nivasa' })).toBe('Welcome to Nivasa')
+    expect(i18nEn.t('messages.welcome', { ns: 'common', productName: 'MyApartment' })).toBe('Welcome to MyApartment')
 
     const i18nTe = createI18nInstance('te', ['common'])
     expect(i18nTe.t('messages.welcome', { ns: 'common', productName: 'నివాస' })).toBe('నివాస కి స్వాగతం')
@@ -79,4 +79,3 @@ describe('i18n Localization', () => {
     expect(tTe('actions.save', { ns: 'common' })).toBe('భద్రపరచు')
   })
 })
-

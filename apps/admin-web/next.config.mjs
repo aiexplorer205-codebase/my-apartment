@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
-  transpilePackages: ['@nivasa/app-platform'],
+  transpilePackages: ['@block9/app-platform'],
 };
 
 export default nextConfig;

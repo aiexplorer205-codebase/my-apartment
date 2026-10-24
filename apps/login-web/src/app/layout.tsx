@@ -1,6 +1,6 @@
 import './globals.css'
 import type { ReactNode } from 'react'
-import { getAppConfig } from '@nivasa/app-platform'
+import { getAppConfig } from '@block9/app-platform'
 
 const config = getAppConfig()
 

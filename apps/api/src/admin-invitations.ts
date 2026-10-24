@@ -34,9 +34,9 @@ export const sendAdminInvitationEmail = async (input: {
     body: JSON.stringify({
       from,
       to: [input.email],
-      subject: `You're invited to manage ${input.organizationName} on Nivasa`,
-      html: `<p>You have been invited to administer <strong>${escapeHtml(input.organizationName)}</strong> on Nivasa.</p><p>Sign in securely using an email one-time passcode sent to this email address. No username or password is needed.</p><p><a href="${escapeHtml(input.invitationUrl)}">Accept administrator invitation</a></p><p>This link expires in 7 days and can only be accepted by signing in with the invited email address.</p>`,
-      text: `You have been invited to administer ${input.organizationName} on Nivasa.\n\nAccept the invitation: ${input.invitationUrl}\n\nSign in using an email one-time passcode sent to this email address. No username or password is needed. The link expires in 7 days.`,
+      subject: `You're invited to manage ${input.organizationName} on MyApartment`,
+      html: `<p>You have been invited to administer <strong>${escapeHtml(input.organizationName)}</strong> on MyApartment.</p><p>Sign in securely using an email one-time passcode sent to this email address. No username or password is needed.</p><p><a href="${escapeHtml(input.invitationUrl)}">Accept administrator invitation</a></p><p>This link expires in 7 days and can only be accepted by signing in with the invited email address.</p>`,
+      text: `You have been invited to administer ${input.organizationName} on MyApartment.\n\nAccept the invitation: ${input.invitationUrl}\n\nSign in using an email one-time passcode sent to this email address. No username or password is needed. The link expires in 7 days.`,
     }),
   })
   if (!response.ok) {

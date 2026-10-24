@@ -21,8 +21,9 @@ export const getPlatformPool = (): Pool => {
   if (!platformPool) {
     platformPool = new Pool({
       connectionString,
+      options: '-c search_path=block9_platform,public',
       max: 10,
-      application_name: 'nivasa-api-platform',
+      application_name: 'myapartment-api-platform',
       connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 30000,
     })
@@ -47,8 +48,9 @@ export const getTenantPool = (databaseName: string): Pool => {
     connection.pathname = `/${databaseName}`
     pool = new Pool({
       connectionString: connection.toString(),
+      options: '-c search_path=block9_tenant,public',
       max: 5,
-      application_name: 'nivasa-api-tenant',
+      application_name: 'myapartment-api-tenant',
       connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 30000,
     })
@@ -71,7 +73,7 @@ export const dropTenantDatabase = async (databaseName: string): Promise<void> =>
   }
   const connection = new URL(platformConnectionString)
   connection.pathname = '/postgres'
-  const pool = new Pool({ connectionString: connection.toString(), max: 1, application_name: 'nivasa-api-deletion', connectionTimeoutMillis: 5000 })
+  const pool = new Pool({ connectionString: connection.toString(), max: 1, application_name: 'myapartment-api-deletion', connectionTimeoutMillis: 5000 })
   try {
     await pool.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()', [databaseName])
     await pool.query(`DROP DATABASE IF EXISTS "${databaseName}"`)
@@ -94,7 +96,7 @@ export const provisionTenantDatabase = async (databaseName: string): Promise<voi
   const pool = new Pool({
     connectionString: connection.toString(),
     max: 1,
-    application_name: 'nivasa-api-provisioning',
+    application_name: 'myapartment-api-provisioning',
     connectionTimeoutMillis: 5000,
   })
   pool.on('error', reportPoolError('provisioning'))
@@ -105,7 +107,7 @@ export const provisionTenantDatabase = async (databaseName: string): Promise<voi
     )
     if (exists.rows[0]?.exists) return
 
-    await pool.query(`CREATE DATABASE "${databaseName}" TEMPLATE tenant_template`)
+    await pool.query(`CREATE DATABASE "${databaseName}" TEMPLATE myapartment_tenant_template`)
   } finally {
     await pool.end()
   }

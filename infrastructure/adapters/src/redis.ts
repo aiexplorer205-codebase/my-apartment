@@ -1,5 +1,5 @@
-import type { CachePort, PortFailure, QueuePort } from '@nivasa/ports'
-import { ok, err, type Result } from '@nivasa/shared'
+import type { CachePort, PortFailure, QueuePort } from '@block9/ports'
+import { ok, err, type Result } from '@block9/shared'
 
 export class RedisCacheAdapter implements CachePort {
   private readonly cache = new Map<string, unknown>()

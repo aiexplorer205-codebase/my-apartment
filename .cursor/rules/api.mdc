@@ -7,9 +7,10 @@ alwaysApply: false
 # API
 
 - Keep HTTP wiring in `apps/api/src/index.ts`; put feature logic in a sibling module under `apps/api/src/`.
-- Build `TenantContext` from validated Auth0 identity and `platform_db` membership. Reject client tenant ids, host headers, and token custom claims as authorization.
+- Build `TenantContext` from validated Auth0 identity and `myapartment_platform_db` membership. Reject client tenant ids, host headers, and token custom claims as authorization.
 - Update OpenAPI/`packages/contracts` when adding or changing routes.
 - Domain and application packages depend on ports, not Auth0/Postgres/Resend SDKs. Adapters live in `infrastructure/adapters`.
-- Parameterized SQL only, on the connection bound to the current tenant (or `platform_db` for control-plane).
+- Parameterized SQL only, on the connection bound to the current tenant (or `myapartment_platform_db` for control-plane).
+- Platform and tenant pools set `search_path` to `block9_platform` and `block9_tenant`, respectively.
 - Fail closed on missing `OPERATOR_IDS`, inactive membership, or ambiguous tenant selection.
 - Do not implement checkout or fake payment success. Do not add job processors in the API; the worker is still a health stub.

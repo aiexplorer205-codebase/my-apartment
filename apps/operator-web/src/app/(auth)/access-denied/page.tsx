@@ -1,7 +1,7 @@
 'use client'
 
 import { useAuth0 } from '../../auth-provider'
-import { getAppConfig } from '@nivasa/app-platform'
+import { getAppConfig } from '@block9/app-platform'
 
 export default function OperatorAccessDeniedPage() {
   const { logout } = useAuth0()

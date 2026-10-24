@@ -5,8 +5,8 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
 import { useOperatorOverview } from '../../lib/operator-api'
 import { formValidationMessage } from '../../lib/form-validation'
-import { getAppConfig } from '@nivasa/app-platform'
-import { useAppMessages } from '@nivasa/ui'
+import { getAppConfig } from '@block9/app-platform'
+import { useAppMessages } from '@block9/ui'
 
 const formatApartmentLimits = (organization: { allowedBlocks: number | null; allowedFlatsPerBlock: number[] | null }) => {
   const blockLimit = organization.allowedBlocks ?? '—'

@@ -9,8 +9,8 @@ import { getPlatformPool, getTenantPool } from '../apps/api/src/persistence.ts'
 
 // Local signed test identities exercise real JWT verification and membership
 // authorization. This is not an Auth0-provider integration or a browser test.
-describe.skipIf(process.env.NIVASA_DATABASE_TESTS!=='1')('Opening balances over authenticated HTTP',()=>{
-  const platformName=`nivasa_http_platform_${randomUUID().replaceAll('-','')}`
+describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances over authenticated HTTP',()=>{
+  const platformName=`myapartment_http_platform_${randomUUID().replaceAll('-','')}`
   const names:string[]=[],pools:Array<ReturnType<typeof getTenantPool>>=[]
   const previous:Record<string,string|undefined>={}
   const pair=generateKeyPairSync('rsa',{modulusLength:2048})
@@ -20,18 +20,18 @@ describe.skipIf(process.env.NIVASA_DATABASE_TESTS!=='1')('Opening balances over 
   const origin=(server:Server)=>{const address=server.address();if(!address||typeof address==='string')throw new Error('Test server did not bind');return`http://127.0.0.1:${address.port}`}
   beforeAll(async()=>{
     for(const name of ['POSTGRES_TENANT_URL','POSTGRES_PLATFORM_URL','AUTH0_ISSUER','AUTH0_AUDIENCE'])previous[name]=process.env[name]
-    const password=execFileSync('docker',['compose','-p','nivasa-schema-check','exec','-T','postgres','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
+    const password=execFileSync('docker',['compose','-p','myapartment-schema-check','exec','-T','postgres','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
     const url=new URL('postgresql://postgres@127.0.0.1:55434/postgres');url.password=password
     process.env.POSTGRES_TENANT_URL=url.toString();control=getTenantPool('postgres')
     await control.query(`CREATE DATABASE "${platformName}" TEMPLATE template0`)
     url.pathname=`/${platformName}`;process.env.POSTGRES_PLATFORM_URL=url.toString();platform=getPlatformPool()
-    const migrations=new URL('../migrations/platform_db/',import.meta.url)
+    const migrations=new URL('../migrations/myapartment_platform_db/',import.meta.url)
     for(const file of readdirSync(migrations).filter((name)=>name.endsWith('.sql')).sort())await platform.query(readFileSync(new URL(file,migrations),'utf8'))
     const jwk={...pair.publicKey.export({format:'jwk'}),kid:'local-opening-test',alg:'RS256',use:'sig'}
     issuerServer=createServer((_request,response)=>{response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({keys:[jwk]}))})
     const issuerReady=listen(issuerServer);issuerServer.listen(0,'127.0.0.1');await issuerReady
     issuer=origin(issuerServer)+'/'
-    process.env.AUTH0_ISSUER=issuer;process.env.AUTH0_AUDIENCE='urn:nivasa:opening-test'
+    process.env.AUTH0_ISSUER=issuer;process.env.AUTH0_AUDIENCE='urn:myapartment:opening-test'
     api=startApiServer(0);await listen(api);base=origin(api)
   },20000)
   afterAll(async()=>{
@@ -43,12 +43,12 @@ describe.skipIf(process.env.NIVASA_DATABASE_TESTS!=='1')('Opening balances over 
   },30000)
   const token=(subject:string)=>{
     const header=Buffer.from(JSON.stringify({alg:'RS256',kid:'local-opening-test',typ:'JWT'})).toString('base64url')
-    const payload=Buffer.from(JSON.stringify({iss:issuer,aud:'urn:nivasa:opening-test',sub:subject,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300})).toString('base64url')
+    const payload=Buffer.from(JSON.stringify({iss:issuer,aud:'urn:myapartment:opening-test',sub:subject,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300})).toString('base64url')
     const input=`${header}.${payload}`;return`${input}.${sign('RSA-SHA256',Buffer.from(input),pair.privateKey).toString('base64url')}`
   }
   const tenant=async()=>{
-    const id=randomUUID(),database=`nivasa_http_tenant_${randomUUID().replaceAll('-','')}`,residentId=randomUUID(),unitId=randomUUID(),resident=`resident|${randomUUID()}`,admin=`admin|${randomUUID()}`
-    await control.query(`CREATE DATABASE "${database}" TEMPLATE tenant_template`);names.push(database)
+    const id=randomUUID(),database=`myapartment_http_tenant_${randomUUID().replaceAll('-','')}`,residentId=randomUUID(),unitId=randomUUID(),resident=`resident|${randomUUID()}`,admin=`admin|${randomUUID()}`
+    await control.query(`CREATE DATABASE "${database}" TEMPLATE myapartment_tenant_template`);names.push(database)
     const pool=getTenantPool(database);pools.push(pool)
     await pool.query(`INSERT INTO organizations(id,tenant_id,name,locale,currency,timezone) VALUES($1::uuid,$1::text,'HTTP Test Community','en-IN','INR','Asia/Kolkata')`,[id])
     await pool.query(`INSERT INTO units(id,tenant_id,number,status) VALUES($1,$2,'A-101','occupied')`,[unitId,id])

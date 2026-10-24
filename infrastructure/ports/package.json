@@ -1,5 +1,5 @@
 {
-  "name": "@nivasa/ports",
+  "name": "@block9/ports",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,8 +16,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@nivasa/domain": "workspace:*",
-    "@nivasa/shared": "workspace:*"
+    "@block9/domain": "workspace:*",
+    "@block9/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

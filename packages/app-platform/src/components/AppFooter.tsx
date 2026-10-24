@@ -14,7 +14,7 @@ export function AppFooter({
   const copyright = getFormattedCopyright()
 
   return (
-    <footer className={`nivasa-app-footer ${className}`.trim()} style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', padding: '16px 0' }}>
+    <footer className={`myapartment-app-footer ${className}`.trim()} style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', padding: '16px 0' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
         <span>{copyright}</span>
         {showSupport && (

@@ -1,7 +1,7 @@
  'use client'
 import { useCallback } from 'react'
-import { apiFetch, apiFetchBlob } from '@nivasa/api-client'
-import { ComplaintHomeShortcut, Complaints } from '@nivasa/ui'
+import { apiFetch, apiFetchBlob } from '@block9/api-client'
+import { ComplaintHomeShortcut, Complaints } from '@block9/ui'
 import { useAuth0 } from '../../app/auth-provider'
 
 export function ComplaintWorkspace({onOpen}:{onOpen?:()=>void} = {}) {

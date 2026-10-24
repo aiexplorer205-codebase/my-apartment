@@ -1,7 +1,7 @@
 'use client'
 
-import { AdminAssignmentControl, WorkspaceBreadcrumb, WorkspaceStatusTabs } from '@nivasa/ui'
-import { apiFetch } from '@nivasa/api-client'
+import { AdminAssignmentControl, WorkspaceBreadcrumb, WorkspaceStatusTabs } from '@block9/ui'
+import { apiFetch } from '@block9/api-client'
 import { useAuth0 } from '../../app/auth-provider'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { LoadState } from '../../lib/auth-ui'

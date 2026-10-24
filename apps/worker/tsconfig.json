@@ -6,10 +6,10 @@
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@nivasa/domain": ["../../packages/domain/src/index.ts"],
-      "@nivasa/shared": ["../../packages/shared/src/index.ts"],
-      "@nivasa/config": ["../../packages/config/src/index.ts"],
-      "@nivasa/application": ["../../packages/application/src/index.ts"]
+      "@block9/domain": ["../../packages/domain/src/index.ts"],
+      "@block9/shared": ["../../packages/shared/src/index.ts"],
+      "@block9/config": ["../../packages/config/src/index.ts"],
+      "@block9/application": ["../../packages/application/src/index.ts"]
     }
   },
   "include": [

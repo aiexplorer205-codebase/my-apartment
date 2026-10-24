@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 // Temporary tables shadow application tables; rollback leaves local data intact.
 const check = (assertions: string) => {
-  const migration = readFileSync(new URL('../migrations/tenant_db/034_readable_work_references.sql', import.meta.url), 'utf8')
+  const migration = readFileSync(new URL('../migrations/myapartment_tenant_db/034_readable_work_references.sql', import.meta.url), 'utf8')
   return execFileSync('docker', ['compose', 'exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-At'], {
     input: `BEGIN;
       CREATE TEMP TABLE complaints (id UUID PRIMARY KEY, subject TEXT);
@@ -18,7 +18,7 @@ const check = (assertions: string) => {
   })
 }
 
-describe.skipIf(process.env.NIVASA_DATABASE_TESTS !== '1')('readable complaint and maintenance references', () => {
+describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('readable complaint and maintenance references', () => {
   it('backfills existing records without replacing their UUIDs', () => {
     const output = check(`SELECT id::text || ':' || reference FROM complaints;
       SELECT id::text || ':' || reference FROM maintenance_tasks;`)

@@ -1,5 +1,5 @@
 {
-  "name": "@nivasa/resident-web",
+  "name": "@block9/resident-web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -14,11 +14,11 @@
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@nivasa/api-client": "workspace:*",
-    "@nivasa/app-platform": "workspace:*",
-    "@nivasa/auth-types": "workspace:*",
-    "@nivasa/design-tokens": "workspace:*",
-    "@nivasa/ui": "workspace:*",
+    "@block9/api-client": "workspace:*",
+    "@block9/app-platform": "workspace:*",
+    "@block9/auth-types": "workspace:*",
+    "@block9/design-tokens": "workspace:*",
+    "@block9/ui": "workspace:*",
     "i18next": "^24.2.2",
     "react-i18next": "^15.4.1"
   },

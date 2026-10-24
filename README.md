@@ -1,4 +1,4 @@
-# Nivasa
+# MyApartment by BLOCK9
 
 Multi-tenant apartment operations for residents, apartment administrators, and platform operators. Identity is Auth0 email OTP. Each customer organization has its own PostgreSQL database.
 
@@ -13,7 +13,7 @@ This repository is a local, testable product. It is **not** a production-support
 - [Contributing](CONTRIBUTING.md)
 - [Security reporting](SECURITY.md)
 
-Optional HTML screen frames: `docs/design/nivasa-screen-designs`. The running apps are the source of truth.
+Optional HTML screen frames live in the prototype directory. The running apps are the source of truth.
 
 ## Quick start
 

@@ -6,9 +6,9 @@
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@nivasa/domain": ["../domain/src/index.ts"],
-      "@nivasa/shared": ["../shared/src/index.ts"],
-      "@nivasa/config": ["../config/src/index.ts"]
+      "@block9/domain": ["../domain/src/index.ts"],
+      "@block9/shared": ["../shared/src/index.ts"],
+      "@block9/config": ["../config/src/index.ts"]
     }
   },
   "include": [

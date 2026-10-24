@@ -1,6 +1,6 @@
-import type { IdentityPort, PortFailure } from '@nivasa/ports'
-import type { LoginOtpRequest, OtpChallenge } from '@nivasa/domain'
-import { ok, err, type Result } from '@nivasa/shared'
+import type { IdentityPort, PortFailure } from '@block9/ports'
+import type { LoginOtpRequest, OtpChallenge } from '@block9/domain'
+import { ok, err, type Result } from '@block9/shared'
 
 export class Auth0IdentityAdapter implements IdentityPort {
   async normalizeSubject(subject: string): Promise<Result<string, PortFailure>> {

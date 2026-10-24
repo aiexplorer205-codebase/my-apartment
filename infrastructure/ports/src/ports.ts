@@ -1,5 +1,5 @@
-import type { LoginOtpRequest, OtpChallenge, Tenant, TenantContext } from '@nivasa/domain'
-import type { Result } from '@nivasa/shared'
+import type { LoginOtpRequest, OtpChallenge, Tenant, TenantContext } from '@block9/domain'
+import type { Result } from '@block9/shared'
 
 export type PortErrorCode =
   | 'UNKNOWN_TENANT'

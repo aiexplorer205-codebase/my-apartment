@@ -16,7 +16,7 @@ type AuthContextValue = {
   logout: (options?: { logoutParams?: { returnTo?: string } }) => void
 }
 
-const tenantSelectionKey = 'nivasa.admin.tenant.'
+const tenantSelectionKey = 'myapartment.admin.tenant.'
 const context = createContext<AuthContextValue | null>(null)
 
 export function useAuth0() {

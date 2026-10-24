@@ -26,18 +26,18 @@ COPY --chown=node:node packages/design-tokens/package.json ./packages/design-tok
 COPY --chown=node:node packages/domain/package.json ./packages/domain/
 COPY --chown=node:node packages/shared/package.json ./packages/shared/
 COPY --chown=node:node packages/ui/package.json ./packages/ui/
-RUN --mount=type=cache,id=nivasa-pnpm-store,target=/pnpm/store,uid=1000,gid=1000 \
+RUN --mount=type=cache,id=myapartment-pnpm-store,target=/pnpm/store,uid=1000,gid=1000 \
     pnpm install --frozen-lockfile --store-dir=/pnpm/store
 
 COPY --chown=node:node . .
 
-RUN pnpm --filter @nivasa/config run build && \
-    pnpm --filter @nivasa/domain run build && \
-    pnpm --filter @nivasa/shared run build && \
-    pnpm --filter @nivasa/application run build && \
-    pnpm --filter @nivasa/ports run build && \
-    pnpm --filter @nivasa/adapters run build && \
-    pnpm --filter @nivasa/worker run build
+RUN pnpm --filter @block9/config run build && \
+    pnpm --filter @block9/domain run build && \
+    pnpm --filter @block9/shared run build && \
+    pnpm --filter @block9/application run build && \
+    pnpm --filter @block9/ports run build && \
+    pnpm --filter @block9/adapters run build && \
+    pnpm --filter @block9/worker run build
 
 
 

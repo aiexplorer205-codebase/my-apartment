@@ -8,7 +8,7 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 }
 
 export function Button({ variant = 'primary', className = '', children, ...props }: ButtonProps) {
-  return <button className={`nivasa-button nivasa-button-${variant} ${className}`.trim()} {...props}>{children}</button>
+  return <button className={`myapartment-button myapartment-button-${variant} ${className}`.trim()} {...props}>{children}</button>
 }
 
 type AppMessage = { id: number; text: string; kind: 'error' | 'success' | 'info' }

@@ -1,8 +1,8 @@
 import './globals.css'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
-import { I18nProvider, getAppConfig } from '@nivasa/app-platform'
-import { AppMessagesProvider, PwaControls } from '@nivasa/ui'
+import { I18nProvider, getAppConfig } from '@block9/app-platform'
+import { AppMessagesProvider, PwaControls } from '@block9/ui'
 
 const config = getAppConfig()
 

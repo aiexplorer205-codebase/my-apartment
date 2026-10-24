@@ -44,19 +44,19 @@ importers:
       '@auth0/nextjs-auth0':
         specifier: ^4.32.0
         version: 4.32.0(next@15.5.27(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@nivasa/api-client':
+      '@block9/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
-      '@nivasa/app-platform':
+      '@block9/app-platform':
         specifier: workspace:*
         version: link:../../packages/app-platform
-      '@nivasa/auth-types':
+      '@block9/auth-types':
         specifier: workspace:*
         version: link:../../packages/auth-types
-      '@nivasa/design-tokens':
+      '@block9/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
-      '@nivasa/ui':
+      '@block9/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       i18next:
@@ -90,16 +90,16 @@ importers:
 
   apps/api:
     dependencies:
-      '@nivasa/application':
+      '@block9/application':
         specifier: workspace:*
         version: link:../../packages/application
-      '@nivasa/config':
+      '@block9/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@nivasa/contracts':
+      '@block9/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@nivasa/shared':
+      '@block9/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       jose:
@@ -121,10 +121,10 @@ importers:
 
   apps/login-web:
     dependencies:
-      '@nivasa/app-platform':
+      '@block9/app-platform':
         specifier: workspace:*
         version: link:../../packages/app-platform
-      '@nivasa/design-tokens':
+      '@block9/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
       next:
@@ -155,19 +155,19 @@ importers:
       '@auth0/nextjs-auth0':
         specifier: ^4.32.0
         version: 4.32.0(next@15.5.27(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@nivasa/api-client':
+      '@block9/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
-      '@nivasa/app-platform':
+      '@block9/app-platform':
         specifier: workspace:*
         version: link:../../packages/app-platform
-      '@nivasa/auth-types':
+      '@block9/auth-types':
         specifier: workspace:*
         version: link:../../packages/auth-types
-      '@nivasa/design-tokens':
+      '@block9/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
-      '@nivasa/ui':
+      '@block9/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       next:
@@ -198,19 +198,19 @@ importers:
       '@auth0/nextjs-auth0':
         specifier: ^4.32.0
         version: 4.32.0(next@15.5.27(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@nivasa/api-client':
+      '@block9/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
-      '@nivasa/app-platform':
+      '@block9/app-platform':
         specifier: workspace:*
         version: link:../../packages/app-platform
-      '@nivasa/auth-types':
+      '@block9/auth-types':
         specifier: workspace:*
         version: link:../../packages/auth-types
-      '@nivasa/design-tokens':
+      '@block9/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
-      '@nivasa/ui':
+      '@block9/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       i18next:
@@ -244,13 +244,13 @@ importers:
 
   apps/worker:
     dependencies:
-      '@nivasa/application':
+      '@block9/application':
         specifier: workspace:*
         version: link:../../packages/application
-      '@nivasa/config':
+      '@block9/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@nivasa/shared':
+      '@block9/shared':
         specifier: workspace:*
         version: link:../../packages/shared
     devDependencies:
@@ -260,13 +260,13 @@ importers:
 
   infrastructure/adapters:
     dependencies:
-      '@nivasa/domain':
+      '@block9/domain':
         specifier: workspace:*
         version: link:../../packages/domain
-      '@nivasa/ports':
+      '@block9/ports':
         specifier: workspace:*
         version: link:../ports
-      '@nivasa/shared':
+      '@block9/shared':
         specifier: workspace:*
         version: link:../../packages/shared
     devDependencies:
@@ -279,10 +279,10 @@ importers:
 
   infrastructure/ports:
     dependencies:
-      '@nivasa/domain':
+      '@block9/domain':
         specifier: workspace:*
         version: link:../../packages/domain
-      '@nivasa/shared':
+      '@block9/shared':
         specifier: workspace:*
         version: link:../../packages/shared
     devDependencies:
@@ -319,13 +319,13 @@ importers:
 
   packages/application:
     dependencies:
-      '@nivasa/config':
+      '@block9/config':
         specifier: workspace:*
         version: link:../config
-      '@nivasa/domain':
+      '@block9/domain':
         specifier: workspace:*
         version: link:../domain
-      '@nivasa/shared':
+      '@block9/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:

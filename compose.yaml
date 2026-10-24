@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-platform_db}
+      POSTGRES_DB: ${POSTGRES_DB:-myapartment_platform_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
@@ -13,7 +13,7 @@ services:
       - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
       - ./migrations:/migrations:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-platform_db}']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-myapartment_platform_db}']
       interval: 10s
       timeout: 5s
       retries: 12
@@ -42,11 +42,11 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 4001
-      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:-postgresql://postgres:postgres@postgres:5432/platform_db}
-      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:-postgresql://postgres:postgres@postgres:5432/tenant_template}
+      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:-postgresql://postgres:postgres@postgres:5432/myapartment_platform_db}
+      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:-postgresql://postgres:postgres@postgres:5432/myapartment_tenant_template}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
-      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.nivasa.local}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.myapartment.local}
       AUTH0_ISSUER: ${AUTH0_ISSUER:-https://example.auth0.com/}
       AUTH0_MGMT_CLIENT_ID: ${AUTH0_MGMT_CLIENT_ID:-}
       AUTH0_MGMT_CLIENT_SECRET: ${AUTH0_MGMT_CLIENT_SECRET:-}
@@ -62,9 +62,9 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3100,http://localhost:3101}
       AUTH0_OTP_ENABLED: ${AUTH0_OTP_ENABLED:-false}
       RESEND_API_KEY: ${RESEND_API_KEY:-replace-with-resend-key}
-      RESEND_FROM: ${RESEND_FROM:-no-reply@local.nivasa.test}
+      RESEND_FROM: ${RESEND_FROM:-no-reply@block9.co.in}
       FILEBASE_ENDPOINT: ${FILEBASE_ENDPOINT:-https://example.filebase.com}
-      FILEBASE_BUCKET: ${FILEBASE_BUCKET:-nivasa-local-dev}
+      FILEBASE_BUCKET: ${FILEBASE_BUCKET:-block9-local-dev}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-replace-me}
       QUEUE_RETRY_LIMIT: ${QUEUE_RETRY_LIMIT:-3}
     depends_on:
@@ -91,11 +91,11 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 4010
-      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:-postgresql://postgres:postgres@postgres:5432/platform_db}
-      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:-postgresql://postgres:postgres@postgres:5432/tenant_template}
+      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:-postgresql://postgres:postgres@postgres:5432/myapartment_platform_db}
+      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:-postgresql://postgres:postgres@postgres:5432/myapartment_tenant_template}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
-      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.nivasa.local}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.myapartment.local}
       RESEND_API_KEY: ${RESEND_API_KEY:-replace-with-resend-key}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-replace-me}
       QUEUE_RETRY_LIMIT: ${QUEUE_RETRY_LIMIT:-3}
@@ -144,7 +144,7 @@ services:
       PORT: 3000
       API_INTERNAL_URL: http://api:4001
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
-      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.nivasa.local}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.myapartment.local}
       AUTH0_CLIENT_ID: ${AUTH0_RESIDENT_CLIENT_ID:-}
       AUTH0_CLIENT_SECRET: ${AUTH0_RESIDENT_CLIENT_SECRET:-}
       AUTH0_SECRET: ${AUTH0_RESIDENT_SECRET:-replace-with-unique-32-byte-random-secret}
@@ -171,7 +171,7 @@ services:
       PORT: 3000
       API_INTERNAL_URL: http://api:4001
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
-      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.nivasa.local}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.myapartment.local}
       AUTH0_CLIENT_ID: ${AUTH0_ADMIN_CLIENT_ID:-}
       AUTH0_CLIENT_SECRET: ${AUTH0_ADMIN_CLIENT_SECRET:-}
       AUTH0_SECRET: ${AUTH0_ADMIN_SECRET:-replace-with-unique-32-byte-random-secret}
@@ -199,7 +199,7 @@ services:
       PORT: 3000
       API_INTERNAL_URL: http://api:4001
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
-      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.nivasa.local}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.myapartment.local}
       AUTH0_CLIENT_ID: ${AUTH0_OPERATOR_CLIENT_ID:-}
       AUTH0_CLIENT_SECRET: ${AUTH0_OPERATOR_CLIENT_SECRET:-}
       AUTH0_SECRET: ${AUTH0_OPERATOR_SECRET:-replace-with-unique-32-byte-random-secret}

@@ -8,8 +8,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type TouchEve
 import { AuthBoundary, LoadState, TenantWorkspacePicker } from '../../lib/auth-ui'
 import { useApiPost, useApiQuery } from '../../lib/use-api'
 import { useAuth0 } from '../../app/auth-provider'
-import { getAppConfig, useTranslation, LanguageSwitcher } from '@nivasa/app-platform'
-import { useAppMessages } from '@nivasa/ui'
+import { getAppConfig, useTranslation, LanguageSwitcher } from '@block9/app-platform'
+import { useAppMessages } from '@block9/ui'
 
 type Payment = {
   kind: 'report' | 'credit' | 'adjustment' | 'adjustment_credit' | 'refund'

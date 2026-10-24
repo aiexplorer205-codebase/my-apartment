@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
-import { getAppConfig } from '@nivasa/app-platform'
+import { getAppConfig } from '@block9/app-platform'
 import { LoadState } from '../../lib/auth-ui'
 import { useApiQuery } from '../../lib/use-api'
 

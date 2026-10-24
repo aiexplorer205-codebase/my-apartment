@@ -6,7 +6,7 @@ import type { ReactNode } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth0 } from '../auth-provider'
 import { EmbeddedLogin } from '../../lib/auth-ui'
-import { getAppConfig } from '@nivasa/app-platform'
+import { getAppConfig } from '@block9/app-platform'
 
 const invitationApi = '/api/backend/v1/public/resident-invitations'
 type Invitation = { email: string; fullName: string; organizationName: string; unit: string; startDate: string }

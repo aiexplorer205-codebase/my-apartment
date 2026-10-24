@@ -30,7 +30,7 @@ export const sendResidentInvitationEmail = async (input: {
     body: JSON.stringify({
       from,
       to: [input.email],
-      subject: `You're invited to ${input.organizationName} on Nivasa`,
+      subject: `You're invited to ${input.organizationName} on MyApartment`,
       html: `<p>Hello ${escapeHtml(input.residentName)},</p><p>You have been invited to join <strong>${escapeHtml(input.organizationName)}</strong> for <strong>${escapeHtml(input.unitLabel)}</strong>.</p><p>Accept the invitation using the email one-time passcode sent to this address. The link expires in 7 days and only this verified email address can accept it.</p><p><a href="${escapeHtml(input.invitationUrl)}">Accept resident invitation</a></p>`,
       text: `Hello ${input.residentName},\n\nYou have been invited to join ${input.organizationName} for ${input.unitLabel}. Accept using an email one-time passcode sent to this address. The link expires in 7 days and only this verified email address can accept it.\n\nAccept the invitation: ${input.invitationUrl}`,
     }),

@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { getAppConfig, getBrand } from '@nivasa/app-platform'
+import { getAppConfig, getBrand } from '@block9/app-platform'
 
 export default function manifest(): MetadataRoute.Manifest {
   const config = getAppConfig()

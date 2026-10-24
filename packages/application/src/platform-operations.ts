@@ -5,9 +5,9 @@ import type {
   PlatformOverviewProjection,
   PlatformSettings,
   PlatformSupportAccess,
-} from '@nivasa/domain'
-import type { TenantContext } from '@nivasa/domain'
-import { AuthorizationError, ValidationError } from '@nivasa/shared'
+} from '@block9/domain'
+import type { TenantContext } from '@block9/domain'
+import { AuthorizationError, ValidationError } from '@block9/shared'
 
 import { requireOperatorIdentity } from './guards.js'
 

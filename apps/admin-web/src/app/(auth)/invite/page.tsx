@@ -5,7 +5,7 @@ import { Suspense, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth0 } from '../../auth-provider'
 import { EmbeddedLogin } from '../../../lib/auth-ui'
-import { getAppConfig } from '@nivasa/app-platform'
+import { getAppConfig } from '@block9/app-platform'
 
 const apiUrl = '/api/backend/v1/public/admin-invitations/accept'
 const lookupUrl = '/api/backend/v1/public/admin-invitations/lookup'

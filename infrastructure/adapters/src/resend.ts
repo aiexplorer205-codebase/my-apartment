@@ -1,5 +1,5 @@
-import type { EmailPort, PortFailure } from '@nivasa/ports'
-import { ok, type Result } from '@nivasa/shared'
+import type { EmailPort, PortFailure } from '@block9/ports'
+import { ok, type Result } from '@block9/shared'
 
 export class ResendEmailAdapter implements EmailPort {
   async sendTransactionEmail(_to: string, _template: string, _payload: Record<string, unknown>): Promise<Result<void, PortFailure>> {

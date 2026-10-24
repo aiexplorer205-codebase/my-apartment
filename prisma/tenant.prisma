@@ -1,5 +1,5 @@
 // Tenant migration schema for application-owned data.
-// Keep tenant schema contents independent from platform_db.
+// Keep tenant schema contents independent from myapartment_platform_db.
 
 generator client {
   provider = "prisma-client-js"

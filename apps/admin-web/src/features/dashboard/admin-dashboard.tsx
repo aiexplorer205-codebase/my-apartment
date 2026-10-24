@@ -16,8 +16,8 @@ import { AuthBoundary, LoadState, TenantWorkspacePicker } from '../../lib/auth-u
 import { formValidationMessage } from '../../lib/form-validation'
 import { useApiPost, useApiQuery } from '../../lib/use-api'
 import { useAuth0 } from '../../app/auth-provider'
-import { getAppConfig, useTranslation, LanguageSwitcher } from '@nivasa/app-platform'
-import { ReceiptReview, useAppMessages, WorkspaceBreadcrumb } from '@nivasa/ui'
+import { getAppConfig, useTranslation, LanguageSwitcher } from '@block9/app-platform'
+import { ReceiptReview, useAppMessages, WorkspaceBreadcrumb } from '@block9/ui'
 
 type AdminOverview = {
   tenantId: string

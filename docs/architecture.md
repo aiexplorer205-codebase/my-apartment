@@ -1,6 +1,6 @@
 # Architecture
 
-Nivasa is a multi-tenant apartment operations product for India (INR default, locale per tenant). This document describes the **implemented** system. Visual HTML frames under `docs/design/nivasa-screen-designs` are optional reference; the running apps are authoritative.
+MyApartment by BLOCK9 is a multi-tenant apartment operations product for India (INR default, locale per tenant). This document describes the **implemented** system. Visual HTML frames in the prototype directory are optional reference; the running apps are authoritative.
 
 ## Runtime
 
@@ -37,7 +37,7 @@ Web apps keep server-side Auth0 sessions and proxy API calls through `/api/backe
 | `infrastructure/ports` | Ports |
 | `infrastructure/adapters` | Auth0, Postgres, Redis, Resend |
 
-Schema is ordered SQL in `migrations/platform_db` (`001`–`009`) and `migrations/tenant_db` (`001`–`034`). Prisma in root `package.json` is unused.
+Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`009`) and `migrations/myapartment_tenant_db` (`001`–`034`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
 
 Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,validation}.json`. Keep key parity. Validate with `pnpm platform:validate`.
 
@@ -45,9 +45,9 @@ Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,vali
 
 SaaS tenant = one customer organization (may have multiple blocks/flats). Isolation is **database-per-tenant** on a shared private Postgres cluster:
 
-- `platform_db`: tenant records, memberships, locators, operator audit, provisioning. Locators never go to clients.
-- `tenant_<id>`: that organization's units, residents, invoices, payments, notices, complaints, maintenance, ledgers.
-- `tenant_template`: clone source for new organizations. It must include every tenant migration before onboarding.
+- `myapartment_platform_db`: tenant records, memberships, locators, operator audit, provisioning. Locators never go to clients.
+- `myapartment_tenant_<id>`: that organization's units, residents, invoices, payments, notices, complaints, maintenance, and ledgers, under schema `block9_tenant`.
+- `myapartment_tenant_template`: clone source for new organizations. It must include every tenant migration before onboarding.
 
 `TenantContext` is derived server-side from a validated Auth0 subject plus active membership and tenant status. A client tenant id, host header, token custom claim, or UI picker is not authorization. Ambiguous multi-tenant membership fails closed (`tenant_selection_required`) in this slice.
 
@@ -56,7 +56,7 @@ SaaS tenant = one customer organization (may have multiple blocks/flats). Isolat
 - API validates JWT issuer, audience, signature/JWKS, and expiry.
 - Resident and admin sign-in: Auth0 email OTP, embedded in each app.
 - Operator: separate Auth0 app; API require `OPERATOR_IDS` exact `sub` match.
-- Operator onboarding clones `tenant_template`, creates the admin in Auth0 via Management API, emails a seven-day single-use link (Resend). Accepting requires OTP on the invited email.
+- Operator onboarding clones `myapartment_tenant_template`, creates the admin in Auth0 via Management API, emails a seven-day single-use link (Resend). Accepting requires OTP on the invited email.
 - Resident invitations use the same pattern. SMS/WhatsApp OTP is not enabled.
 
 ## Product (shipped)

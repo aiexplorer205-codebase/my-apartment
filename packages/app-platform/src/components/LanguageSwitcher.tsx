@@ -18,11 +18,11 @@ export function LanguageSwitcher({
 }: LanguageSwitcherProps) {
   const { locale, setLocale } = useLocale()
   const locales = getLocales()
-  const selectId = `nivasa-locale-select-${useId().replace(/:/g, '')}`
+  const selectId = `myapartment-locale-select-${useId().replace(/:/g, '')}`
 
   return (
-    <div className={`nivasa-language-switcher ${iconOnly ? 'icon-only' : ''} ${className}`.trim()}>
-      {iconOnly && <svg className="nivasa-language-switcher-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18m0-18a14 14 0 0 0 0 18"/></svg>}
+    <div className={`myapartment-language-switcher ${iconOnly ? 'icon-only' : ''} ${className}`.trim()}>
+      {iconOnly && <svg className="myapartment-language-switcher-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18m0-18a14 14 0 0 0 0 18"/></svg>}
       <label htmlFor={selectId} className="sr-only" style={{ display: 'none' }}>
         Select Language
       </label>

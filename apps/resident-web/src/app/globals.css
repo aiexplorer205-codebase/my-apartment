@@ -1,4 +1,4 @@
-@import '@nivasa/design-tokens/tokens.css';
+@import '@block9/design-tokens/tokens.css';
 
 :root {
   --bg: #f4f7fb;
@@ -1955,7 +1955,7 @@ body { max-width: 100%; overflow-x: clip; }
   .resident-sidebar-language { display: none; }
   .resident-mobile-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
   .resident-mobile-header-actions > button,
-  .resident-mobile-header-actions > .nivasa-language-switcher.icon-only {
+  .resident-mobile-header-actions > .myapartment-language-switcher.icon-only {
     position: relative;
     display: grid;
     flex: 0 0 42px;
@@ -1968,9 +1968,9 @@ body { max-width: 100%; overflow-x: clip; }
     color: #555765;
   }
   .resident-mobile-header-actions > button svg,
-  .resident-mobile-header-actions .nivasa-language-switcher-icon { width: 22px; height: 22px; }
-  .resident-mobile-header-actions .nivasa-language-switcher.icon-only { padding: 0; }
-  .resident-mobile-header-actions .nivasa-language-switcher.icon-only select {
+  .resident-mobile-header-actions .myapartment-language-switcher-icon { width: 22px; height: 22px; }
+  .resident-mobile-header-actions .myapartment-language-switcher.icon-only { padding: 0; }
+  .resident-mobile-header-actions .myapartment-language-switcher.icon-only select {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -1984,7 +1984,7 @@ body { max-width: 100%; overflow-x: clip; }
     opacity: 0;
     cursor: pointer;
   }
-  .resident-mobile-header-actions .nivasa-language-switcher.icon-only:focus-within { outline: 2px solid #6357ff; outline-offset: 2px; }
+  .resident-mobile-header-actions .myapartment-language-switcher.icon-only:focus-within { outline: 2px solid #6357ff; outline-offset: 2px; }
 }
 
 /* Selected screen-design foundation; keep overrides after legacy styles. */
@@ -1996,7 +1996,7 @@ body { max-width: 100%; overflow-x: clip; }
 body { font-family: var(--font); background: var(--canvas); color: var(--ink); font-size: 16px; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 button, input, select, textarea { font: inherit; }
-.primary, .admin-shell .primary, .nivasa-button-primary { background: var(--brand); color: white; min-height: 44px; }
+.primary, .admin-shell .primary, .myapartment-button-primary { background: var(--brand); color: white; min-height: 44px; }
 .secondary, .admin-shell .secondary { min-height: 44px; }
 .dashboard-shell.admin-shell, .dashboard-shell.resident-shell { background: var(--canvas); }
 .admin-shell .card, .resident-shell .card { border-color: var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }

@@ -7,7 +7,7 @@ import { createI18nInstance } from './instance'
 import { defaultLocale, isLocaleSupported, getLocaleDirection } from '../locales'
 import type { SupportedLocale } from '../types'
 
-export const LOCALE_COOKIE_NAME = 'nivasa_locale'
+export const LOCALE_COOKIE_NAME = 'myapartment_locale'
 
 function getCookieLocale(): SupportedLocale | null {
   if (typeof document === 'undefined') return null
