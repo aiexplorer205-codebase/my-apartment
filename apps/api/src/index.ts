@@ -1982,19 +1982,19 @@ const parseBlockInput = (input: unknown): { buildingName: string; floors: number
 
 const requireApartmentSchema = async (access: TenantAccess): Promise<void> => {
   const result = await withTenantPool(access).query<{ ready: boolean }>(
-    `SELECT to_regclass('public.apartments') IS NOT NULL
-       AND to_regclass('public.apartment_buildings') IS NOT NULL
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'apartments' AND column_name = 'address')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'apartment_buildings' AND column_name = 'maintenance_rate_per_sqft')
+    `SELECT to_regclass('block9_tenant.apartments') IS NOT NULL
+       AND to_regclass('block9_tenant.apartment_buildings') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'apartments' AND column_name = 'address')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'apartment_buildings' AND column_name = 'maintenance_rate_per_sqft')
        AND EXISTS (
          SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'units' AND column_name = 'apartment_building_id'
+         WHERE table_schema = 'block9_tenant' AND table_name = 'units' AND column_name = 'apartment_building_id'
        )
        AND EXISTS (
          SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'apartment_buildings' AND column_name = 'flat_limit'
+         WHERE table_schema = 'block9_tenant' AND table_name = 'apartment_buildings' AND column_name = 'flat_limit'
        )
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'apartment_buildings' AND column_name = 'allowance_slot') AS ready`,
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'apartment_buildings' AND column_name = 'allowance_slot') AS ready`,
   )
   if (!result.rows[0]?.ready) {
     throw new ApiFault(503, 'dependency_unavailable', 'Apartment setup is not up to date for this tenant database. Apply the tenant database migrations, including migrations/myapartment_tenant_db/031_property_setup_deletion.sql, then retry.')

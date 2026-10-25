@@ -57,11 +57,14 @@ apply_migrations() {
 }
 
 if [[ "$kind" == tenant && "$target" == all-tenants ]]; then
+  databases=$(docker compose exec -T postgres psql -U postgres -d myapartment_platform_db -At \
+    -v ON_ERROR_STOP=1 -c "SELECT database_name FROM block9_platform.tenant_records WHERE database_name IS NOT NULL ORDER BY database_name")
   apply_migrations myapartment_tenant_template
   while IFS= read -r database; do
-    [[ -n "$database" ]] && apply_migrations "$database"
-  done < <(docker compose exec -T postgres psql -U postgres -d myapartment_platform_db -At \
-    -v ON_ERROR_STOP=1 -c "SELECT database_name FROM tenant_records WHERE database_name IS NOT NULL ORDER BY database_name")
+    if [[ -n "$database" ]]; then
+      apply_migrations "$database"
+    fi
+  done <<< "$databases"
 else
   if [[ "$target" == all-tenants ]]; then
     echo "The all-tenants target is only valid for tenant migrations." >&2
