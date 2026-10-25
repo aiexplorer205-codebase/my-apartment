@@ -53,6 +53,9 @@ importers:
       '@block9/auth-types':
         specifier: workspace:*
         version: link:../../packages/auth-types
+      '@block9/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@block9/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
@@ -207,6 +210,9 @@ importers:
       '@block9/auth-types':
         specifier: workspace:*
         version: link:../../packages/auth-types
+      '@block9/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@block9/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens

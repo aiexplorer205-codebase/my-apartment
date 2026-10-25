@@ -2120,3 +2120,16 @@ button, input, select, textarea { font: inherit; }
 .complaint-photo-grid figure { margin: 0; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; }
 .complaint-photo-grid img { display: block; width: 100%; max-height: 320px; object-fit: contain; border-radius: 8px; }
 .complaint-photo-grid figcaption { margin-block: 10px; overflow-wrap: anywhere; font-size: 14px; color: var(--muted); }
+
+/* Six resident destinations, including meeting minutes, fit the mobile navigation. */
+@media (max-width: 900px) {
+  .resident-shell .resident-sidebar .nav-list { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .resident-shell .resident-sidebar .nav-label { overflow-wrap: anywhere; }
+}
+.resident-meeting-minutes .card-title-row { flex-wrap: wrap; gap: 12px; }
+
+.resident-nav-short-label { display: none; }
+@media (max-width: 900px) {
+  .resident-nav-full-label { display: none; }
+  .resident-nav-short-label { display: inline; }
+}

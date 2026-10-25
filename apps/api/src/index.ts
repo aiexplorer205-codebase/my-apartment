@@ -1,3 +1,4 @@
+import { readMeetingMinutes, writeMeetingMinutes } from './meeting-minutes.js'
 import { apartmentSetup } from './apartment-setup.js'
 import { propertySetupDeletion } from './property-setup-deletion.js'
 import { adjustmentRead, adjustmentWrite, adjustmentBatch, creditRead, creditWrite } from './billing-adjustments.js'
@@ -23,6 +24,7 @@ import { pathToFileURL } from 'node:url'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import type { PoolClient } from 'pg'
 
+import { meetingMinutesPaths, meetingMinutesSchemas } from '@block9/contracts'
 import type { HealthResponse, ApiErrorResponse, OpenApiBootstrap } from '@block9/contracts'
 import { AuthorizationError, ValidationError } from '@block9/shared'
 import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from './billing-calculations.js'
@@ -560,6 +562,7 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     },
     '/v1/tenant/polls': { get: { tags: ['tenant'], summary: 'List active resident polls and permitted results', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident polls' }, '403': { description: 'An active resident profile is required' } } } },
     '/v1/tenant/polls/{pollId}/vote': { post: { tags: ['tenant'], summary: 'Submit a resident poll vote', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Vote recorded' }, '409': { description: 'Poll closed or resident already voted' } } } },
+    ...meetingMinutesPaths,
     '/v1/admin/communications/context': {get:{tags:['tenant'],summary:'Read community scheduling name and timezone',security:[{bearerAuth:[]}],responses:{'200':{description:'Community context'},'403':{description:'Administrator permission required'}}}},
     '/v1/admin/announcements/{announcementId}': {get:{tags:['tenant'],summary:'Read one scoped announcement independently of list preview',security:[{bearerAuth:[]}],responses:{'200':{description:'Announcement'},'404':{description:'Not found'}}}},
     '/v1/admin/polls/{pollId}': {get:{tags:['tenant'],summary:'Read one scoped poll and admin results independently of list preview',security:[{bearerAuth:[]}],responses:{'200':{description:'Poll and results'},'404':{description:'Not found'}}}},
@@ -685,7 +688,7 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
       post: { tags: ['tenant'], summary: 'Accept a resident invitation with verified email identity', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident record and tenant membership activated' }, '400': { description: 'Invitation is invalid, expired, or already accepted' }, '403': { description: 'Verified email does not match the invitation' } } },
     },
   },
-  components: { schemas: {}, securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } } },
+  components: { schemas: { ...meetingMinutesSchemas }, securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } } },
 })
 
 export const createErrorResponse = (error: unknown): ApiErrorResponse => {
@@ -3346,6 +3349,19 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, await acceptResidentInvitation(request, await readJsonBody(request)), requestId)
         return
       }
+      const meetingRoute = requestUrl.pathname.match(/^\/v1\/(admin|tenant)\/meeting-minutes(?:\/([^/]+)(\/publish)?)?$/)
+      if (meetingRoute) {
+        const admin = meetingRoute[1] === 'admin', path = (meetingRoute[2] ?? '') + (meetingRoute[3] ?? '')
+        const readable = request.method === 'GET' && !meetingRoute[3]
+        const writable = admin && ((request.method === 'POST' && (!path || Boolean(meetingRoute[3]))) || (request.method === 'PATCH' && Boolean(path) && !meetingRoute[3]))
+        const access = await resolveTenantAccess(request, admin ? 'admin' : 'resident')
+        if (!readable && !writable) throw new ApiFault(405, 'invalid_request', 'Method not allowed')
+        const result = readable
+          ? await readMeetingMinutes(withTenantPool(access), access, admin, path, requestUrl.searchParams)
+          : await writeMeetingMinutes(withTenantPool(access), access, path, await readJsonBody(request, 1_048_576))
+        respond(response, !readable && !path ? 201 : 200, result, requestId)
+        return
+      }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/home') {
         const access = await resolveTenantAccess(request, 'resident')
         respond(response, 200, await getResidentHome(access, access.subject), requestId)
@@ -3692,7 +3708,8 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       const causeCode = String(errorObject?.code ?? errorObject?.cause?.code ?? 'unknown')
       const apartmentSchemaRequest = requestUrl.pathname === '/v1/admin/buildings' || requestUrl.pathname.startsWith('/v1/admin/residents') || requestUrl.pathname.startsWith('/v1/admin/resident-invitations') || requestUrl.pathname.startsWith('/v1/admin/resident-imports') || requestUrl.pathname.startsWith('/v1/public/resident-invitations') || requestUrl.pathname.startsWith('/v1/tenant/')
       const billingSchemaRequest = requestUrl.pathname.startsWith('/v1/admin/billing')
-      const tenantSchemaRequest = apartmentSchemaRequest || billingSchemaRequest
+      const meetingSchemaRequest = /^\/v1\/(admin|tenant)\/meeting-minutes(?:\/|$)/.test(requestUrl.pathname)
+      const tenantSchemaRequest = apartmentSchemaRequest || billingSchemaRequest || meetingSchemaRequest
       const tenantSchemaUnavailable = !apiFault && tenantSchemaRequest && ['42P01', '42703', '3F000'].includes(causeCode)
       const tenantDatabaseMissing = !apiFault && tenantSchemaRequest && causeCode === '3D000'
       if (!apiFault) {
@@ -3709,7 +3726,9 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
           reason,
         }))
       }
-      const dependencyMessage = tenantSchemaUnavailable && billingSchemaRequest
+      const dependencyMessage = tenantSchemaUnavailable && meetingSchemaRequest
+        ? 'Apply tenant migration 035_minutes_of_meeting.sql to the template and this tenant database before using Minutes of Meeting.'
+        : tenantSchemaUnavailable && billingSchemaRequest
         ? 'The selected tenant database is missing billing schema. Apply the required migrations/myapartment_tenant_db/005_billing_runs.sql through migrations/myapartment_tenant_db/009_billing_unit_exclusions.sql, then retry.'
         : tenantSchemaUnavailable && apartmentSchemaRequest
           ? 'The selected tenant database is missing apartment or resident-lifecycle schema. Apply migrations/myapartment_tenant_db/003_apartments.sql, migrations/myapartment_tenant_db/004_resident_invitations.sql, migrations/myapartment_tenant_db/010_resident_lifecycle.sql, and migrations/myapartment_tenant_db/030_bulk_resident_imports.sql to that tenant database, then rebuild and restart the API.'

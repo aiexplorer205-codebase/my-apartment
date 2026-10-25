@@ -11,6 +11,7 @@ This is a testable local product, not a production-supported release. Do not dep
 - Auth0 OTP is the identity proof. Do not accept a second OTP issuer or skip invitation acceptance.
 - Do not fake payment success, checkout, or worker job completion.
 - Invitation links are single-use and expire after seven days; delivery is email only.
+- Minutes of Meeting drafts are admin-only. Published notes/attendance snapshots are immutable; resident responses include attendee names and block/flat labels but no contact details, internal attendee IDs, or publisher subjects. Attendance never grants access.
 - Complaint/maintenance UUIDs stay the API identifiers; `CMP-`/`MNT-` are display references.
 - Production origins use HTTPS. Auth0 callback, logout, and web-origin lists must match those origins exactly.
 - Operator production access needs an approved private ingress (or equivalent) in addition to Auth0. Local loopback publish is not that control. `OPERATOR_WEB_PRIVATE_INGRESS` in Compose is not production ingress.

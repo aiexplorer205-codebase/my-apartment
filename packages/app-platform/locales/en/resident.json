@@ -38,7 +38,8 @@
       "payments": "Review your balance and record an offline payment.",
       "history": "A clear record of payments and confirmations.",
       "notices": "Announcements from your apartment community.",
-      "profile": "Your resident and block details."
+      "profile": "Your resident and block details.",
+      "meetingMinutes": "Meeting notes and community decisions."
     },
     "currentBill": "CURRENT BILL · {{period}}",
     "currentBalance": "CURRENT BALANCE",
@@ -72,4 +73,3 @@
     "noPublishedNotices": "No published announcements."
   }
 }
-

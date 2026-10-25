@@ -18,7 +18,7 @@ async function linkedRecords(client: PoolClient, table: string, ids: string[], i
      WHERE fk.contype = 'f' AND fk.confrelid = $1::regclass AND cardinality(fk.conkey) = 1`, [table])
   const reasons: string[] = []
   for (const ref of references.rows) {
-    if (ref.schema === 'public' && ignored.includes(ref.table)) continue
+    if (ref.schema === 'block9_tenant' && ignored.includes(ref.table)) continue
     const result = await client.query<{ count: number }>(
       `SELECT COUNT(*)::int AS count FROM ${identifier(ref.schema)}.${identifier(ref.table)} WHERE ${identifier(ref.column)} = ANY($1::uuid[])`, [ids])
     const count = result.rows[0]!.count
@@ -61,10 +61,10 @@ export async function propertySetupDeletion(pool: Pool, access: Access, raw: unk
     if (counts.active) blockers.push(`${counts.active} active or scheduled resident(s). Record move-out through the resident lifecycle.`)
     if (counts.historical) blockers.push(`${counts.historical} historical resident profile(s). Resident and financial history must be retained.`)
     if (invitations.rows.some((invitation) => invitation.status === 'accepted')) blockers.push('Accepted resident invitation history must be retained.')
-    blockers.push(...await linkedRecords(client, 'public.units', unitIds, ['residents', 'resident_invitations']))
-    if (blockIds.length) blockers.push(...await linkedRecords(client, 'public.apartment_buildings', blockIds, ['units']))
+    blockers.push(...await linkedRecords(client, 'block9_tenant.units', unitIds, ['residents', 'resident_invitations']))
+    if (blockIds.length) blockers.push(...await linkedRecords(client, 'block9_tenant.apartment_buildings', blockIds, ['units']))
     // Invitation references are protected before removing unaccepted invitations.
-    blockers.push(...await linkedRecords(client, 'public.resident_invitations', invitations.rows.map((invitation) => invitation.id), []))
+    blockers.push(...await linkedRecords(client, 'block9_tenant.resident_invitations', invitations.rows.map((invitation) => invitation.id), []))
     const pendingInvitations = invitations.rows.filter((invitation) => invitation.pending).length
     const reviewToken = createHash('sha256').update(JSON.stringify({ kind: input.kind, id: input.id, name, blockIds, unitIds, invitations: invitations.rows, blockers })).digest('hex')
     const review = { kind: input.kind, id: input.id, name, blockCount: blocks.rows.length, flatCount: units.rows.length, pendingInvitations, invitationCount: invitations.rows.length, blockers, canDelete: !blockers.length, reviewToken }

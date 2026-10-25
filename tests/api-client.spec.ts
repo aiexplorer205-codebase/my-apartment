@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiFetch,apiFetchBlob } from '../packages/api-client/src/index.ts'
+import { apiFetch,apiFetchBlob,ApiRequestError } from '../packages/api-client/src/index.ts'
 
 afterEach(()=>vi.unstubAllGlobals())
 describe('versioned API path boundaries',()=>{
@@ -8,6 +8,11 @@ describe('versioned API path boundaries',()=>{
     vi.stubGlobal('fetch',fetch)
     expect(await apiFetch('/v1/tenant/payments/history?search=receipt..2026')).toEqual({records:[]})
     expect(fetch).toHaveBeenCalledWith('/api/backend/v1/tenant/payments/history?search=receipt..2026',expect.objectContaining({cache:'no-store'}))
+  })
+  it('preserves HTTP status so draft forms distinguish rejected saves from interrupted saves',async()=>{
+    vi.stubGlobal('fetch',async()=>({ok:false,status:400,json:async()=>({message:'Choose attendees'})}))
+    await expect(apiFetch('/v1/admin/meeting-minutes',{method:'POST'})).rejects.toMatchObject({status:400,message:'Choose attendees'})
+    await expect(apiFetch('/v1/admin/meeting-minutes')).rejects.toBeInstanceOf(ApiRequestError)
   })
   it('rejects external, literal and encoded traversal paths before making a request',async()=>{
     const fetch=vi.fn();vi.stubGlobal('fetch',fetch)

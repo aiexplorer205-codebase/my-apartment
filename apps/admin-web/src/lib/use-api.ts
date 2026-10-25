@@ -53,3 +53,11 @@ export function useApiPost() {
     })
   }, [activeTenantId])
 }
+
+export function useApiPatch() {
+  const { activeTenantId } = useAuth0()
+  return useCallback(async <T extends object>(path: string, body: object): Promise<T> => apiFetch<T>(path, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(activeTenantId ? { 'X-Tenant-Id': activeTenantId } : {}) },
+    body: JSON.stringify(body),
+  }), [activeTenantId])
+}

@@ -37,7 +37,7 @@ Web apps keep server-side Auth0 sessions and proxy API calls through `/api/backe
 | `infrastructure/ports` | Ports |
 | `infrastructure/adapters` | Auth0, Postgres, Redis, Resend |
 
-Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`009`) and `migrations/myapartment_tenant_db` (`001`–`034`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
+Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`009`) and `migrations/myapartment_tenant_db` (`001`–`035`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
 
 Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,validation}.json`. Keep key parity. Validate with `pnpm platform:validate`.
 
@@ -63,11 +63,15 @@ SaaS tenant = one customer organization (may have multiple blocks/flats). Isolat
 
 **Resident:** tenant home, invoice breakdown, payment history, report offline payment, notices and polls, complaints (photos), profile, invitation accept.
 
-**Admin:** apartment setup (manual + CSV review/confirm), unused setup deletion, flats/residents and invitations, billing rules/preview/publish, invoice adjustments, collections (confirm offline reports), overdues, accounts (ledgers, reconciliation, opening balances, credits/refunds), complaints and maintenance (`CMP-`/`MNT-` display ids; UUIDs remain API ids), announcements/polls with retry-safe publication.
+**Admin:** apartment setup (manual + CSV review/confirm), unused setup deletion, flats/residents and invitations, billing rules/preview/publish, invoice adjustments, collections (confirm offline reports), overdues, accounts (ledgers, reconciliation, opening balances, credits/refunds), complaints and maintenance (`CMP-`/`MNT-` display ids; UUIDs remain API ids), announcements/polls with retry-safe publication, Minutes of Meeting drafts and reviewed publication with attendance by resident/block/flat.
 
 **Operator:** aggregate overview, create organization, retry provisioning, deactivate/reactivate/delete, audit log list, monetization/transaction views from API data. Campaigns and support consoles are placeholders.
 
 **Gated:** online checkout, worker jobs, report file exports, operator campaigns.
+
+### Minutes of Meeting
+
+[Minutes of Meeting](./minutes-of-meeting-plan.md) supports admin drafts, plain-text meeting notes, attendee selection by block/flat and person, and reviewed publication. Residents see the latest published meeting by meeting date, with older summaries fetched on demand. Publication is retry-safe and version-checked; published content and attendee name/flat snapshots are immutable. Resident responses exclude internal attendance identifiers and publisher subjects. Tenant migration `035_minutes_of_meeting.sql` is required before use; existing application databases were not migrated as part of implementation.
 
 ### Apartment setup (summary)
 
@@ -79,7 +83,7 @@ Review (`POST /v1/admin/apartment-setup/review`) stores an immutable draft. Conf
 
 ## API modules
 
-Feature code lives next to routes in `apps/api/src/` (`apartment-setup.ts`, `property-setup-deletion.ts`, `billing-*.ts`, `collections.ts`, `manual-payments.ts`, `accounts.ts`, `complaints.ts`, `maintenance.ts`, `resident-invitations.ts`, `admin-communications.ts`, and related files). `index.ts` wires HTTP, auth, and OpenAPI.
+Feature code lives next to routes in `apps/api/src/` (`apartment-setup.ts`, `property-setup-deletion.ts`, `billing-*.ts`, `collections.ts`, `manual-payments.ts`, `accounts.ts`, `complaints.ts`, `maintenance.ts`, `resident-invitations.ts`, `admin-communications.ts`, `meeting-minutes.ts`, and related files). `index.ts` wires HTTP, auth, and OpenAPI.
 
 ## Local vs production
 

@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from 'pg'
 import { ApiFault } from './api-fault.js'
 
 type Access={tenantId:string;subject:string;role:'admin'|'resident'}
-export async function publishCommunication(pool:Pool,access:Access,kind:'announcement'|'poll',key:unknown,payload:object,create:(client:PoolClient)=>Promise<{id:string}>){
+export async function publishCommunication(pool:Pool,access:Access,kind:'announcement'|'poll'|'meeting_minutes'|'meeting_minutes_draft',key:unknown,payload:object,create:(client:PoolClient)=>Promise<{id:string}>){
   if(access.role!=='admin')throw new ApiFault(403,'forbidden','Administrator permission is required')
   if(typeof key!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key))throw new ApiFault(400,'invalid_request','A valid publication request key is required')
   const hash=createHash('sha256').update(JSON.stringify(payload)).digest('hex'),client=await pool.connect()

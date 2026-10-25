@@ -20,7 +20,8 @@
     "@block9/design-tokens": "workspace:*",
     "@block9/ui": "workspace:*",
     "i18next": "^24.2.2",
-    "react-i18next": "^15.4.1"
+    "react-i18next": "^15.4.1",
+    "@block9/contracts": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.11.0",

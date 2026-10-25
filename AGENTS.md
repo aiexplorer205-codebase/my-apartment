@@ -17,6 +17,8 @@ docker/  compose.yaml  compose.dev.yaml
 
 Local how-to: [docs/local-setup.md](docs/local-setup.md). System: [docs/architecture.md](docs/architecture.md). Gates: [docs/security-and-ops.md](docs/security-and-ops.md). HTML frames (not product truth): `ui-prototype/ui_design_prototype/myapartment-screen-designs`.
 
+Minutes of Meeting: [feature details](docs/minutes-of-meeting-plan.md). Admin drafts/review/publication; resident latest/history. Published notes and attendance snapshots are immutable. Use resident UUIDs for selection; block/flat numbers are display labels, not authorization. Requires tenant migration `035`.
+
 ## Where to change what
 
 | Change | Place |
@@ -31,7 +33,7 @@ Local how-to: [docs/local-setup.md](docs/local-setup.md). System: [docs/architec
 | Ports vs Auth0/Postgres/Resend | `infrastructure/ports` vs `infrastructure/adapters` |
 | Schema | Next numbered `migrations/myapartment_{platform,tenant}_db/*.sql` then `scripts/run-migrations.sh` |
 
-Init on a new volume applies tenant SQL only through `029`. Apply `030`–`034` with the runner (`all-tenants` includes `myapartment_tenant_template`). Runner has no history table; do not re-apply a file that already ran.
+Init on a new volume applies tenant SQL only through `029`. Apply `030`–`035` with the runner (`all-tenants` includes `myapartment_tenant_template`). Runner has no history table; do not re-apply a file that already ran.
 
 ## Hard rules
 

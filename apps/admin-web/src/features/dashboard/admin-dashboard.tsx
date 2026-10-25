@@ -1,5 +1,6 @@
 'use client'
 
+import { AdminMeetingMinutes } from '../communications/meeting-minutes'
 import { ApartmentSetup } from '../residents/apartment-setup'
 import { DeletePropertySetup } from '../residents/delete-property-setup'
 import { InvoiceCorrections, BulkInvoiceCorrections } from '../accounts/billing-corrections'
@@ -59,6 +60,7 @@ const adminNavigation = [
   { label: 'Overdues', navKey: 'overdues', icon: 'alert', group: 'Finance' },
   { label: 'Accounts', navKey: 'accounts', icon: 'wallet', group: 'Finance' },
   { label: 'Announcements', navKey: 'announcements', icon: 'megaphone', group: 'Community' },
+  { label: 'Minutes of Meeting', navKey: 'meetingMinutes', icon: 'file', group: 'Community' },
   { label: 'Polls', navKey: 'polls', icon: 'chart', group: 'Community' },
   { label: 'Reports', navKey: 'reports', icon: 'chart', group: 'Administration' },
   { label: 'Settings', navKey: 'settings', icon: 'settings', group: 'Administration' },
@@ -85,7 +87,7 @@ function AdminNavIcon({ name }: { name: AdminIconName }) {
 }
 
 function AdminContent() {
-  type Section = 'Accounts' | 'More' | 'Maintenance' | 'Complaints' | 'Dashboard' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
+  type Section = 'Minutes of Meeting' | 'Accounts' | 'More' | 'Maintenance' | 'Complaints' | 'Dashboard' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
   const [section, setSection] = useState<Section>('Dashboard')
   const [navigationSearch, setNavigationSearch] = useState('')
   const [expenseTaskId, setExpenseTaskId] = useState<string | undefined>(undefined)
@@ -214,6 +216,7 @@ function AdminContent() {
           </>
           )}
         </> : section === 'Flats & Residents' ? <AdminResidents onStructureChanged={blockInventory.reload} />
+          : section === 'Minutes of Meeting' ? <AdminMeetingMinutes />
           : section === 'Announcements' ? <AdminAnnouncements />
           : section === 'Polls' ? <AdminPolls />
           : section === 'Billing' ? <AdminBilling />

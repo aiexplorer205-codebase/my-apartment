@@ -70,7 +70,7 @@ Firebase and Filebase variables in `.env.example` are unused by current flows.
 
 Init scripts on a **new** Postgres volume apply `migrations/myapartment_platform_db` `001`–`009` to database `myapartment_platform_db` in schema `block9_platform`, and `migrations/myapartment_tenant_db` `001`–`029` to `myapartment_tenant_template` in schema `block9_tenant`. Existing volumes are never reset. The runner does not record history; apply each file once, in order.
 
-Tenant migrations `030`–`034` (bulk import, setup deletion, apartment setup reviews, readable `CMP-`/`MNT-` references) are not in the init script. Apply them to the template and every tenant after first start, and after any volume that was created before those files existed:
+Tenant migrations `030`–`035` (bulk import, setup deletion, apartment setup reviews, readable `CMP-`/`MNT-` references, Minutes of Meeting) are not in the init script. Apply them to the template and every tenant after first start, and after any volume that was created before those files existed:
 
 ```sh
 scripts/run-migrations.sh tenant all-tenants \
@@ -78,8 +78,17 @@ scripts/run-migrations.sh tenant all-tenants \
   031_property_setup_deletion.sql \
   032_delete_all_property_setup.sql \
   033_apartment_setup.sql \
-  034_readable_work_references.sql
+  034_readable_work_references.sql \
+  035_minutes_of_meeting.sql
 ```
+
+If `030`–`034` have already run, apply only the new MoM migration once:
+
+```sh
+scripts/run-migrations.sh tenant all-tenants 035_minutes_of_meeting.sql
+```
+
+MoM appears under Community in admin and in resident navigation. Admins save drafts, select attendees by block/flat/person, review, and publish. Residents open the latest meeting by meeting date and fetch older meetings on demand. Published notes and attendance snapshots cannot be edited. No new provider keys or worker processes are needed.
 
 `all-tenants` updates `myapartment_tenant_template` and every database in `myapartment_platform_db.tenant_records`. Then rebuild the API:
 

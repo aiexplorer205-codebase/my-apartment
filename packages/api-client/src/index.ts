@@ -1,5 +1,9 @@
 export type ApiErrorBody = { message?: string; code?: string }
 
+export class ApiRequestError extends Error {
+  constructor(readonly status: number, message: string) { super(message); this.name = 'ApiRequestError' }
+}
+
 function validatePath(path:string){
   let pathname: string
   try { pathname = decodeURIComponent(path.split(/[?#]/, 1)[0] ?? '') } catch { throw new Error('API paths must be relative versioned routes') }
@@ -12,7 +16,7 @@ export async function apiFetch<T>(path: string, init: globalThis.RequestInit = {
   validatePath(path)
   const response = await globalThis.fetch(`/api/backend${path}`, { ...init, cache: 'no-store' })
   const payload = await response.json() as T & ApiErrorBody
-  if (!response.ok) throw new Error(payload.message ?? `Request failed (${response.status})`)
+  if (!response.ok) throw new ApiRequestError(response.status, payload.message ?? `Request failed (${response.status})`)
   return payload
 }
 

@@ -1,5 +1,7 @@
 'use client'
 
+import { ResidentMeetingMinutes } from '../meeting-minutes/resident-meeting-minutes'
+
 import { ResidentUpdatesWorkspace, type UpdatesState } from '../updates/resident-updates'
 import { ResidentProfileWorkspace, type ResidentProfile } from '../profile/resident-profile'
 import { PaymentHistory, type PaymentHistoryState } from '../payments/payment-history'
@@ -72,12 +74,13 @@ type ResidentHome = {
 
 type ResidentNotice = Omit<Notice, 'publishedAt'> & { createdAt: string; channel: string; startsAt: string; endsAt: string | null }
 type ResidentPoll = { id:string; question:string; startsAt:string; endsAt:string; resultsVisibleUntil:string; resultsRetentionDays:number; status:string; anonymous:boolean; showResultsLive:boolean; hasVoted:boolean; myOptionId:string|null; canChangeVote:boolean; isLive:boolean; options:Array<{id:string;label:string}>; results:Array<{id:string;label:string;votes:number}>|null; voters:Array<{full_name:string;unit:string;option:string}> }
-type ActiveTab = 'complaints' | 'home' | 'payments' | 'history' | 'notices' | 'profile'
+type ActiveTab = 'meetingMinutes' | 'complaints' | 'home' | 'payments' | 'history' | 'notices' | 'profile'
 
 const residentNavigation: Array<{ tab: ActiveTab; label: string; navKey: string; icon: 'home' | 'wallet' | 'history' | 'bell' | 'user' }> = [
   { tab: 'home', label: 'Home', navKey: 'home', icon: 'home' },
   { tab: 'payments', label: 'Payments', navKey: 'billing', icon: 'wallet' },
     { tab: 'notices', label: 'Updates', navKey: 'updates', icon: 'bell' },
+  { tab: 'meetingMinutes', label: 'Minutes of Meeting', navKey: 'meetingMinutes', icon: 'history' },
   { tab: 'complaints', label: 'Complaints', navKey: 'complaints', icon: 'history' },
   { tab: 'profile', label: 'Profile', navKey: 'profile', icon: 'user' },
 ]
@@ -301,7 +304,7 @@ function ResidentContent() {
             return (
               <button key={tab} type="button" className={activeTab === tab || (activeTab === 'history' && tab === 'payments') ? 'nav-item active' : 'nav-item'} aria-label={translatedLabel} title={translatedLabel} aria-current={activeTab === tab || (activeTab === 'history' && tab === 'payments') ? 'page' : undefined} onClick={() => setActiveTab(tab)}>
                 <ResidentNavIcon name={icon} />
-                <span className="nav-label">{translatedLabel}</span>
+                <span className="nav-label">{tab === 'meetingMinutes' ? <><span className="resident-nav-full-label">{translatedLabel}</span><span className="resident-nav-short-label">{t('common:meetings.shortTitle')}</span></> : translatedLabel}</span>
                 {tab === 'notices' && unreadNoticeCount > 0 && <span className="resident-nav-count">{unreadNoticeCount}</span>}
               </button>
             )
@@ -521,6 +524,7 @@ function ResidentContent() {
 
         {activeTab === 'history' && <PaymentHistory state={historyState} setState={setHistoryState} onBackToPayments={() => setActiveTab('payments')} />}
 
+        {activeTab === 'meetingMinutes' && <ResidentMeetingMinutes />}
         {activeTab === 'notices' && <ResidentUpdatesWorkspace state={updatesState} setState={setUpdatesState} onRead={refreshUpdates}/>}
 
         {activeTab === 'profile' && <ResidentProfileWorkspace data={profile.data} loading={profile.loading} error={profile.error} onRetry={profile.reload} onSaved={() => {profile.reload();home.reload()}} />}
