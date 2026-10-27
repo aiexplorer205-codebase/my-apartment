@@ -2,6 +2,8 @@
 
 This is a testable local product, not a production-supported release. Do not deploy until the gates below are owned and verified.
 
+The [AWS pilot deployment plan](aws-pilot.md) records the agreed Free plan budget, `block9.online` / Cloudflare setup, private SSM operator path, deployment configuration, backup procedure, and unresolved launch gates. Preparing those files does not close the gates below.
+
 ## Invariants (do not weaken)
 
 - Never commit secrets, `.env`, tokens, database locators, or real resident data.

@@ -1,0 +1,130 @@
+# Always combine with compose.yaml; never add compose.dev.yaml.
+# Deploy previously built, scanned images by immutable digest. See docs/aws-pilot.md.
+x-runtime: &runtime
+  restart: unless-stopped
+  init: true
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options:
+      max-size: '10m'
+      max-file: '3'
+
+services:
+  postgres:
+    <<: *runtime
+    ports: !reset []
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: myapartment_platform_db
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique production database password}
+    shm_size: 128mb
+    stop_grace_period: 60s
+
+  redis:
+    <<: *runtime
+    ports: !reset []
+
+  api:
+    <<: *runtime
+    build: !reset null
+    image: ${API_IMAGE:?Set API_IMAGE to a tested image digest}
+    ports: !reset []
+    environment:
+      NODE_ENV: production
+      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:?Set production platform URL}
+      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:?Set production template URL}
+      REDIS_URL: redis://redis:6379
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:?Set production Auth0 domain}
+      AUTH0_ISSUER: ${AUTH0_ISSUER:?Set production Auth0 issuer}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:?Set production API audience}
+      AUTH0_MGMT_CLIENT_ID: ${AUTH0_MGMT_CLIENT_ID:?Set Management API client}
+      AUTH0_MGMT_CLIENT_SECRET: ${AUTH0_MGMT_CLIENT_SECRET:?Set Management API secret}
+      OPERATOR_IDS: ${OPERATOR_IDS:?Set exact approved Auth0 subjects}
+      OPERATOR_ID: ${OPERATOR_ID:?Set primary approved Auth0 subject}
+      AUTH0_OTP_ENABLED: 'true'
+      RESEND_API_KEY: ${RESEND_API_KEY:?Set production Resend key}
+      RESEND_FROM: ${RESEND_FROM:?Set verified email sender}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set exact HTTPS origins}
+      ADMIN_WEB_PUBLIC_URL: https://${ADMIN_HOST:?Set admin hostname}
+      RESIDENT_WEB_PUBLIC_URL: https://${RESIDENT_HOST:?Set resident hostname}
+    stop_grace_period: 30s
+
+  login-web:
+    <<: *runtime
+    build: !reset null
+    image: ${LOGIN_IMAGE:?Set tested login image digest}
+    ports: !reset []
+    environment:
+      ADMIN_WEB_PUBLIC_URL: https://${ADMIN_HOST}
+      RESIDENT_WEB_PUBLIC_URL: https://${RESIDENT_HOST}
+
+  resident-web:
+    <<: *runtime
+    build: !reset null
+    image: ${RESIDENT_IMAGE:?Set tested resident image digest}
+    ports: !reset []
+    environment:
+      AUTH0_CLIENT_ID: ${AUTH0_RESIDENT_CLIENT_ID:?Set resident client}
+      AUTH0_CLIENT_SECRET: ${AUTH0_RESIDENT_CLIENT_SECRET:?Set resident secret}
+      AUTH0_SECRET: ${AUTH0_RESIDENT_SECRET:?Set independent session secret}
+      APP_BASE_URL: https://${RESIDENT_HOST}
+
+  admin-web:
+    <<: *runtime
+    build: !reset null
+    image: ${ADMIN_IMAGE:?Set tested admin image digest}
+    ports: !reset []
+    environment:
+      AUTH0_CLIENT_ID: ${AUTH0_ADMIN_CLIENT_ID:?Set admin client}
+      AUTH0_CLIENT_SECRET: ${AUTH0_ADMIN_CLIENT_SECRET:?Set admin secret}
+      AUTH0_SECRET: ${AUTH0_ADMIN_SECRET:?Set independent session secret}
+      APP_BASE_URL: https://${ADMIN_HOST}
+      RESIDENT_WEB_PUBLIC_URL: https://${RESIDENT_HOST}
+
+  operator-web:
+    <<: *runtime
+    build: !reset null
+    image: ${OPERATOR_IMAGE:?Set tested operator image digest}
+    ports: !reset []
+    environment:
+      AUTH0_CLIENT_ID: ${AUTH0_OPERATOR_CLIENT_ID:?Set operator client}
+      AUTH0_CLIENT_SECRET: ${AUTH0_OPERATOR_CLIENT_SECRET:?Set operator secret}
+      AUTH0_SECRET: ${AUTH0_OPERATOR_SECRET:?Set independent session secret}
+      APP_BASE_URL: https://${OPERATOR_HOST:?Set operator hostname}:8443
+      OPERATOR_WEB_PRIVATE_INGRESS: 'true'
+
+  # Neither the health-only worker nor the local HTTP proxy is part of the pilot.
+  worker:
+    profiles: [local-only]
+    ports: !reset []
+  reverse-proxy:
+    profiles: [local-only]
+    ports: !reset []
+
+  edge:
+    <<: *runtime
+    image: ${CADDY_IMAGE:?Set tested Caddy image digest}
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?Set certificate contact email}
+      LOGIN_HOST: ${LOGIN_HOST:?Set login hostname}
+      ADMIN_HOST: ${ADMIN_HOST}
+      RESIDENT_HOST: ${RESIDENT_HOST}
+      OPERATOR_HOST: ${OPERATOR_HOST}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '127.0.0.1:8443:8443'
+    volumes:
+      - ./infrastructure/proxy/Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      login-web: {condition: service_healthy}
+      resident-web: {condition: service_healthy}
+      admin-web: {condition: service_healthy}
+      operator-web: {condition: service_healthy}
+
+volumes:
+  caddy-data:
+  caddy-config:

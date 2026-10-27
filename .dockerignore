@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+backups
 node_modules
 **/node_modules
 .next

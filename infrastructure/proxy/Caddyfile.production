@@ -1,0 +1,48 @@
+{
+  email {$ACME_EMAIL}
+  admin off
+}
+
+(headers) {
+  header {
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options nosniff
+    Referrer-Policy no-referrer
+    -Server
+  }
+}
+
+{$LOGIN_HOST} {
+  import headers
+  request_body {
+    max_size 1MB
+  }
+  reverse_proxy login-web:3000
+}
+
+{$RESIDENT_HOST} {
+  import headers
+  request_body {
+    max_size 22MB
+  }
+  reverse_proxy resident-web:3000
+}
+
+{$ADMIN_HOST} {
+  import headers
+  request_body {
+    max_size 22MB
+  }
+  reverse_proxy admin-web:3000
+}
+
+# Port 8443 is published ONLY on host loopback. Security group also denies it.
+# All four names resolve publicly for ACME HTTP challenges, including this one.
+# No public operator route on port 443; no public API route on any hostname.
+https://{$OPERATOR_HOST}:8443 {
+  import headers
+  request_body {
+    max_size 1MB
+  }
+  reverse_proxy operator-web:3000
+}

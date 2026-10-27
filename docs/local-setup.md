@@ -2,6 +2,8 @@
 
 Run MyApartment by BLOCK9 on Docker Compose with a non-production Auth0 tenant. Do not use production credentials.
 
+For the AWS pilot deployment plan and launch gates, see [AWS pilot](aws-pilot.md).
+
 ## Prerequisites
 
 - Node.js 22+, Corepack, pnpm 9.15.0

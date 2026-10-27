@@ -23,7 +23,7 @@ describe('i18n Localization', () => {
     const i18n = createI18nInstance('en', ['common', 'validation'])
     expect(i18n.t('actions.save', { ns: 'common' })).toBe('Save')
     expect(i18n.t('actions.cancel', { ns: 'common' })).toBe('Cancel')
-    expect(i18n.t('navigation.overview', { ns: 'common' })).toBe('Overview')
+    expect(i18n.t('navigation.overview', { ns: 'common' })).toBe('Dashboard')
     expect(i18n.t('status.loading', { ns: 'common' })).toBe('Loading...')
   })
 
@@ -31,7 +31,7 @@ describe('i18n Localization', () => {
     const i18n = createI18nInstance('te', ['common', 'validation'])
     expect(i18n.t('actions.save', { ns: 'common' })).toBe('భద్రపరచు')
     expect(i18n.t('actions.cancel', { ns: 'common' })).toBe('రద్దు చేయి')
-    expect(i18n.t('navigation.overview', { ns: 'common' })).toBe('అవలోకనం')
+    expect(i18n.t('navigation.overview', { ns: 'common' })).toBe('డ్యాష్‌బోర్డ్')
     expect(i18n.t('status.loading', { ns: 'common' })).toBe('లోడ్ అవుతోంది...')
   })
 
