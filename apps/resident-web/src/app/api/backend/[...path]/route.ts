@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { auth0 } from '../../../../lib/auth0'
+import { sameOrigin } from '../../../../lib/security-request'
 
 const API_BASE_URL = (process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4101').replace(/\/$/, '')
 const PUBLIC_PREFIX = '/v1/public/'
@@ -8,6 +9,9 @@ const PUBLIC_PREFIX = '/v1/public/'
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params
   const apiPath = `/${path.join('/')}`
+  if (request.method === 'POST' && ['/v1/public/resident-invitations/accept', '/v1/resident/security/revoke-sessions'].includes(apiPath) && !sameOrigin(request)) {
+    return NextResponse.json({ message: 'Request was not accepted' }, { status: 403, headers: { 'cache-control': 'no-store' } })
+  }
   const incomingUrl = new URL(request.url)
   const targetUrl = `${API_BASE_URL}${apiPath}${incomingUrl.search}`
   const headers = new globalThis.Headers()

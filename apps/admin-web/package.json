@@ -11,20 +11,22 @@
   },
   "dependencies": {
     "@auth0/nextjs-auth0": "^4.32.0",
-    "next": "^15.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
     "@block9/api-client": "workspace:*",
     "@block9/app-platform": "workspace:*",
     "@block9/auth-types": "workspace:*",
+    "@block9/contracts": "workspace:*",
     "@block9/design-tokens": "workspace:*",
     "@block9/ui": "workspace:*",
     "i18next": "^24.2.2",
-    "react-i18next": "^15.4.1",
-    "@block9/contracts": "workspace:*"
+    "next": "^15.0.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-i18next": "^15.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.11.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.7.0"

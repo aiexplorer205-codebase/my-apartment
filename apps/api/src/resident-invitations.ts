@@ -8,6 +8,18 @@ export const createResidentInvitationToken = (tenantId: string): { token: string
 export const hashResidentInvitationToken = (token: string): string =>
   createHash('sha256').update(token).digest('hex')
 
+export const sendResidentSecurityEmail = async (email: string): Promise<void> => {
+  const apiKey = process.env.RESEND_API_KEY?.trim(), from = process.env.RESEND_FROM?.trim()
+  if (!apiKey || !from || apiKey === 'replace-with-resend-key') throw new Error('Configure Resend to send security notifications')
+  const response = await globalThis.fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to: [email], subject: 'MyApartment sign-in access updated', text: 'A request was made to sign out your previous MyApartment app sessions following a passkey replacement. Sign in again using your verified email OTP or your new passkey. If you did not request this, contact your apartment administrator.' }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error('Security notification could not be delivered')
+}
+
 const escapeHtml = (value: string): string =>
   value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
 

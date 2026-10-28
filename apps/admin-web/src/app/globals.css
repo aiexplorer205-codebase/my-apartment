@@ -1792,3 +1792,9 @@ button, input, select, textarea { font: inherit; }
 
 .operations-clickable-row { cursor: pointer; }
 .admin-shell .operations-table .operations-clickable-row:focus-within { background: var(--bg); }
+
+.signup-qr-dialog { margin: auto; width: min(480px, calc(100vw - 24px)); border-radius: 16px; color: inherit; }
+.signup-qr-dialog::backdrop { background: #102b3bb3; }
+.signup-qr-dialog canvas { display: block; max-width: 100%; height: auto !important; margin: 16px auto; }
+.signup-qr-dialog p { margin: 12px 0; line-height: 1.5; }
+.signup-qr-dialog > button { margin: 4px; }

@@ -264,7 +264,7 @@ form:has([role="alert"]) textarea:user-invalid {
   font-weight: 600;
 }
 
-.auth-form input, .embedded-login-form input {
+.auth-form input, .auth-form select, .embedded-login-form input {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;

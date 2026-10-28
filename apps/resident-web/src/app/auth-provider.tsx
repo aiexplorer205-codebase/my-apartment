@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 
 type AuthUser = { email?: string; name?: string; sub?: string }
-type LoginOptions = { authorizationParams?: { login_hint?: string; connection?: string; prompt?: string; scope?: string }; appState?: { returnTo?: string } }
+type LoginOptions = { authorizationParams?: { login_hint?: string; screen_hint?: string; connection?: string; prompt?: string; scope?: string }; appState?: { returnTo?: string } }
 type AuthContextValue = {
   isLoading: boolean
   isAuthenticated: boolean

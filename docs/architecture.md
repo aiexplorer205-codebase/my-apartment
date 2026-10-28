@@ -54,16 +54,16 @@ SaaS tenant = one customer organization (may have multiple blocks/flats). Isolat
 ## Auth and invitations
 
 - API validates JWT issuer, audience, signature/JWKS, and expiry.
-- Resident and admin sign-in: Auth0 email OTP, embedded in each app.
+- Resident sign-in: Auth0 Universal Login on a database connection, with required verified email OTP and optional passkeys. Admin sign-in retains embedded Auth0 email OTP.
 - Operator: separate Auth0 app; API require `OPERATOR_IDS` exact `sub` match.
 - Operator onboarding clones `myapartment_tenant_template`, creates the admin in Auth0 via Management API, emails a seven-day single-use link (Resend). Accepting requires OTP on the invited email.
-- Resident invitations use the same pattern. SMS/WhatsApp OTP is not enabled.
+- Residents join through a flat-specific signup QR or an email invitation. Both require verified Auth0 email and explicit acceptance before platform membership is created. Resident identities are created by Auth0, without pre-provisioning legacy passwordless users. SMS/WhatsApp OTP is not enabled. See [resident authentication setup](./resident-authentication.md).
 
 ## Product (shipped)
 
 **Resident:** tenant home, invoice breakdown, payment history, report offline payment, notices and polls, complaints (photos), profile, invitation accept.
 
-**Admin:** apartment setup (manual + CSV review/confirm), unused setup deletion, flats/residents and invitations, billing rules/preview/publish, invoice adjustments, collections (confirm offline reports), overdues, accounts (ledgers, reconciliation, opening balances, credits/refunds), complaints and maintenance (`CMP-`/`MNT-` display ids; UUIDs remain API ids), announcements/polls with retry-safe publication, Minutes of Meeting drafts and reviewed publication with attendance by resident/block/flat.
+**Admin:** apartment setup (manual review/confirm), unused setup deletion, flats/residents and invitations, billing rules/preview/publish, invoice adjustments, collections (confirm offline reports), overdues, accounts (ledgers, reconciliation, opening balances, credits/refunds), complaints and maintenance (`CMP-`/`MNT-` display ids; UUIDs remain API ids), announcements/polls with retry-safe publication, Minutes of Meeting drafts and reviewed publication with attendance by resident/block/flat.
 
 **Operator:** aggregate overview, create organization, retry provisioning, deactivate/reactivate/delete, audit log list, monetization/transaction views from API data. Campaigns and support consoles are placeholders.
 
@@ -75,7 +75,7 @@ SaaS tenant = one customer organization (may have multiple blocks/flats). Isolat
 
 ### Apartment setup (summary)
 
-Review (`POST /v1/admin/apartment-setup/review`) stores an immutable draft. Confirm (`…/confirm`) creates blocks/flats and durable invitation rows in one transaction; email is sent after commit and can be retried. CSV: one row per new flat, columns `block,floor,flatNumber,fullName,email,phone,occupancyType,startDate` (omit `block` when the apartment allows only one). Uploads never overwrite existing flats.
+Review (`POST /v1/admin/apartment-setup/review`) stores an immutable structure draft. Confirm (`…/confirm`) creates blocks/flats in one transaction. Resident details in structure setup are rejected; bulk CSV onboarding is removed. After saving a flat, admins generate a seven-day single-use signup QR or manually enter resident details and send an email invitation. QR tokens are generated and hashed server-side, rendered locally by the admin browser, and rotated on regeneration. A tenant-wide invitation lock serializes signup, invitation creation, QR generation and resident move-out.
 
 ### Unused setup deletion (summary)
 

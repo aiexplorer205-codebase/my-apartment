@@ -21,7 +21,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createHash, randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 
-import { createRemoteJWKSet, jwtVerify } from 'jose'
+import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import type { PoolClient } from 'pg'
 
 import { meetingMinutesPaths, meetingMinutesSchemas } from '@block9/contracts'
@@ -29,11 +29,14 @@ import type { HealthResponse, ApiErrorResponse, OpenApiBootstrap } from '@block9
 import { AuthorizationError, ValidationError } from '@block9/shared'
 import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from './billing-calculations.js'
 import { createAdminInvitationToken, hashAdminInvitationToken, sendAdminInvitationEmail } from './admin-invitations.js'
-import { createResidentInvitationToken, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
+import { assertSessionNotRevoked } from './resident-session-security.js'
+import { issueResidentSignupQr } from './resident-signup-qr.js'
+import { createResidentInvitationToken, hashResidentInvitationToken, sendResidentInvitationEmail, sendResidentSecurityEmail } from './resident-invitations.js'
 import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
 import { checkDatabaseReadiness, dropTenantDatabase, getPlatformPool, getTenantPool, provisionTenantDatabase } from './persistence.js'
 
 interface AuthenticatedSubject {
+  clientId?: string
   subject: string
   organizationId?: string
   accessToken: string
@@ -83,23 +86,28 @@ const authenticate = async (request: IncomingMessage): Promise<AuthenticatedSubj
     throw new ApiFault(503, 'configuration_error', 'Auth0 API audience is not configured')
   }
 
+  let payload: JWTPayload
   try {
     if (!jwks || jwksIssuer !== issuer) {
       jwks = createRemoteJWKSet(new URL('.well-known/jwks.json', issuer))
       jwksIssuer = issuer
     }
-    const { payload } = await jwtVerify(token, jwks, { issuer, audience })
-    if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
-      throw new ApiFault(401, 'unauthorized', 'The access token has no subject')
-    }
-    return {
-      subject: payload.sub,
-      organizationId: typeof payload.org_id === 'string' ? payload.org_id : undefined,
-      accessToken: token,
-    }
-  } catch (error) {
-    if (error instanceof ApiFault) throw error
+    const verified = await jwtVerify(token, jwks, { issuer, audience })
+    payload = verified.payload
+  } catch {
     throw new ApiFault(401, 'unauthorized', 'The Auth0 access token is invalid or expired')
+  }
+  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
+    throw new ApiFault(401, 'unauthorized', 'The access token has no subject')
+  }
+  const revocation = await getPlatformPool().query<{ revoked_before: Date }>(
+    'SELECT revoked_before FROM resident_session_revocations WHERE subject = $1', [payload.sub])
+  assertSessionNotRevoked(payload, revocation.rows[0]?.revoked_before)
+  return {
+    subject: payload.sub,
+    clientId: typeof payload.azp === 'string' ? payload.azp : undefined,
+    organizationId: typeof payload.org_id === 'string' ? payload.org_id : undefined,
+    accessToken: token,
   }
 }
 
@@ -597,6 +605,12 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/admin/residents/{residentId}/settle-dues': {
       post: { tags: ['tenant'], summary: 'Record receipt of a former resident’s outstanding dues', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Outstanding invoices marked paid with confirmed payment records' }, '403': { description: 'Administrator permission required' }, '404': { description: 'Resident not found' }, '409': { description: 'Pending payments must be resolved first' } } },
     },
+    '/v1/admin/resident-signup-qr': {
+      post: { tags: ['tenant'], summary: 'Generate a seven-day single-use flat signup capability; replaces previous pending QR', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Signup URL, flat label, expiry; render QR locally' }, '403': { description: 'Administrator required' }, '404': { description: 'Tenant flat not found' }, '409': { description: 'Flat occupied or email invitation pending' } } },
+    },
+    '/v1/resident/security/revoke-sessions': {
+      post: { tags: ['tenant'], summary: 'Invalidate previous application sessions for the authenticated subject', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Previous sign-ins denied; fresh authentication required' }, '401': { description: 'Authentication required' } } },
+    },
     '/v1/admin/resident-invitations': {
       get: { tags: ['tenant'], summary: 'List recent resident invitations', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped invitations' }, '403': { description: 'Administrator permission required' } } },
       post: { tags: ['tenant'], summary: 'Invite a resident to a unit by email', description: 'Requires fullName, email, optional phone, unitId, and occupancyType (owner or tenant). startDate is optional and defaults to the current date. Email OTP identity verification is required to accept. Resident access starts on startDate. The one-time link expires in seven days.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Invitation saved and email sent' }, '400': { description: 'Invalid invitation details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Resident already exists or another administrator owns the pending invitation' }, '503': { description: 'Invitation saved but email delivery failed' } } },
@@ -605,16 +619,13 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
       get: { tags: ['tenant'], summary: 'Read block allowances and all existing flats for apartment setup', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Scoped blocks, flat allowances and inventory' }, '403': { description: 'Administrator required' } } },
     },
     '/v1/admin/apartment-setup/review': {
-      post: { tags: ['tenant'], summary: 'Validate and save an immutable apartment structure review with optional resident details', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Field and CSV row errors, or saved review ID with building preview and totals. Errors block the entire import; no property structure or emails created.' }, '403': { description: 'Administrator required' } } },
+      post: { tags: ['tenant'], summary: 'Validate and save an immutable apartment structure review; onboard residents individually afterwards', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Field errors or saved review ID with building preview and totals. Resident details in structure setup are rejected.' }, '403': { description: 'Administrator required' } } },
     },
     '/v1/admin/apartment-setup/confirm': {
-      post: { tags: ['tenant'], summary: 'Recheck allowances and atomically create the reviewed apartment structure and durable invitation rows', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Saved result with invitation row IDs to send after commit; repeated confirmations return the original result' }, '403': { description: 'Administrator required' }, '404': { description: 'Review not found for this tenant and administrator' }, '409': { description: 'Allowances or structure changed; nothing created' } } },
+      post: { tags: ['tenant'], summary: 'Recheck allowances and atomically create the reviewed apartment structure', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Saved structure result; repeated confirmations return the original result' }, '403': { description: 'Administrator required' }, '404': { description: 'Review not found for this tenant and administrator' }, '409': { description: 'Allowances or structure changed; nothing created' } } },
     },
     '/v1/admin/apartment-setup/latest': {
       get: { tags: ['tenant'], summary: 'Resume this administrator’s latest apartment setup invitations with current delivery statuses', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Confirmed setup result and invitation delivery statuses' }, '403': { description: 'Administrator required' } } },
-    },
-    '/v1/admin/resident-imports/{rowId}/send': {
-      post: { tags: ['tenant'], summary: 'Confirm and send one reviewed resident invitation, skipping completed rows', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Sent or failed result; failed rows can be retried' }, '404': { description: 'Import row not found for this administrator and tenant' } } },
     },
     '/v1/admin/resident-invitations/{invitationId}/revoke': {
       post: { tags: ['tenant'], summary: 'Revoke a pending resident invitation', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Invitation revoked' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Invitation is no longer pending' } } },
@@ -682,7 +693,7 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
       post: { tags: ['auth'], summary: 'Send an Email OTP only to an existing passwordless account', responses: { '200': { description: 'If the account exists, a sign-in code was sent' }, '400': { description: 'Invalid email or application' }, '503': { description: 'Identity service unavailable' } } },
     },
     '/v1/public/resident-invitations/lookup': {
-      post: { tags: ['tenant'], summary: 'Resolve a resident invitation before Email OTP sign-in', responses: { '200': { description: 'Invited email, organization, and unit' }, '400': { description: 'Invitation is invalid, expired, or already accepted' } } },
+      post: { tags: ['tenant'], summary: 'Resolve an email invitation or flat signup QR before verified Auth0 sign-in', responses: { '200': { description: 'Invited email, organization, and unit' }, '400': { description: 'Invitation is invalid, expired, or already accepted' } } },
     },
     '/v1/public/resident-invitations/accept': {
       post: { tags: ['tenant'], summary: 'Accept a resident invitation with verified email identity', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident record and tenant membership activated' }, '400': { description: 'Invitation is invalid, expired, or already accepted' }, '403': { description: 'Verified email does not match the invitation' } } },
@@ -1501,19 +1512,19 @@ export const parseResidentInvitationInput = (input: unknown): ResidentInvitation
 
 const requireResidentInvitationSchema = async (access: TenantAccess): Promise<void> => {
   const result = await withTenantPool(access).query<{ ready: boolean }>(
-    `SELECT to_regclass('public.resident_invitations') IS NOT NULL
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'residents' AND column_name = 'occupancy_type')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'residents' AND column_name = 'move_out_date')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'resident_invitations' AND column_name = 'start_date') AS ready`,
+    `SELECT to_regclass('block9_tenant.resident_invitations') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'residents' AND column_name = 'occupancy_type')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'residents' AND column_name = 'move_out_date')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'resident_invitations' AND column_name = 'kind') AS ready`,
   )
-  if (!result.rows[0]?.ready) throw new ApiFault(503, 'dependency_unavailable', 'Resident lifecycle support is not installed for this tenant database. Apply migrations/myapartment_tenant_db/010_resident_lifecycle.sql, then retry.')
+  if (!result.rows[0]?.ready) throw new ApiFault(503, 'dependency_unavailable', 'Resident lifecycle support is not installed for this tenant database. Apply tenant migrations through 036_resident_qr_signup.sql, then retry.')
 }
 
 const getAdminResidentInvitations = async (access: TenantAccess) => {
   requireRole(access, 'admin')
   await requireResidentInvitationSchema(access)
   const result = await withTenantPool(access).query(
-    `SELECT i.id, i.unit_id AS "unitId", i.full_name AS "fullName", i.email::text AS email, i.phone,
+    `SELECT i.id, i.kind, i.unit_id AS "unitId", COALESCE(i.full_name, 'Resident signup QR') AS "fullName", i.email::text AS email, i.phone,
             i.occupancy_type AS "occupancyType", i.invited_by AS "invitedBy", i.status, i.start_date::text AS "startDate",
             CASE WHEN i.status = 'pending' AND i.expires_at <= NOW() THEN 'expired' ELSE i.status END AS "displayStatus",
             i.expires_at AS "expiresAt", u.number AS unit, u.building_name AS building
@@ -1539,7 +1550,7 @@ const revokeAdminResidentInvitation = async (access: TenantAccess, invitationId:
   return { id: invitationId, status: 'revoked' as const }
 }
 
-const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unknown, requestId: string, bulkRowId?: string) => {
+const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unknown, requestId: string) => {
   requireRole(access, 'admin')
   await requireResidentInvitationSchema(access)
   const input = parseResidentInvitationInput(rawInput)
@@ -1573,13 +1584,12 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     )
     if (activeResident.rowCount) throw new ApiFault(409, 'invalid_request', 'This unit already has an active resident. Refresh the unit list and choose another unit.')
     unitLabel = `${unit.rows[0].building_name} · ${unit.rows[0].number}`
-    const pending = await client.query<{ id: string; invited_by: string; bulk_row_id: string | null }>(
-      `SELECT id, invited_by, bulk_row_id FROM resident_invitations
+    const pending = await client.query<{ id: string; invited_by: string }>(
+      `SELECT id, invited_by FROM resident_invitations
        WHERE tenant_id = $1 AND lower(email::text) = $2 AND status = 'pending' FOR UPDATE`,
       [access.tenantId, input.email],
     )
     const existing = pending.rows[0]
-    if (bulkRowId && existing && existing.bulk_row_id !== bulkRowId) throw new ApiFault(409, 'invalid_request', 'This email already has a pending invitation')
     if (existing && existing.invited_by !== access.subject) {
       throw new ApiFault(409, 'invalid_request', 'A pending invitation for this email is already managed by another administrator')
     }
@@ -1610,7 +1620,6 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
       )
       invitationId = inserted.rows[0]?.id ?? ''
     }
-    if (bulkRowId) await client.query('UPDATE resident_invitations SET bulk_row_id = $2 WHERE id = $1', [invitationId, bulkRowId])
     if (!invitationId) throw new ApiFault(500, 'data_integrity_error', 'Invitation was not saved')
     await client.query('COMMIT')
   } catch (error) {
@@ -1622,13 +1631,6 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     throw error
   } finally {
     client.release()
-  }
-
-  try {
-    await provisionPasswordlessUser(input.email)
-  } catch {
-    console.error(JSON.stringify({ level: 'error', event: 'resident_invitation_auth0_provisioning_failed', requestId, tenantId: access.tenantId, invitationId }))
-    throw new ApiFault(503, 'dependency_unavailable', 'The invitation was saved, but the resident’s Email OTP identity could not be prepared. Check Auth0 user-provisioning settings and retry.')
   }
 
   const baseUrl = (process.env.RESIDENT_WEB_PUBLIC_URL ?? 'http://localhost:3098').replace(/\/$/, '')
@@ -1645,31 +1647,6 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     throw new ApiFault(503, 'dependency_unavailable', 'The invitation was saved, but its email could not be sent. Check email delivery settings and retry the invitation.')
   }
   return { id: invitationId, email: input.email, fullName: input.fullName, unit: unitLabel, expiresAt, status: 'pending' as const }
-}
-
-export const sendBulkResidentRow = async (access: TenantAccess, id: string, requestId: string) => {
-  requireRole(access, 'admin')
-  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ApiFault(400, 'invalid_request', 'Invalid import row')
-  const client = await withTenantPool(access).connect()
-  try {
-    await client.query('BEGIN')
-    const result = await client.query<{ payload: ResidentInvitationInput; status: string }>(
-      'SELECT payload, status FROM resident_import_rows WHERE id = $1 AND tenant_id = $2 AND created_by = $3 FOR NO KEY UPDATE', [id, access.tenantId, access.subject])
-    const row = result.rows[0]
-    if (!row) throw new ApiFault(404, 'not_found', 'Import row not found')
-    if (row.status === 'sent') { await client.query('COMMIT'); return { status: 'sent' } }
-    try {
-      await createAdminResidentInvitation(access, row.payload, requestId, id)
-      await client.query("UPDATE resident_import_rows SET status = 'sent', error = NULL WHERE id = $1", [id])
-      await client.query('COMMIT')
-      return { status: 'sent' }
-    } catch (cause) {
-      const error = cause instanceof Error ? cause.message : 'Invitation could not be sent'
-      await client.query("UPDATE resident_import_rows SET status = 'failed', error = $2 WHERE id = $1", [id, error])
-      await client.query('COMMIT')
-      return { status: 'failed', error }
-    }
-  } catch (cause) { await client.query('ROLLBACK'); throw cause } finally { client.release() }
 }
 
 const recordResidentMoveOut = async (access: TenantAccess, residentId: string, rawInput: unknown) => {
@@ -1806,19 +1783,33 @@ const lookupResidentInvitation = async (rawInput: unknown) => {
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) throw new ApiFault(400, 'invalid_request', 'A resident invitation token is required')
   const { tenantId, tokenHash } = parseResidentInvitationToken((rawInput as Record<string, unknown>).token)
   const tenant = await getInvitationTenant(tenantId)
-  const result = await getTenantPool(tenant.database_name as string).query<{ email: string; full_name: string; building_name: string; number: string; start_date: string }>(
-    `SELECT i.email::text, i.full_name, i.start_date::text, u.building_name, u.number
+  const result = await getTenantPool(tenant.database_name as string).query<{ kind: string; email: string; full_name: string; building_name: string; number: string; start_date: string }>(
+    `SELECT i.kind, i.email::text, i.full_name, i.start_date::text, u.building_name, u.number
      FROM resident_invitations i JOIN units u ON u.id = i.unit_id AND u.tenant_id = i.tenant_id
      WHERE i.tenant_id = $1 AND i.token_hash = $2 AND i.status = 'pending' AND i.expires_at > NOW()`,
     [tenantId, tokenHash],
   )
   const invitation = result.rows[0]
   if (!invitation) throw new ApiFault(400, 'invalid_request', 'This invitation is invalid, expired, or already accepted')
-  return { email: invitation.email, fullName: invitation.full_name, organizationName: tenant.org_name, unit: `${invitation.building_name} · ${invitation.number}`, startDate: invitation.start_date }
+  return { kind: invitation.kind, email: invitation.email, fullName: invitation.full_name, organizationName: tenant.org_name, unit: `${invitation.building_name} · ${invitation.number}`, startDate: invitation.start_date }
+}
+
+export const parseQrResidentSignupInput = (raw: unknown, savedUnitId: string, verifiedEmail: string) => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiFault(400, 'invalid_request', 'Enter your resident details')
+  const details = parseResidentInvitationInput({ ...(raw as Record<string, unknown>), unitId: savedUnitId })
+  if (details.email !== verifiedEmail.toLowerCase()) throw new ApiFault(403, 'forbidden', 'Verify the email entered in your signup details')
+  return details
+}
+
+const requireResidentIdentity = (identity: AuthenticatedSubject) => {
+  const clientId = process.env.AUTH0_RESIDENT_CLIENT_ID?.trim()
+  if (!clientId) throw new ApiFault(503, 'configuration_error', 'Configure AUTH0_RESIDENT_CLIENT_ID')
+  if (identity.clientId !== clientId || !identity.subject.startsWith('auth0|')) throw new ApiFault(403, 'forbidden', 'Use the resident database sign-in to continue')
 }
 
 const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unknown) => {
   const identity = await authenticate(request)
+  requireResidentIdentity(identity)
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) throw new ApiFault(400, 'invalid_request', 'A resident invitation token is required')
   const { tenantId, tokenHash } = parseResidentInvitationToken((rawInput as Record<string, unknown>).token)
   const domain = process.env.AUTH0_DOMAIN?.trim()
@@ -1843,11 +1834,11 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
     await client.query('BEGIN')
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [tenantId + ':resident-invitations'])
     const result = await client.query<{
-      id: string; unit_id: string; full_name: string; email: string; phone: string | null;
+      id: string; kind: string; unit_id: string; full_name: string; email: string; phone: string | null;
       occupancy_type: 'owner' | 'tenant'; status: string; expires_at: Date; start_date: string;
       building_name: string; number: string;
     }>(
-      `SELECT i.id, i.unit_id, i.full_name, i.email::text, i.phone, i.occupancy_type, i.status, i.expires_at, i.start_date::text,
+      `SELECT i.id, i.kind, i.unit_id, i.full_name, i.email::text, i.phone, i.occupancy_type, i.status, i.expires_at, i.start_date::text,
               u.building_name, u.number
        FROM resident_invitations i JOIN units u ON u.id = i.unit_id AND u.tenant_id = i.tenant_id
        WHERE i.tenant_id = $1 AND i.token_hash = $2 FOR UPDATE OF i`,
@@ -1855,6 +1846,15 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
     )
     const invitation = result.rows[0]
     if (!invitation) throw new ApiFault(400, 'invalid_request', 'This invitation is invalid or no longer available')
+    if (invitation.kind === 'qr' && invitation.status === 'pending') {
+      if (invitation.expires_at <= new Date()) throw new ApiFault(400, 'invalid_request', 'This signup QR has expired')
+      const details = parseQrResidentSignupInput(rawInput, invitation.unit_id, profile.email)
+      const pendingEmail = await client.query(`SELECT id FROM resident_invitations WHERE tenant_id = $1 AND lower(email::text) = $2 AND status = 'pending' AND id <> $3`, [tenantId, details.email, invitation.id])
+      if (pendingEmail.rowCount) throw new ApiFault(409, 'invalid_request', 'This email already has a pending invitation. Accept or cancel that invitation first.')
+      Object.assign(invitation, { full_name: details.fullName, email: details.email, phone: details.phone, occupancy_type: details.occupancyType, start_date: details.startDate })
+      await client.query(`UPDATE resident_invitations SET full_name = $2, email = $3, phone = $4, occupancy_type = $5, start_date = $6 WHERE id = $1`,
+        [invitation.id, details.fullName, details.email, details.phone, details.occupancyType, details.startDate])
+    }
     if (invitation.email.toLowerCase() !== profile.email.toLowerCase()) throw new ApiFault(403, 'forbidden', 'This invitation can only be accepted by the invited email address')
     unitLabel = `${invitation.building_name} · ${invitation.number}`
     if (invitation.status === 'accepted') {
@@ -1884,6 +1884,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
         )
       }
       await client.query(`UPDATE resident_invitations SET status = 'accepted', accepted_at = NOW(), updated_at = NOW() WHERE id = $1`, [invitation.id])
+      await client.query(`INSERT INTO resident_access_audit (tenant_id, actor_subject, action, invitation_id, unit_id) VALUES ($1, $2, 'signup.accepted', $3, $4)`, [tenantId, identity.subject, invitation.id, invitation.unit_id])
       await client.query(`UPDATE units SET status = 'occupied', updated_at = NOW() WHERE id = $1 AND tenant_id = $2`, [invitation.unit_id, tenantId])
     }
     await client.query('COMMIT')
@@ -3316,6 +3317,28 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, createOpenApiBootstrap(), requestId)
         return
       }
+      if (request.method === 'POST' && requestUrl.pathname === '/v1/resident/security/revoke-sessions') {
+        const identity = await authenticate(request)
+        requireResidentIdentity(identity)
+        const membership = await getPlatformPool().query(`SELECT 1 FROM tenant_memberships m JOIN tenant_records t ON t.tenant_id = m.tenant_id WHERE m.subject = $1 AND m.role = 'resident' AND m.status = 'active' AND t.status = 'active' LIMIT 1`, [identity.subject])
+        if (!membership.rowCount) throw new ApiFault(403, 'forbidden', 'An active resident membership is required')
+        const domain = process.env.AUTH0_DOMAIN?.trim()
+        if (!domain || domain.includes('/')) throw new ApiFault(503, 'configuration_error', 'Configure the Auth0 domain')
+        const profileResponse = await globalThis.fetch(`https://${domain}/userinfo`, { headers: { Authorization: `Bearer ${identity.accessToken}` }, signal: AbortSignal.timeout(10_000) })
+        if (!profileResponse.ok) throw new ApiFault(401, 'unauthorized', 'Verify your email again')
+        const profile = await profileResponse.json() as { sub?: string; email?: string; email_verified?: boolean }
+        if (profile.sub !== identity.subject || !profile.email || profile.email_verified !== true) throw new ApiFault(403, 'forbidden', 'A verified resident email is required')
+        await sendResidentSecurityEmail(profile.email)
+        const client = await getPlatformPool().connect()
+        try {
+          await client.query('BEGIN')
+          await client.query(`INSERT INTO resident_session_revocations (subject, revoked_before) VALUES ($1, NOW()) ON CONFLICT (subject) DO UPDATE SET revoked_before = NOW()`, [identity.subject])
+          await client.query(`INSERT INTO platform_audit (actor_subject, action, target, reason, request_id) VALUES ($1, 'resident.sessions_revoked', $1, 'Resident requested invalidation of previous app sessions', $2)`, [identity.subject, requestId])
+          await client.query('COMMIT')
+        } catch (cause) { await client.query('ROLLBACK'); throw cause } finally { client.release() }
+        respond(response, 200, { revoked: true }, requestId)
+        return
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/public/auth/otp') {
         throw new ApiFault(410, 'configuration_error', 'Authentication is managed by the configured Auth0 Universal Login application')
       }
@@ -3326,7 +3349,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
           : {}
         const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
         const application = body.application
-        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || (application !== 'admin' && application !== 'resident')) {
+        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || application !== 'admin') {
           throw new ApiFault(400, 'invalid_request', 'Enter a valid email address and application')
         }
         await sendPasswordlessOtpToRegisteredUser(email, application)
@@ -3582,10 +3605,9 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, 200, await getAdminResidentInvitations(access), requestId)
         return
       }
-      const bulkResidentMatch = requestUrl.pathname.match(/^\/v1\/admin\/resident-imports\/([0-9a-f-]+)\/send$/i)
-      if (request.method === 'POST' && bulkResidentMatch) {
-        const access = await resolveTenantAccess(request)
-        respond(response, 200, await sendBulkResidentRow(access, bulkResidentMatch[1]!, requestId), requestId)
+      if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/resident-signup-qr') {
+        const access = await resolveTenantAccess(request, 'admin')
+        respond(response, 201, await issueResidentSignupQr(withTenantPool(access), access, await readJsonBody(request)), requestId)
         return
       }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/resident-invitations') {
@@ -3706,7 +3728,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       const status = apiFault?.status ?? 503
       const errorObject = error && typeof error === 'object' ? error as { code?: unknown; cause?: { code?: unknown } } : undefined
       const causeCode = String(errorObject?.code ?? errorObject?.cause?.code ?? 'unknown')
-      const apartmentSchemaRequest = requestUrl.pathname === '/v1/admin/buildings' || requestUrl.pathname.startsWith('/v1/admin/residents') || requestUrl.pathname.startsWith('/v1/admin/resident-invitations') || requestUrl.pathname.startsWith('/v1/admin/resident-imports') || requestUrl.pathname.startsWith('/v1/public/resident-invitations') || requestUrl.pathname.startsWith('/v1/tenant/')
+      const apartmentSchemaRequest = requestUrl.pathname === '/v1/admin/buildings' || requestUrl.pathname.startsWith('/v1/admin/residents') || requestUrl.pathname.startsWith('/v1/admin/resident-invitations') || requestUrl.pathname === '/v1/admin/resident-signup-qr' || requestUrl.pathname.startsWith('/v1/admin/resident-imports') || requestUrl.pathname.startsWith('/v1/public/resident-invitations') || requestUrl.pathname.startsWith('/v1/tenant/')
       const billingSchemaRequest = requestUrl.pathname.startsWith('/v1/admin/billing')
       const meetingSchemaRequest = /^\/v1\/(admin|tenant)\/meeting-minutes(?:\/|$)/.test(requestUrl.pathname)
       const tenantSchemaRequest = apartmentSchemaRequest || billingSchemaRequest || meetingSchemaRequest
@@ -3731,7 +3753,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         : tenantSchemaUnavailable && billingSchemaRequest
         ? 'The selected tenant database is missing billing schema. Apply the required migrations/myapartment_tenant_db/005_billing_runs.sql through migrations/myapartment_tenant_db/009_billing_unit_exclusions.sql, then retry.'
         : tenantSchemaUnavailable && apartmentSchemaRequest
-          ? 'The selected tenant database is missing apartment or resident-lifecycle schema. Apply migrations/myapartment_tenant_db/003_apartments.sql, migrations/myapartment_tenant_db/004_resident_invitations.sql, migrations/myapartment_tenant_db/010_resident_lifecycle.sql, and migrations/myapartment_tenant_db/030_bulk_resident_imports.sql to that tenant database, then rebuild and restart the API.'
+          ? 'The selected tenant database is missing apartment or resident-lifecycle schema. Apply migrations/myapartment_tenant_db/003_apartments.sql, migrations/myapartment_tenant_db/004_resident_invitations.sql, migrations/myapartment_tenant_db/010_resident_lifecycle.sql, migrations/myapartment_tenant_db/030_bulk_resident_imports.sql, and migrations/myapartment_tenant_db/036_resident_qr_signup.sql to that tenant database, then rebuild and restart the API.'
           : tenantDatabaseMissing
           ? 'The selected tenant database does not exist. Check the tenant database_name in myapartment_platform_db and complete tenant provisioning.'
           : 'A required data service is unavailable'

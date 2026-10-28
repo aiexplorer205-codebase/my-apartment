@@ -8,13 +8,15 @@ This is a testable local product, not a production-supported release. Do not dep
 - Parameterized SQL only. Tenant repositories use the connection bound to server-side `TenantContext`.
 - UI visibility is not authorization. Enforce role and membership on every API read/write.
 - Operator access fails closed unless `OPERATOR_IDS` lists the exact Auth0 `sub`.
-- Auth0 OTP is the identity proof. Do not accept a second OTP issuer or skip invitation acceptance.
+- Auth0 verifies resident email OTP and passkeys. Every resident email must be verified; passkeys are optional. Do not accept a second OTP issuer or skip invitation acceptance.
 - Do not fake payment success, checkout, or worker job completion.
-- Invitation links are single-use and expire after seven days; delivery is email only.
+- Invitation capabilities are single-use and expire after seven days, delivered by private flat signup QR or email. A QR authorizes enrollment for its saved flat; client block/flat labels never authorize access.
 - Minutes of Meeting drafts are admin-only. Published notes/attendance snapshots are immutable; resident responses include attendee names and block/flat labels but no contact details, internal attendee IDs, or publisher subjects. Attendance never grants access.
 - Complaint/maintenance UUIDs stay the API identifiers; `CMP-`/`MNT-` are display references.
 - Production origins use HTTPS. Auth0 callback, logout, and web-origin lists must match those origins exactly.
 - Operator production access needs an approved private ingress (or equivalent) in addition to Auth0. Local loopback publish is not that control. `OPERATOR_WEB_PRIVATE_INGRESS` in Compose is not production ingress.
+
+Resident passkey replacement requires a fresh Auth0 email OTP in the resident app. Previous passkeys remain until Auth0 confirms a new credential; completion removes the snapshotted previous passkeys, sends a security email, and records a platform cutoff for previous application sessions. The API checks the original Auth0 authentication time, not token issue time, so refreshing a previous token does not bypass the cutoff. The supplied Auth0 Action is mandatory. This invalidates access to MyApartment APIs; it does not delete cloud-synced credentials from devices or terminate unrelated Auth0 applications. There is no admin credential deletion or cooling period. See [setup and verification](./resident-authentication.md).
 
 ## Reporting
 

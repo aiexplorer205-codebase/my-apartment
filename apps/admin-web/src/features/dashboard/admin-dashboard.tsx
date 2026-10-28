@@ -1,6 +1,7 @@
 'use client'
 
 import { AdminMeetingMinutes } from '../communications/meeting-minutes'
+import { ResidentSignupQr } from '../residents/signup-qr'
 import { ApartmentSetup } from '../residents/apartment-setup'
 import { DeletePropertySetup } from '../residents/delete-property-setup'
 import { InvoiceCorrections, BulkInvoiceCorrections } from '../accounts/billing-corrections'
@@ -541,7 +542,7 @@ type AdminResident = {
 function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void }) {
   type ResidentUnit = { id: string; buildingId: string | null; building: string; number: string; occupancyStatus: string; paymentStatus: string }
   type BuildingOption = { id: string; name: string; apartment: string; city: string; unitCount: number }
-  type PendingResidentInvitation = { id: string; unitId: string; fullName: string; email: string; phone: string | null; occupancyType: 'owner' | 'tenant'; displayStatus: string; expiresAt: string; startDate: string; unit: string; building: string; canManage: boolean }
+  type PendingResidentInvitation = { kind: 'email' | 'qr'; id: string; unitId: string; fullName: string; email: string; phone: string | null; occupancyType: 'owner' | 'tenant'; displayStatus: string; expiresAt: string; startDate: string; unit: string; building: string; canManage: boolean }
   const today = new Date()
   const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
   const tomorrow = new Date(today)
@@ -762,12 +763,13 @@ function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void
             const residentStatusTone = resident.status === 'active' ? 'success' : resident.status === 'scheduled' ? 'warning' : 'neutral'
             return <div className="flat-resident-entry" key={`resident:${resident.id}`}><strong>{resident.name}</strong><small>{resident.occupancyType} · {resident.email}{resident.phone ? ` · ${resident.phone}` : ''}</small><small>Status: <span className={`status-pill ${residentStatusTone}`} data-status={resident.status}>{resident.status.replaceAll('_', ' ')}</span>{resident.moveOutDate && <> · Moves out {new Date(`${resident.moveOutDate}T00:00:00`).toLocaleDateString('en-IN')}</>}</small></div>
           })}
-          {flatInvitations.map((invitation) => <div className="flat-resident-entry" key={`invitation:${invitation.id}`}><strong>{invitation.fullName} <span className="status-pill warning">Invitation sent · {invitation.displayStatus}</span></strong><small>{invitation.occupancyType} · {invitation.email}{invitation.phone ? ` · ${invitation.phone}` : ''}</small><small>Starts {formatCalendarDate(invitation.startDate)} · Expires {formatExpiry(invitation.expiresAt)}</small></div>)}
+          {flatInvitations.map((invitation) => <div className="flat-resident-entry" key={`invitation:${invitation.id}`}><strong>{invitation.fullName} <span className="status-pill warning">{invitation.kind === 'qr' ? 'Signup QR' : 'Invitation sent'} · {invitation.displayStatus}</span></strong><small>{invitation.occupancyType} · {invitation.email}{invitation.phone ? ` · ${invitation.phone}` : ''}</small><small>Starts {formatCalendarDate(invitation.startDate)} · Expires {formatExpiry(invitation.expiresAt)}</small></div>)}
         </td>
         <td><span className={`status-pill ${flat.paymentStatus === 'overdue' ? 'warning' : flat.paymentStatus === 'paid' ? 'success' : ''}`} data-status={flat.paymentStatus}>{flat.paymentStatus.replaceAll('_', ' ')}</span></td>
         <td><div className="flat-resident-actions">
           {flatResidents.map((resident) => resident.status === 'active' ? (resident.moveOutDate && pendingInvitationUnitIds.has(resident.unitId) ? <small key={resident.id}>Invitation pending</small> : <button type="button" className="secondary" key={resident.id} onClick={() => startNewResidentTransition(resident)}>{resident.moveOutDate ? 'Continue new resident' : '＋ New resident'}</button>) : resident.outstandingMinor > 0 && <button type="button" className="secondary" key={resident.id} disabled={settlingResidentId === resident.id} onClick={() => settleFormerDues(resident)}>{settlingResidentId === resident.id ? 'Recording…' : 'Record receipt'}</button>)}
-          {flatInvitations.map((invitation) => <span className="invitation-row-actions" key={invitation.id}>{invitation.canManage && invitation.displayStatus !== 'revoked' && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => void resendInvitation(invitation)}>{invitationActionId === invitation.id ? 'Sending…' : invitation.displayStatus === 'expired' ? 'Send again' : 'Resend'}</button>}{invitation.canManage && invitation.displayStatus === 'pending' && <button className="secondary danger-button" type="button" disabled={invitationActionId === invitation.id} onClick={() => void revokeInvitation(invitation)}>{invitationActionId === invitation.id ? 'Working…' : 'Cancel'}</button>}</span>)}
+          {flatInvitations.map((invitation) => <span className="invitation-row-actions" key={invitation.id}>{invitation.kind !== 'qr' && invitation.canManage && invitation.displayStatus !== 'revoked' && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => void resendInvitation(invitation)}>{invitationActionId === invitation.id ? 'Sending…' : invitation.displayStatus === 'expired' ? 'Send again' : 'Resend'}</button>}{invitation.canManage && invitation.displayStatus === 'pending' && <button className="secondary danger-button" type="button" disabled={invitationActionId === invitation.id} onClick={() => void revokeInvitation(invitation)}>{invitationActionId === invitation.id ? 'Working…' : 'Cancel'}</button>}</span>)}
+          {(canAddResident || (flatInvitations.some((i) => i.kind === 'qr') && flatResidents.every((r) => r.status !== 'active' && r.status !== 'scheduled') && !flatInvitations.some((i) => i.kind === 'email' && i.displayStatus === 'pending'))) && <ResidentSignupQr unitId={flat.id} onChanged={invitations.reload} />}
           {canAddResident && <button type="button" className="secondary" onClick={() => startInvite(flat)}>＋ Add resident</button>}
         </div></td>
       </tr>

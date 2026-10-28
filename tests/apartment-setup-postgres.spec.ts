@@ -36,7 +36,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('apartment setup
     limits.mockResolvedValue({ rows: [{ allowed_blocks: 2, allowed_flats_per_block: [3, 2] }] })
     const access = { tenantId: randomUUID(), subject: 'test-admin', role: 'admin' }
     await pool.query("INSERT INTO apartments(tenant_id,name,city,billing_start_month) VALUES($1,'Apartment','Pune',CURRENT_DATE)", [access.tenantId])
-    const blocks = [{ name: 'Block A', floors: 2, flats: [{ number: 'A-001', floorNumber: 1 }, { number: 'A-201', floorNumber: 2, resident: { fullName: 'Asha Rao', email: `${randomUUID()}@example.test`, phone: '', occupancyType: 'owner', startDate: '2026-10-24' } }] }, { name: 'Block B', floors: 1, flats: [{ number: 'B-101', floorNumber: 1 }] }]
+    const blocks = [{ name: 'Block A', floors: 2, flats: [{ number: 'A-001', floorNumber: 1 }, { number: 'A-201', floorNumber: 2 }] }, { name: 'Block B', floors: 1, flats: [{ number: 'B-101', floorNumber: 1 }] }]
     const run = (action: 'inventory' | 'review' | 'confirm' | 'latest', input?: unknown, actor = access) => apartmentSetup(pool, platform, actor, action, input, parseResidentInvitationInput)
     return { access, blocks, run }
   }
@@ -48,11 +48,8 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('apartment setup
     expect(result.created).toBe(true)
     expect((await pool.query('SELECT name,floors,flat_limit,allowance_slot FROM apartment_buildings WHERE tenant_id=$1 ORDER BY allowance_slot', [f.access.tenantId])).rows).toEqual([{ name: 'Block A', floors: 2, flat_limit: 3, allowance_slot: 0 }, { name: 'Block B', floors: 1, flat_limit: 2, allowance_slot: 1 }])
     expect((await pool.query('SELECT id FROM units WHERE tenant_id=$1', [f.access.tenantId])).rowCount).toBe(3)
-    expect(result.invitations).toHaveLength(1)
-    const saved = await pool.query('SELECT payload,status FROM resident_import_rows WHERE tenant_id=$1', [f.access.tenantId])
-    expect(saved.rows[0].status).toBe('ready')
-    expect(saved.rows[0].payload.unitId).toBeTruthy()
-    expect((await pool.query('SELECT id FROM resident_invitations WHERE tenant_id=$1', [f.access.tenantId])).rowCount).toBe(0)
+    expect(result.invitations).toHaveLength(0)
+    expect((await pool.query('SELECT id FROM resident_import_rows WHERE tenant_id=$1', [f.access.tenantId])).rowCount).toBe(0)
   })
   it('makes concurrent repeated confirmations idempotent, including after allowances change', async () => {
     const f = await fixture(), review = await f.run('review', { blocks: f.blocks }) as Review
@@ -101,11 +98,10 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('apartment setup
     expect(excess.reviewId).toBeNull()
     expect((await pool.query('SELECT floors FROM apartment_buildings WHERE id=$1', [block.id])).rows[0].floors).toBe(3)
   })
-  it('resumes durable invitation results after refresh', async () => {
-    const f = await fixture(), review = await f.run('review', { blocks: f.blocks }) as Review
-    const created = await f.run('confirm', review) as Result
-    await pool.query("UPDATE resident_import_rows SET status='sent' WHERE id=$1", [created.invitations[0]!.id])
-    const latest = await f.run('latest') as Result
-    expect(latest.invitations[0]!.status).toBe('sent')
+  it('rejects bulk resident onboarding in apartment setup', async () => {
+    const f = await fixture()
+    const blocks = [{ name: 'A', floors: 1, flats: [{ number: 'A-101', floorNumber: 1, resident: { fullName: 'Asha Rao', email: 'asha@example.test', occupancyType: 'owner', startDate: '2026-10-24' } }] }]
+    await expect(f.run('review', { blocks })).rejects.toThrow('Bulk resident onboarding has been removed')
+    expect((await pool.query('SELECT id FROM units WHERE tenant_id=$1', [f.access.tenantId])).rowCount).toBe(0)
   })
 })

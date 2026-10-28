@@ -121,6 +121,7 @@ export async function apartmentSetup(pool: Pool, platform: Pool, access: Access,
     }
     const inventory = await loadSetupInventory(client, platform, access.tenantId)
     const review = validateApartmentSetup(input, inventory, parseResident)
+    if (review.summary.invitations > 0) throw new ApiFault(400, 'invalid_request', 'Bulk resident onboarding has been removed. Use signup QR or an email invitation for each flat.')
     if (review.errors.length) {
       if (action === 'confirm') throw new ApiFault(409, 'invalid_request', `Setup changed. Review the apartment again. ${review.errors[0]!.message}`)
       await client.query('COMMIT')
@@ -137,8 +138,6 @@ export async function apartmentSetup(pool: Pool, platform: Pool, access: Access,
     if (!apartmentId) throw new ApiFault(409, 'invalid_request', 'The apartment workspace is not initialized.')
     const slots = Array.from({ length: inventory.allowedBlocks }, (_, i) => i).filter((slot) => !inventory.blocks.some((b) => b.allowanceSlot === slot))
     const invitations: Array<{ id: string; email: string; fullName: string; number: string; status: string }> = []
-    const batchId = randomUUID()
-    let rowNumber = 2
     for (const block of review.blocks) {
       let buildingId = block.id
       if (!buildingId) {
@@ -151,11 +150,6 @@ export async function apartmentSetup(pool: Pool, platform: Pool, access: Access,
       for (const flat of block.flats) {
         const unitId = randomUUID()
         await client.query("INSERT INTO units(id,tenant_id,number,status,building_name,floor_number,apartment_id,apartment_building_id) VALUES($1,$2,$3,'vacant',$4,$5,$6,$7)", [unitId, access.tenantId, flat.number, block.name, flat.floorNumber, apartmentId, buildingId])
-        if (flat.resident) {
-          const id = randomUUID()
-          await client.query('INSERT INTO resident_import_rows(id,tenant_id,created_by,batch_id,row_number,payload) VALUES($1,$2,$3,$4,$5,$6::jsonb)', [id, access.tenantId, access.subject, batchId, rowNumber++, JSON.stringify({ ...flat.resident, unitId })])
-          invitations.push({ id, email: String(flat.resident.email), fullName: String(flat.resident.fullName), number: flat.number, status: 'ready' })
-        }
       }
     }
     const result = { created: true, reviewId, summary: review.summary, invitations }

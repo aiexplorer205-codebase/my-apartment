@@ -36,6 +36,8 @@ Also create:
 - An Auth0 API whose identifier matches `AUTH0_AUDIENCE` (example: `https://api.myapartment.local`).
 - A Machine-to-Machine application for the Management API with `create:users`, `read:users`, and `delete:users`. Enable the Email passwordless connection for that M2M client. Keep connection signup disabled; the API creates invited users.
 
+For resident QR signup, email OTP and optional passkeys, complete [the resident Auth0 setup](./resident-authentication.md). Residents use a separate database connection; retain the legacy email connection for admin/operator.
+
 Set in `.env`: `AUTH0_DOMAIN`, `AUTH0_ISSUER` (trailing slash), `AUTH0_AUDIENCE`, each app’s `AUTH0_*_CLIENT_ID` / `AUTH0_*_CLIENT_SECRET`, and three independent ≥32-byte session secrets (`AUTH0_RESIDENT_SECRET`, `AUTH0_ADMIN_SECRET`, `AUTH0_OPERATOR_SECRET`). Never put secrets in `NEXT_PUBLIC_*`.
 
 Set `OPERATOR_IDS` to the exact approved operator Auth0 `sub` values (not emails). The API fails closed if the list is empty or the subject is not listed.
@@ -94,6 +96,14 @@ MoM appears under Community in admin and in resident navigation. Admins save dra
 
 ```sh
 docker compose up --build -d --no-deps api
+```
+
+For QR signup and passkey session invalidation, also apply these new files **once** (after the earlier migrations):
+
+```sh
+scripts/run-migrations.sh platform myapartment_platform_db 010_resident_session_revocations.sql
+scripts/run-migrations.sh tenant all-tenants 036_resident_qr_signup.sql
+docker compose up --build -d --no-deps api resident-web admin-web
 ```
 
 ## Local tenant data
