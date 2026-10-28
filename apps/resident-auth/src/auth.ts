@@ -35,7 +35,7 @@ export const auth = betterAuth({
   database: { dialect: new PostgresDialect({ pool }), type: 'postgres', schemaName: 'block9_platform' },
   trustedOrigins: [configuration.origin],
   emailAndPassword: { enabled: false },
-  user: { modelName: 'resident_auth_user', changeEmail: { enabled: false }, deleteUser: { enabled: false } },
+  user: { modelName: 'resident_auth_user', additionalFields: { qrEnrolled: { type: 'boolean', required: false, input: false } }, changeEmail: { enabled: false }, deleteUser: { enabled: false } },
   account: { modelName: 'resident_auth_account', accountLinking: { enabled: false } },
   verification: { modelName: 'resident_auth_verification' },
   session: {
@@ -77,16 +77,64 @@ export const auth = betterAuth({
           WHERE resident_auth_email_limit.sent_at < NOW() - INTERVAL '60 seconds' RETURNING email`, [email])
         if (!cooldown.rowCount) throw new APIError('TOO_MANY_REQUESTS', { message: 'Wait one minute before requesting another code' })
       }
-      if (['/passkey/generate-register-options', '/passkey/verify-registration', '/passkey/delete-passkey'].includes(ctx.path)) {
+      if (ctx.path === '/passkey/delete-passkey') throw new APIError('FORBIDDEN', { message: 'Register a replacement passkey after verifying your email, or ask your administrator for a new QR' })
+      if (['/passkey/generate-register-options', '/passkey/verify-registration'].includes(ctx.path)) {
         const session = await getSessionFromCtx(ctx)
         const verifiedAt = session?.session.emailOtpVerifiedAt
-        if (!session?.user.emailVerified || !verifiedAt || Date.now() - new Date(verifiedAt as string).getTime() > 300_000) {
+        const verifiedAtMs = verifiedAt ? new Date(verifiedAt as string).getTime() : 0
+        if (!session?.user.emailVerified || !verifiedAtMs || Date.now() - verifiedAtMs > 300_000 || verifiedAtMs > Date.now()) {
           throw new APIError('FORBIDDEN', { message: 'Verify your email with a fresh code before changing passkeys' })
+        }
+        if (ctx.path === '/passkey/verify-registration') {
+          (ctx.context as { passkeyRegistrationStartedAt?: number }).passkeyRegistrationStartedAt = Date.now()
         }
       }
     }),
     after: createAuthMiddleware(async (ctx) => {
       if (ctx.path === '/email-otp/send-verification-otp' && (ctx.context as { residentEmailDeliveryFailed?: boolean }).residentEmailDeliveryFailed) throw new APIError('SERVICE_UNAVAILABLE', { message: 'Email delivery is unavailable. Wait one minute and try again.' })
+      if (ctx.path === '/passkey/verify-authentication' && ctx.context.newSession) {
+        const created = ctx.context.newSession.session
+        const client = await pool.connect()
+        try {
+          await client.query('BEGIN')
+          await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [created.userId])
+          const credential = await client.query('SELECT 1 FROM resident_auth_passkey WHERE "userId"=$1 AND "credentialID"=$2', [created.userId, ctx.body?.response?.id])
+          if (!credential.rowCount) {
+            await client.query('DELETE FROM resident_auth_session WHERE token=$1', [created.token])
+            await client.query('COMMIT')
+            throw new APIError('UNAUTHORIZED', { message: 'This passkey was replaced. Sign in with your new passkey.' })
+          }
+          await client.query('COMMIT')
+        } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
+      }
+      if (ctx.path === '/passkey/verify-registration') {
+        const session = await getSessionFromCtx(ctx)
+        const credentialID = typeof ctx.body?.response?.id === 'string' ? ctx.body.response.id : ''
+        const startedAt = (ctx.context as { passkeyRegistrationStartedAt?: number }).passkeyRegistrationStartedAt
+        if (!session || !credentialID || !startedAt) throw new APIError('UNAUTHORIZED', { message: 'Sign in again and verify your email before changing passkeys' })
+        const client = await pool.connect()
+        try {
+          await client.query('BEGIN')
+          await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [session.user.id])
+          const currentSession = await client.query<{ emailOtpVerifiedAt: Date | null }>(
+            'SELECT "emailOtpVerifiedAt" FROM resident_auth_session WHERE token=$1 AND "userId"=$2 AND "expiresAt">NOW() FOR UPDATE',
+            [session.session.token, session.user.id],
+          )
+          const verifiedAt = currentSession.rows[0]?.emailOtpVerifiedAt?.getTime() ?? 0
+          if (!session.user.emailVerified || !verifiedAt || Date.now() - verifiedAt > 300_000 || verifiedAt > Date.now()) {
+            throw new APIError('FORBIDDEN', { message: 'Verify your email with a fresh code before changing passkeys' })
+          }
+          const credential = await client.query<{ id: string }>(
+            'SELECT id FROM resident_auth_passkey WHERE "userId"=$1 AND "credentialID"=$2 AND "createdAt">=$3 FOR UPDATE',
+            [session.user.id, credentialID, new Date(startedAt)],
+          )
+          if (!credential.rows[0]) throw new APIError('CONFLICT', { message: 'The new passkey was not saved. Your existing passkeys remain valid.' })
+          await client.query('DELETE FROM resident_auth_passkey WHERE "userId"=$1 AND id<>$2', [session.user.id, credential.rows[0].id])
+          await client.query('DELETE FROM resident_auth_session WHERE "userId"=$1 AND token<>$2', [session.user.id, session.session.token])
+          await client.query("INSERT INTO resident_auth_audit(user_id,action) VALUES($1,'passkey.otp_replaced')", [session.user.id])
+          await client.query('COMMIT')
+        } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
+      }
       if (ctx.path === '/sign-in/email-otp' && ctx.context.newSession) {
         await ctx.context.internalAdapter.updateSession(ctx.context.newSession.session.token, { emailOtpVerifiedAt: new Date() })
       }

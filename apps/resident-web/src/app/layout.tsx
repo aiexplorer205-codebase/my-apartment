@@ -1,4 +1,5 @@
 import './globals.css'
+import { ResidentQrBanner } from '../lib/resident-qr-banner'
 import { residentAuthProvider } from '../lib/resident-auth-config'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <AuthProvider provider={residentAuthProvider()}>
             <AppMessagesProvider>
               <PwaControls appName={config.application.productName} />
+              <ResidentQrBanner />
               {children}
             </AppMessagesProvider>
           </AuthProvider>

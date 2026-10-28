@@ -1,0 +1,7 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "test": true,
+        "printf": true,
+        "pnpm": true
+    }
+}

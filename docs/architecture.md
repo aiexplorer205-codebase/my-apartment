@@ -37,7 +37,7 @@ Web apps keep server-side Auth0 sessions and proxy API calls through `/api/backe
 | `infrastructure/ports` | Ports |
 | `infrastructure/adapters` | Auth0, Postgres, Redis, Resend |
 
-Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`010`) and `migrations/myapartment_tenant_db` (`001`–`037`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
+Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`012`) and `migrations/myapartment_tenant_db` (`001`–`038`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
 
 Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,validation}.json`. Keep key parity. Validate with `pnpm platform:validate`.
 

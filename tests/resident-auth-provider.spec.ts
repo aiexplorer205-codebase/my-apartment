@@ -43,6 +43,12 @@ describe('resident provider boundaries', () => {
     fetch.mockResolvedValue(new Response('null'))
     await expect(authenticateResidentSession('resident-session.YQ')).rejects.toThrow('verified resident session')
   })
+  it('accepts a QR-enrolled passkey identity without claiming its email is verified', async () => {
+    vi.stubEnv('RESIDENT_AUTH_PROVIDER', 'better-auth')
+    vi.stubEnv('RESIDENT_AUTH_INTERNAL_URL', 'http://resident-auth:4120')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ user: { id: 'qr-user', email: 'qr-user@passkey.invalid', emailVerified: false, qrEnrolled: true }, session: { expiresAt: new Date(Date.now() + 60000).toISOString() } }))))
+    await expect(authenticateResidentSession('resident-session.YQ')).resolves.toMatchObject({ subject: 'betterauth|qr-user', verifiedEmail: undefined })
+  })
   it('rejects insecure production origins, unrelated RP IDs and weak configuration', () => {
     vi.stubEnv('RESIDENT_WEB_PUBLIC_URL', 'http://residents.example.com')
     expect(() => authConfiguration()).toThrow('HTTPS')

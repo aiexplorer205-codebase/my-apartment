@@ -1,3 +1,4 @@
+import { issueResidentQr, issueResidentResetQr } from './resident-qr.js'
 import { authenticateResidentSession, identityMayUseRole, residentAuthProvider } from './resident-auth.js'
 import { reserveTenantStorageDeletion, deleteTenantPhotoStorage } from './photo-maintenance.js'
 import { readMeetingMinutes, writeMeetingMinutes } from './meeting-minutes.js'
@@ -603,9 +604,10 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/tenant/photo-uploads': { post: { tags: ['tenant'], summary: 'Reserve a private WebP upload and obtain a five-minute presigned PUT URL', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Upload id, URL and required headers' }, '400': { description: 'Invalid metadata' }, '429': { description: 'Daily upload quota exhausted' } } } },
     '/v1/tenant/photo-uploads/{uploadId}/complete': { post: { tags: ['tenant'], summary: 'Verify and sanitize a private staged image before attachment', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Verified upload id' }, '400': { description: 'Invalid image or checksum' }, '404': { description: 'Upload not owned by this resident' }, '409': { description: 'Upload expired or being validated' } } } },
 
+    '/v1/admin/residents/{residentId}/passkey-qr': { post: { tags: ['tenant'], summary: 'Issue a single-use passkey reset QR and notify the resident in-app', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Private invitationUrl and expiry; previous passkeys remain valid until registration succeeds' }, '403': { description: 'Administrator required' }, '409': { description: 'Resident passkey authentication unavailable' } } } },
     '/v1/admin/resident-invitations': {
       get: { tags: ['tenant'], summary: 'List recent resident invitations', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped invitations' }, '403': { description: 'Administrator permission required' } } },
-      post: { tags: ['tenant'], summary: 'Invite a resident to a unit by email', description: 'Requires fullName, email, optional phone, unitId, and occupancyType (owner or tenant). startDate is optional and defaults to the current date. Email OTP identity verification is required to accept. Resident access starts on startDate. The one-time link expires in seven days.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Invitation saved and email sent' }, '400': { description: 'Invalid invitation details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Resident already exists or another administrator owns the pending invitation' }, '503': { description: 'Invitation saved but email delivery failed' } } },
+      post: { tags: ['tenant'], summary: 'Invite a resident by email or passkey QR', description: 'Requires fullName, unitId, and occupancyType (owner or tenant). With delivery=qr, email is optional contact information and a private invitationUrl is returned. QR registration and acceptance are required. Default email delivery requires a verified email. Optional phone. startDate is optional and defaults to the current date. Email OTP identity verification is required to accept. Resident access starts on startDate. The one-time link expires in seven days.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Invitation saved and email sent' }, '400': { description: 'Invalid invitation details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Resident already exists or another administrator owns the pending invitation' }, '503': { description: 'Invitation saved but email delivery failed' } } },
     },
     '/v1/admin/apartment-setup/inventory': {
       get: { tags: ['tenant'], summary: 'Read block allowances and all existing flats for apartment setup', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Scoped blocks, flat allowances and inventory' }, '403': { description: 'Administrator required' } } },
@@ -735,7 +737,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
   const residentResult = await pool.query<{
     id: string
     full_name: string
-    email: string
+    email: string | null
     phone: string | null
     unit_number: string
     building_name: string
@@ -1408,7 +1410,8 @@ const getAdminResidents = async (access: TenantAccess) => {
     id: string
     unit_id: string
     full_name: string
-    email: string
+    email: string | null
+    has_passkey_auth: boolean
     phone: string | null
     occupancy_type: 'owner' | 'tenant'
     status: string
@@ -1421,7 +1424,7 @@ const getAdminResidents = async (access: TenantAccess) => {
     move_out_date: string | null
     final_meter_reading: string | null
   }>(
-    `SELECT r.id, r.unit_id, r.full_name, r.email::text, r.phone, r.occupancy_type,
+    `SELECT r.id, r.unit_id, r.full_name, r.email::text, r.auth_subject LIKE 'betterauth|%' AS has_passkey_auth, r.phone, r.occupancy_type,
             CASE WHEN r.status = 'active' AND r.start_date > CURRENT_DATE THEN 'scheduled'
                  WHEN r.status = 'active' AND r.move_out_date < CURRENT_DATE THEN 'inactive'
                  ELSE r.status END AS status,
@@ -1471,6 +1474,7 @@ const getAdminResidents = async (access: TenantAccess) => {
       unitId: resident.unit_id,
       name: resident.full_name,
       email: resident.email,
+      hasPasskeyAuth: resident.has_passkey_auth,
       phone: resident.phone,
       occupancyType: resident.occupancy_type,
       status: resident.status,
@@ -1486,7 +1490,7 @@ const getAdminResidents = async (access: TenantAccess) => {
   })
 }
 
-type ResidentInvitationInput = { fullName: string; email: string; phone: string | null; unitId: string; occupancyType: 'owner' | 'tenant'; startDate: string }
+type ResidentInvitationInput = { delivery?: 'qr'; fullName: string; email: string; phone: string | null; unitId: string; occupancyType: 'owner' | 'tenant'; startDate: string }
 
 export const parseResidentInvitationInput = (input: unknown): ResidentInvitationInput => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault(400, 'invalid_request', 'Resident invitation details are required')
@@ -1498,11 +1502,11 @@ export const parseResidentInvitationInput = (input: unknown): ResidentInvitation
   const occupancyType = value.occupancyType
   const startDate = parseCalendarDate(value.startDate ?? new Date().toISOString().slice(0, 10), 'Resident start date')
   if (fullName.length < 2 || fullName.length > 120) throw new ApiFault(400, 'invalid_request', 'Full name must be between 2 and 120 characters')
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiFault(400, 'invalid_request', 'Enter a valid email address')
+  if (email.length > 254 || ((!email && value.delivery !== 'qr') || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) throw new ApiFault(400, 'invalid_request', 'Enter a valid email address')
   if (phone && (!/^\+?[0-9 ()-]{7,24}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) throw new ApiFault(400, 'invalid_request', 'Enter a valid mobile number or leave it blank')
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(unitId)) throw new ApiFault(400, 'invalid_request', 'Choose a valid unit')
   if (occupancyType !== 'owner' && occupancyType !== 'tenant') throw new ApiFault(400, 'invalid_request', 'Choose owner or tenant occupancy')
-  return { fullName, email, phone: phone || null, unitId, occupancyType, startDate }
+  return { fullName, email, phone: phone || null, unitId, occupancyType, startDate, ...(value.delivery === 'qr' ? { delivery: 'qr' as const } : {}) }
 }
 
 const requireResidentInvitationSchema = async (access: TenantAccess): Promise<void> => {
@@ -1510,7 +1514,8 @@ const requireResidentInvitationSchema = async (access: TenantAccess): Promise<vo
     `SELECT to_regclass('block9_tenant.resident_invitations') IS NOT NULL
        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'residents' AND column_name = 'occupancy_type')
        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'residents' AND column_name = 'move_out_date')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'resident_invitations' AND column_name = 'start_date') AS ready`,
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'resident_invitations' AND column_name = 'start_date')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'resident_invitations' AND column_name = 'delivery') AS ready`,
   )
   if (!result.rows[0]?.ready) throw new ApiFault(503, 'dependency_unavailable', 'Resident lifecycle support is not installed for this tenant database. Apply migrations/myapartment_tenant_db/010_resident_lifecycle.sql, then retry.')
 }
@@ -1520,7 +1525,7 @@ const getAdminResidentInvitations = async (access: TenantAccess) => {
   await requireResidentInvitationSchema(access)
   const result = await withTenantPool(access).query(
     `SELECT i.id, i.unit_id AS "unitId", i.full_name AS "fullName", i.email::text AS email, i.phone,
-            i.occupancy_type AS "occupancyType", i.invited_by AS "invitedBy", i.status, i.start_date::text AS "startDate",
+            i.occupancy_type AS "occupancyType", i.delivery, i.invited_by AS "invitedBy", i.status, i.start_date::text AS "startDate",
             CASE WHEN i.status = 'pending' AND i.expires_at <= NOW() THEN 'expired' ELSE i.status END AS "displayStatus",
             i.expires_at AS "expiresAt", u.number AS unit, u.building_name AS building
      FROM resident_invitations i
@@ -1549,6 +1554,7 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
   requireRole(access, 'admin')
   await requireResidentInvitationSchema(access)
   const input = parseResidentInvitationInput(rawInput)
+  if (input.delivery === 'qr' && residentAuthProvider() !== 'better-auth') throw new ApiFault(409, 'invalid_request', 'Enable resident passkey authentication before issuing QR invitations')
   const pool = withTenantPool(access)
   const client = await pool.connect()
   const { token, tokenHash } = createResidentInvitationToken(access.tenantId)
@@ -1581,8 +1587,8 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     unitLabel = `${unit.rows[0].building_name} · ${unit.rows[0].number}`
     const pending = await client.query<{ id: string; invited_by: string; bulk_row_id: string | null }>(
       `SELECT id, invited_by, bulk_row_id FROM resident_invitations
-       WHERE tenant_id = $1 AND lower(email::text) = $2 AND status = 'pending' FOR UPDATE`,
-      [access.tenantId, input.email],
+       WHERE tenant_id = $1 AND ((lower(email::text) = NULLIF($2,'')) OR ($3::boolean AND unit_id=$4 AND delivery='qr')) AND status = 'pending' FOR UPDATE`,
+      [access.tenantId, input.email, input.delivery === 'qr', input.unitId],
     )
     const existing = pending.rows[0]
     if (bulkRowId && existing && existing.bulk_row_id !== bulkRowId) throw new ApiFault(409, 'invalid_request', 'This email already has a pending invitation')
@@ -1602,22 +1608,27 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
       await client.query(
         `UPDATE resident_invitations
          SET token_hash = $2, unit_id = $3, full_name = $4, phone = $5, occupancy_type = $6,
-             start_date = $7, expires_at = $8, updated_at = NOW()
+             start_date = $7, expires_at = $8, delivery=$9, email=NULLIF($10,''), updated_at = NOW()
          WHERE id = $1`,
-        [existing.id, tokenHash, input.unitId, input.fullName, input.phone, input.occupancyType, input.startDate, expiresAt],
+        [existing.id, tokenHash, input.unitId, input.fullName, input.phone, input.occupancyType, input.startDate, expiresAt, input.delivery ?? 'email', input.email],
       )
       invitationId = existing.id
     } else {
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO resident_invitations
-           (tenant_id, token_hash, unit_id, full_name, email, phone, occupancy_type, invited_by, start_date, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-        [access.tenantId, tokenHash, input.unitId, input.fullName, input.email, input.phone, input.occupancyType, access.subject, input.startDate, expiresAt],
+           (tenant_id, token_hash, unit_id, full_name, email, phone, occupancy_type, invited_by, start_date, expires_at, delivery)
+         VALUES ($1, $2, $3, $4, NULLIF($5,''), $6, $7, $8, $9, $10, $11) RETURNING id`,
+        [access.tenantId, tokenHash, input.unitId, input.fullName, input.email, input.phone, input.occupancyType, access.subject, input.startDate, expiresAt, input.delivery ?? 'email'],
       )
       invitationId = inserted.rows[0]?.id ?? ''
     }
     if (bulkRowId) await client.query('UPDATE resident_invitations SET bulk_row_id = $2 WHERE id = $1', [invitationId, bulkRowId])
     if (!invitationId) throw new ApiFault(500, 'data_integrity_error', 'Invitation was not saved')
+    if (input.delivery === 'qr') {
+      const qr = await issueResidentQr({ tenantId: access.tenantId, subject: access.subject, fullName: input.fullName, email: input.email, invitationId, token, tokenHash })
+      await client.query('COMMIT')
+      return { ...qr, fullName: input.fullName, email: input.email, unit: unitLabel, status: 'pending' as const }
+    }
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1815,7 +1826,8 @@ const lookupResidentInvitation = async (rawInput: unknown) => {
   const result = await getTenantPool(tenantId).query<{ email: string; full_name: string; building_name: string; number: string; start_date: string }>(
     `SELECT i.email::text, i.full_name, i.start_date::text, u.building_name, u.number
      FROM resident_invitations i JOIN units u ON u.id = i.unit_id AND u.tenant_id = i.tenant_id
-     WHERE i.tenant_id = $1 AND i.token_hash = $2 AND i.status = 'pending' AND i.expires_at > NOW()`,
+     WHERE i.tenant_id = $1 AND i.token_hash = $2 AND i.delivery = 'email'
+       AND i.status = 'pending' AND i.expires_at > NOW()`,
     [tenantId, tokenHash],
   )
   const invitation = result.rows[0]
@@ -1842,7 +1854,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
     if (!profileResponse.ok) throw new ApiFault(401, 'unauthorized', 'The session must include the email profile scope')
     profile = await profileResponse.json() as typeof profile
   }
-  if (profile.sub !== identity.subject || typeof profile.email !== 'string' || profile.email_verified !== true) {
+  if (profile.sub !== identity.subject || (identity.provider !== 'better-auth' && (typeof profile.email !== 'string' || profile.email_verified !== true))) {
     throw new ApiFault(403, 'forbidden', 'Sign in with the invited email address and verify it through Email OTP')
   }
 
@@ -1854,11 +1866,11 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
     await client.query('BEGIN')
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [tenantId + ':resident-invitations'])
     const result = await client.query<{
-      id: string; unit_id: string; full_name: string; email: string; phone: string | null;
+      id: string; unit_id: string; full_name: string; email: string | null; delivery: string; phone: string | null;
       occupancy_type: 'owner' | 'tenant'; status: string; expires_at: Date; start_date: string;
       building_name: string; number: string;
     }>(
-      `SELECT i.id, i.unit_id, i.full_name, i.email::text, i.phone, i.occupancy_type, i.status, i.expires_at, i.start_date::text,
+      `SELECT i.id, i.unit_id, i.full_name, i.email::text, i.delivery, i.phone, i.occupancy_type, i.status, i.expires_at, i.start_date::text,
               u.building_name, u.number
        FROM resident_invitations i JOIN units u ON u.id = i.unit_id AND u.tenant_id = i.tenant_id
        WHERE i.tenant_id = $1 AND i.token_hash = $2 FOR UPDATE OF i`,
@@ -1866,17 +1878,23 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
     )
     const invitation = result.rows[0]
     if (!invitation) throw new ApiFault(400, 'invalid_request', 'This invitation is invalid or no longer available')
-    if (invitation.email.toLowerCase() !== profile.email.toLowerCase()) throw new ApiFault(403, 'forbidden', 'This invitation can only be accepted by the invited email address')
+    if (invitation.delivery === 'qr') {
+      const proof = await getPlatformPool().query(`SELECT 1 FROM resident_auth_qr WHERE tenant_id=$1 AND invitation_id=$2 AND token_hash=$3 AND user_id=$4 AND status='consumed'`,
+        [tenantId, invitation.id, tokenHash, identity.subject.startsWith('betterauth|') ? identity.subject.slice(11) : ''])
+      if (identity.provider !== 'better-auth' || !proof.rowCount) throw new ApiFault(403, 'forbidden', 'Register a passkey with this invitation QR first')
+    } else if (!invitation.email || typeof profile.email !== 'string' || invitation.email?.toLowerCase() !== profile.email.toLowerCase()) throw new ApiFault(403, 'forbidden', 'This invitation can only be accepted by the invited email address')
     unitLabel = `${invitation.building_name} · ${invitation.number}`
     if (invitation.status === 'accepted') {
-      const existing = await client.query('SELECT id FROM residents WHERE auth_subject = $1 AND email = $2 AND unit_id = $3', [identity.subject, invitation.email, invitation.unit_id])
+      const residentEmail = invitation.delivery === 'qr' ? identity.verifiedEmail ?? null : invitation.email
+      const existing = await client.query('SELECT id FROM residents WHERE auth_subject = $1 AND email IS NOT DISTINCT FROM $2 AND unit_id = $3', [identity.subject, residentEmail, invitation.unit_id])
       if (!existing.rowCount) throw new ApiFault(400, 'invalid_request', 'This invitation has already been accepted')
     } else {
       if (invitation.status !== 'pending' || invitation.expires_at <= new Date()) throw new ApiFault(400, 'invalid_request', 'This invitation has expired or was revoked. Ask an administrator to send a new one.')
-      const emailOwner = await client.query('SELECT id FROM residents WHERE lower(email::text) = $1 AND auth_subject <> $2 LIMIT 1', [invitation.email.toLowerCase(), identity.subject])
+      const residentEmail = invitation.delivery === 'qr' ? identity.verifiedEmail ?? null : invitation.email
+      const emailOwner = await client.query('SELECT id FROM residents WHERE lower(email::text) = $1 AND auth_subject <> $2 LIMIT 1', [residentEmail?.toLowerCase() ?? null, identity.subject])
       if (emailOwner.rowCount) throw new ApiFault(409, 'invalid_request', 'This email is already linked to another resident profile in the organization')
-      const existing = await client.query<{ email: string; unit_id: string }>('SELECT email::text, unit_id FROM residents WHERE auth_subject = $1 LIMIT 1', [identity.subject])
-      if (existing.rows[0] && (existing.rows[0].email.toLowerCase() !== invitation.email.toLowerCase() || existing.rows[0].unit_id !== invitation.unit_id)) {
+      const existing = await client.query<{ email: string | null; unit_id: string }>('SELECT email::text, unit_id FROM residents WHERE auth_subject = $1 LIMIT 1', [identity.subject])
+      if (existing.rows[0] && (existing.rows[0].email?.toLowerCase() !== residentEmail?.toLowerCase() || existing.rows[0].unit_id !== invitation.unit_id)) {
         throw new ApiFault(409, 'invalid_request', 'This account already has a different resident profile in the organization')
       }
       const conflictingResident = await client.query(
@@ -1891,7 +1909,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
         await client.query(
           `INSERT INTO residents (auth_subject, unit_id, full_name, email, phone, occupancy_type, status, start_date)
            VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)`,
-          [identity.subject, invitation.unit_id, invitation.full_name, invitation.email, invitation.phone, invitation.occupancy_type, invitation.start_date],
+          [identity.subject, invitation.unit_id, invitation.full_name, residentEmail, invitation.phone, invitation.occupancy_type, invitation.start_date],
         )
       }
       await client.query(`UPDATE resident_invitations SET status = 'accepted', accepted_at = NOW(), updated_at = NOW() WHERE id = $1`, [invitation.id])
@@ -3618,6 +3636,13 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       if (request.method === 'POST' && requestUrl.pathname === '/v1/admin/resident-invitations') {
         const access = await resolveTenantAccess(request)
         respond(response, 201, await createAdminResidentInvitation(access, await readJsonBody(request), requestId), requestId)
+        return
+      }
+      const resetQrMatch = requestUrl.pathname.match(/^\/v1\/admin\/residents\/([^/]+)\/passkey-qr$/)
+      if (request.method === 'POST' && resetQrMatch) {
+        if (residentAuthProvider() !== 'better-auth') throw new ApiFault(409, 'invalid_request', 'Resident passkey authentication is disabled')
+        const access = await resolveTenantAccess(request, 'admin')
+        respond(response, 201, await issueResidentResetQr(access, resetQrMatch[1]!), requestId)
         return
       }
       const residentInvitationRevokeMatch = requestUrl.pathname.match(/^\/v1\/admin\/resident-invitations\/([^/]+)\/revoke$/)

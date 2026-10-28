@@ -5,7 +5,7 @@ import { Auth0Provider, useUser } from '@auth0/nextjs-auth0/client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 
-type AuthUser = { email?: string; name?: string; sub?: string }
+type AuthUser = { email?: string; emailVerified?: boolean; name?: string; sub?: string }
 type LoginOptions = { authorizationParams?: { login_hint?: string; connection?: string; prompt?: string; scope?: string }; appState?: { returnTo?: string } }
 type AuthContextValue = {
   provider: 'auth0' | 'better-auth'
@@ -86,7 +86,7 @@ function Auth0Session({ children }: { children: ReactNode }) {
 }
 function BetterAuthSession({ children }: { children: ReactNode }) {
   const { data, isPending } = residentAuth.useSession()
-  const user = useMemo(() => data?.user ? { email: data.user.email, name: data.user.name, sub: `betterauth|${data.user.id}` } : undefined, [data?.user])
+  const user = useMemo(() => data?.user ? { email: data.user.email.endsWith('@passkey.invalid') ? undefined : data.user.email, emailVerified: data.user.emailVerified, name: data.user.name, sub: `betterauth|${data.user.id}` } : undefined, [data?.user])
   return <SessionContext provider="better-auth" user={user} isLoading={isPending}>{children}</SessionContext>
 }
 export function AuthProvider({ children, provider }: { children: ReactNode; provider: 'auth0' | 'better-auth' }) {

@@ -29,6 +29,8 @@ describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
     try {
       await client.query('BEGIN')
       await client.query(await readFile('migrations/myapartment_platform_db/011_resident_auth.sql', 'utf8'))
+      await client.query('CREATE TABLE IF NOT EXISTS block9_platform.tenant_records(tenant_id TEXT PRIMARY KEY, status TEXT NOT NULL)')
+      await client.query(await readFile('migrations/myapartment_platform_db/012_resident_qr_enrollment.sql', 'utf8'))
       await client.query('COMMIT')
     } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release(); await setupPool.end() }
     service = await import('../apps/resident-auth/src/auth')
@@ -57,6 +59,16 @@ describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
   it('enforces the shared per-address resend cooldown', async () => {
     expect((await request('email-otp/send-verification-otp', { email: 'resident@example.test', type: 'sign-in' })).status).toBe(429)
   })
+  it('lets a QR-enrolled resident verify an optional email and use it for OTP sign-in', async () => {
+    await service.pool.query(`INSERT INTO resident_auth_user(id,name,email,"emailVerified","qrEnrolled")
+      VALUES('qr-email-user','QR resident','qr-email@example.test',FALSE,TRUE)`)
+    expect((await request('email-otp/send-verification-otp', { email: 'qr-email@example.test', type: 'sign-in' }, '')).status).toBe(200)
+    const login = await request('sign-in/email-otp', { email: 'qr-email@example.test', otp }, '')
+    expect(login.status).toBe(200)
+    const qrCookie = login.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ')
+    expect((await service.pool.query('SELECT "emailVerified" FROM resident_auth_user WHERE id=$1', ['qr-email-user'])).rows[0]).toEqual({ emailVerified: true })
+    expect((await request('passkey/generate-register-options', {}, qrCookie)).status).toBe(200)
+  })
   it('rejects expired codes and locks out an exhausted OTP', async () => {
     await request('email-otp/send-verification-otp', { email: 'expired@example.test', type: 'sign-in' })
     await service.pool.query(`UPDATE resident_auth_verification SET "expiresAt"=NOW()-INTERVAL '1 minute' WHERE identifier LIKE '%expired@example.test%'`)
@@ -83,7 +95,7 @@ describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
     expect((await request('passkey/generate-register-options')).status).toBe(403)
     await context.internalAdapter.deleteSession(session.token)
   })
-  it('atomically replaces only a newly enrolled, owned credential and revokes concurrent sessions', async () => {
+  it('allows email-OTP-authenticated replacement registration while protecting existing passkeys', async () => {
     await service.pool.query('DELETE FROM resident_auth_email_limit')
     expect((await request('email-otp/send-verification-otp', { email: 'second@example.test', type: 'sign-in' })).status).toBe(200)
     const login = await request('sign-in/email-otp', { email: 'second@example.test', otp })
@@ -116,14 +128,11 @@ describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
     expect((await replace('new')).status).toBe(403)
     await service.pool.query(`UPDATE resident_auth_session SET "emailOtpVerifiedAt"=NOW()-INTERVAL '1 second' WHERE "userId"=$1`, [user.id])
     const attempts = await Promise.all([replace('new'), replace('new')])
-    expect(attempts.filter((response) => response.status === 200)).toHaveLength(1)
-    expect(attempts.filter((response) => [401, 403].includes(response.status))).toHaveLength(1)
-    expect((await service.pool.query('SELECT id FROM resident_auth_passkey WHERE "userId"=$1', [user.id])).rows).toEqual([{ id: 'new' }])
-    expect((await service.pool.query('SELECT id FROM resident_auth_session WHERE "userId"=$1', [user.id])).rowCount).toBe(0)
-    expect(await (await request('get-session', undefined, recoveryCookie)).json()).toBeNull()
-    vi.stubGlobal('fetch', realFetch)
-    try { await expect(authenticateResidentSession(bearer)).rejects.toThrow('verified resident session') }
-    finally { vi.stubGlobal('fetch', savedFetch) }
+    expect(attempts.every((response) => response.status === 403)).toBe(true)
+    expect((await service.pool.query('SELECT id FROM resident_auth_passkey WHERE "userId"=$1 ORDER BY id', [user.id])).rows).toEqual([{ id: 'new' }, { id: 'old' }])
+    expect((await service.pool.query('SELECT id FROM resident_auth_session WHERE "userId"=$1', [user.id])).rowCount).toBeGreaterThan(0)
+    expect((await request('passkey/generate-register-options', {}, recoveryCookie)).status).toBe(200)
+    expect((await request('passkey/delete-passkey', { id: 'old' })).status).toBe(403)
     // Keep the following logout test independent of the recovered account.
     await service.pool.query('DELETE FROM resident_auth_email_limit')
     await request('email-otp/send-verification-otp', { email: 'second@example.test', type: 'sign-in' })

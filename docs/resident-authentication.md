@@ -23,12 +23,17 @@ Auth0 identities cannot use resident routes when Better Auth is selected. Suspen
 Do not configure operator IDs or tenant memberships to bypass these checks.
 
 Sessions have a fixed eight-hour lifetime, no sliding refresh and no cookie cache. Sign-out invalidates server state.
-Passkeys are optional; email OTP remains available. Credential changes require email OTP proof less than five minutes old.
-Profile → Passkeys and sign-in provides enrollment and replacement. Replacement verifies ownership of a newly
-enrolled credential under a transaction, deletes previous credentials, revokes **all** resident sessions and audits
-the change. A notification is attempted after commit; failed delivery does not roll back security changes and is
-reported without credentials in logs. The user signs in again. Synced passkeys are credentials, not physical devices.
-Mailbox loss requires a separately designed identity recovery procedure; administrators cannot bypass mailbox proof here.
+Passkeys are optional; email OTP remains available. QR signup may omit email or collect an optional email address.
+If an email is entered, the resident verifies it with Email OTP before registering the passkey; without email,
+passkey registration is the first step. Residents with a verified email can request a
+fresh OTP and register a replacement passkey from Profile → Passkeys and sign-in. Existing passkeys are retained
+until the replacement credential is successfully registered; then previous credentials and other sessions are
+invalidated under a transaction and the change is audited. The current verified session remains active.
+
+Residents without a verified email must ask an administrator for a new passkey QR. The admin app issues a
+single-use, seven-day reset QR; the resident sees a banner and can cancel it. The current passkey remains valid
+until a replacement is registered. Synced passkeys are credentials, not physical devices. Mailbox loss requires a
+separately designed identity recovery procedure; administrators cannot bypass mailbox proof here.
 
 ## Local setup
 
@@ -37,11 +42,12 @@ Mailbox loss requires a separately designed identity recovery procedure; adminis
 2. Keep `RESIDENT_WEB_PUBLIC_URL=http://localhost:3098` and `RESIDENT_PASSKEY_RP_ID=localhost` locally.
    Local processes outside Compose use `RESIDENT_AUTH_INTERNAL_URL=http://localhost:4120` and a host-reachable
    `POSTGRES_AUTH_URL`. Container processes use service names from Compose.
-3. New database volumes apply SQL and auth login grants during bootstrap. For an existing local volume:
+3. New database volumes apply SQL and auth login grants during bootstrap. For an existing local volume, apply pending migrations and refresh the resident-auth role grants:
 
    ```sh
    docker compose up -d postgres
-   scripts/run-migrations.sh platform 011_resident_auth.sql
+   scripts/run-migrations.sh platform
+   scripts/run-migrations.sh tenant
    docker compose exec -T postgres bash /docker-entrypoint-initdb.d/05-resident-auth-role.sh
    ```
 
@@ -51,8 +57,10 @@ Mailbox loss requires a separately designed identity recovery procedure; adminis
    docker compose up --build -d --no-deps resident-auth api resident-web
    ```
 
-5. Create a resident invitation in the unchanged admin app, open it, complete email OTP and explicitly accept.
-   Test OTP-only use, optional passkey enrollment/login and lost-passkey replacement. Different providers do not
+5. Invite residents by email or generate a QR from Flats & Residents. QR signup may include a resident email for
+   Email OTP recovery or leave it blank for passkey-only access. Verify the optional email by OTP before testing
+   self-service replacement; test an admin-issued replacement QR and resident cancellation for passkey-only users.
+   Different providers do not
    share sessions or memberships. Do not reuse old Auth0 identities as Better Auth identities.
 
 Setting the flag to `auth0` on API and resident web restores the existing embedded Auth0 OTP flow, which still

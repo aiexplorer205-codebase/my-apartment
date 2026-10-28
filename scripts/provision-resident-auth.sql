@@ -13,3 +13,6 @@ GRANT USAGE ON SEQUENCE block9_platform.resident_auth_audit_id_seq TO myapartmen
 REVOKE ALL ON TABLE block9_platform.resident_auth_user, block9_platform.resident_auth_session,
   block9_platform.resident_auth_account, block9_platform.resident_auth_verification, block9_platform.resident_auth_passkey,
   block9_platform.resident_auth_rate_limit, block9_platform.resident_auth_email_limit, block9_platform.resident_auth_audit FROM myapartment_platform;
+
+GRANT SELECT, UPDATE ON block9_platform.resident_auth_qr TO myapartment_resident_auth;
+GRANT SELECT(tenant_id, status) ON block9_platform.tenant_records TO myapartment_resident_auth;

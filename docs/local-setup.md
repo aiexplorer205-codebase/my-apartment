@@ -70,7 +70,7 @@ Firebase and Filebase variables in `.env.example` are unused by current flows.
 
 Fresh initialization creates `myapartment_platform_db` (`block9_platform`) and
 `myapartment_app_db` (`block9_tenant`), applying every ordered SQL migration through
-tenant `037`. It creates separate platform, tenant-runtime, and lifecycle logins.
+tenant `038` and platform `012`. It creates separate platform, tenant-runtime, and lifecycle logins.
 There is no database-per-tenant template or cloning step.
 
 Use the URLs and password variables in `.env.example`. Existing `.env` files
