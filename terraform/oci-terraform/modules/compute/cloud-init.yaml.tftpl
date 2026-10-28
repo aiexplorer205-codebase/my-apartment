@@ -1,0 +1,56 @@
+#cloud-config
+hostname: ${hostname}
+manage_etc_hosts: true
+package_update: true
+package_upgrade: true
+
+packages:
+  - fail2ban
+  - unattended-upgrades
+  - curl
+  - ca-certificates
+  - jq
+  - age
+  - rclone
+
+users:
+  - default
+  - name: deploy
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - "${ssh_public_key}"
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-hardening.conf
+    permissions: '0644'
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}
+  - path: /etc/cron.weekly/docker-prune
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      docker image prune -af --filter "until=168h"
+
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker deploy
+  - mkdir -p /opt/myapartment
+  - chown deploy:deploy /opt/myapartment
+%{ if tailscale_auth_key != "" }
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  - tailscale up --ssh --authkey=${tailscale_auth_key} --hostname=${hostname}
+%{ endif }
+  - systemctl restart ssh
+  - systemctl enable --now fail2ban
+  - touch /var/lib/cloud/instance/myapartment-bootstrap-done
+
+final_message: "myapartment bootstrap finished after $UPTIME seconds"

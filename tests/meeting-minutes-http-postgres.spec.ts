@@ -1,31 +1,45 @@
+import { Pool } from '../apps/api/node_modules/pg'
 import { execFileSync } from 'node:child_process'
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { readFileSync, readdirSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startApiServer } from '../apps/api/src/index.ts'
-import { getPlatformPool, getTenantPool } from '../apps/api/src/persistence.ts'
+import { closeDatabasePools, getPlatformPool, getTenantPool } from '../apps/api/src/persistence.ts'
 
 // Local signed test identities exercise real JWT verification and membership
 // authorization. This is not an Auth0-provider integration or a browser test.
 describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Minutes of Meeting over authenticated HTTP',()=>{
   const platformName=`myapartment_mom_http_platform_${randomUUID().replaceAll('-','')}`
-  const names:string[]=[],pools:Array<ReturnType<typeof getTenantPool>>=[]
+  const sharedName=`shared_http_${randomUUID().replaceAll('-','')}`
+  let owner: Pool
+  const runtimeRole=`http_${randomUUID().replaceAll('-','')}`
   const previous:Record<string,string|undefined>={}
   const pair=generateKeyPairSync('rsa',{modulusLength:2048})
-  let control:ReturnType<typeof getTenantPool>,platform:ReturnType<typeof getPlatformPool>
+  let control:Pool,platform:ReturnType<typeof getPlatformPool>
   let api:Server,issuerServer:Server,issuer='',base=''
   const listen=(server:Server)=>new Promise<void>((resolve,reject)=>{server.once('error',reject);server.once('listening',resolve)})
   const origin=(server:Server)=>{const address=server.address();if(!address||typeof address==='string')throw new Error('Test server did not bind');return`http://127.0.0.1:${address.port}`}
   beforeAll(async()=>{
-    for(const name of ['POSTGRES_TENANT_URL','POSTGRES_PLATFORM_URL','AUTH0_ISSUER','AUTH0_AUDIENCE'])previous[name]=process.env[name]
+    for(const name of ['POSTGRES_TENANT_URL','POSTGRES_PLATFORM_URL','POSTGRES_MAINTENANCE_URL','AUTH0_ISSUER','AUTH0_AUDIENCE'])previous[name]=process.env[name]
     const password=execFileSync('docker',['compose','-p','myapartment-schema-check','exec','-T','postgres','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
     const url=new URL('postgresql://postgres@127.0.0.1:55434/postgres');url.password=password
-    process.env.POSTGRES_TENANT_URL=url.toString();control=getTenantPool('postgres')
+    control=new Pool({connectionString:url.toString()})
     await control.query(`CREATE DATABASE "${platformName}" TEMPLATE template0`)
-    url.pathname=`/${platformName}`;process.env.POSTGRES_PLATFORM_URL=url.toString();platform=getPlatformPool()
+    url.pathname=`/${platformName}`;process.env.POSTGRES_PLATFORM_URL=url.toString();platform=new Pool({connectionString:url.toString(),options:'-c search_path=block9_platform,public'})
     const migrations=new URL('../migrations/myapartment_platform_db/',import.meta.url)
     for(const file of readdirSync(migrations).filter((name)=>name.endsWith('.sql')).sort())await platform.query(readFileSync(new URL(file,migrations),'utf8'))
+    await control.query(`CREATE DATABASE "${sharedName}" TEMPLATE template0`)
+    const ownerUrl=new URL(url);ownerUrl.pathname=`/${sharedName}`
+    owner=new Pool({connectionString:ownerUrl.toString(),options:'-c search_path=block9_tenant,public'})
+    const tenantMigrations=new URL('../migrations/myapartment_tenant_db/',import.meta.url)
+    for(const file of readdirSync(tenantMigrations).filter(name=>name.endsWith('.sql')).sort())await owner.query(readFileSync(new URL(file,tenantMigrations),'utf8'))
+    await owner.query(`CREATE ROLE ${runtimeRole} LOGIN PASSWORD 'disposable-http-runtime'; GRANT myapartment_runtime TO ${runtimeRole}`)
+    ownerUrl.username=runtimeRole;ownerUrl.password='disposable-http-runtime';process.env.POSTGRES_TENANT_URL=ownerUrl.toString()
+    await platform.query(`CREATE ROLE ${runtimeRole}_platform LOGIN PASSWORD 'disposable-platform'; GRANT USAGE ON SCHEMA block9_platform TO ${runtimeRole}_platform; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA block9_platform TO ${runtimeRole}_platform; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA block9_platform TO ${runtimeRole}_platform`)
+    const platformUrl=new URL(url);platformUrl.username=`${runtimeRole}_platform`;platformUrl.password='disposable-platform';process.env.POSTGRES_PLATFORM_URL=platformUrl.toString()
+    await owner.query(`CREATE ROLE ${runtimeRole}_lifecycle LOGIN PASSWORD 'disposable-lifecycle'; GRANT myapartment_lifecycle TO ${runtimeRole}_lifecycle`)
+    const lifecycleUrl=new URL(ownerUrl);lifecycleUrl.username=`${runtimeRole}_lifecycle`;lifecycleUrl.password='disposable-lifecycle';process.env.POSTGRES_MAINTENANCE_URL=lifecycleUrl.toString()
     const jwk={...pair.publicKey.export({format:'jwk'}),kid:'local-mom-test',alg:'RS256',use:'sig'}
     issuerServer=createServer((_request,response)=>{response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({keys:[jwk]}))})
     const issuerReady=listen(issuerServer);issuerServer.listen(0,'127.0.0.1');await issuerReady
@@ -35,9 +49,10 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Minutes of Meetin
   },20000)
   afterAll(async()=>{
     for(const server of [api,issuerServer])if(server)await new Promise<void>((resolve,reject)=>{server.closeAllConnections();server.close((error)=>error?reject(error):resolve())})
-    await Promise.all(pools.map((pool)=>pool.end()))
+    await closeDatabasePools()
+    if(owner)await owner.end()
     if(platform)await platform.end()
-    if(control){for(const name of names)await control.query(`DROP DATABASE IF EXISTS "${name}"`);await control.query(`DROP DATABASE IF EXISTS "${platformName}"`);await control.end()}
+    if(control){await control.query(`DROP DATABASE IF EXISTS "${sharedName}"`);await control.query(`DROP DATABASE IF EXISTS "${platformName}"`);await control.query(`DROP ROLE IF EXISTS ${runtimeRole}; DROP ROLE IF EXISTS ${runtimeRole}_platform; DROP ROLE IF EXISTS ${runtimeRole}_lifecycle`);await control.end()}
     for(const[name,value]of Object.entries(previous)){if(value===undefined)delete process.env[name];else process.env[name]=value}
   },30000)
   const token=(subject:string)=>{
@@ -46,11 +61,8 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Minutes of Meetin
     const input=`${header}.${payload}`;return`${input}.${sign('RSA-SHA256',Buffer.from(input),pair.privateKey).toString('base64url')}`
   }
   const tenant=async()=>{
-    const id=randomUUID(),database=`myapartment_mom_http_tenant_${randomUUID().replaceAll('-','')}`,residentId=randomUUID(),unitId=randomUUID(),resident=`resident|${randomUUID()}`,admin=`admin|${randomUUID()}`
-    await control.query(`CREATE DATABASE "${database}" TEMPLATE template0`);names.push(database)
-    const pool=getTenantPool(database);pools.push(pool)
-    const directory=new URL('../migrations/myapartment_tenant_db/',import.meta.url)
-    for(const file of readdirSync(directory).filter(name=>name.endsWith('.sql')).sort())await pool.query(readFileSync(new URL(file,directory),'utf8'))
+    const id=randomUUID(),database=sharedName,residentId=randomUUID(),unitId=randomUUID(),resident=`resident|${randomUUID()}`,admin=`admin|${randomUUID()}`
+    const pool=getTenantPool(id)
     await pool.query(`INSERT INTO organizations(id,tenant_id,name,locale,currency,timezone) VALUES($1::uuid,$1::text,'HTTP Test Community','en-IN','INR','Asia/Kolkata')`,[id])
     await pool.query(`INSERT INTO units(id,tenant_id,number,status) VALUES($1,$2,'A-101','occupied')`,[unitId,id])
     await pool.query(`INSERT INTO residents(id,auth_subject,unit_id,full_name,email,status,start_date) VALUES($1,$2,$3,'HTTP Test Resident','http-resident@example.test','active','2020-01-01')`,[residentId,resident,unitId])

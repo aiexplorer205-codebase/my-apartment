@@ -3,6 +3,9 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
+      PLATFORM_DATABASE_PASSWORD: ${PLATFORM_DATABASE_PASSWORD:-local-platform-password}
+      APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:-local-app-password}
+      LIFECYCLE_DATABASE_PASSWORD: ${LIFECYCLE_DATABASE_PASSWORD:-local-lifecycle-password}
       POSTGRES_DB: ${POSTGRES_DB:-myapartment_platform_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -12,6 +15,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
       - ./migrations:/migrations:ro
+      - ./scripts:/scripts:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-myapartment_platform_db}']
       interval: 10s
@@ -42,8 +46,9 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 4001
-      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:-postgresql://postgres:postgres@postgres:5432/myapartment_platform_db}
-      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:-postgresql://postgres:postgres@postgres:5432/myapartment_tenant_template}
+      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:-postgresql://myapartment_platform:${PLATFORM_DATABASE_PASSWORD:-local-platform-password}@postgres:5432/myapartment_platform_db}
+      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:-postgresql://myapartment_app:${APP_DATABASE_PASSWORD:-local-app-password}@postgres:5432/myapartment_app_db}
+      POSTGRES_MAINTENANCE_URL: ${POSTGRES_MAINTENANCE_URL:-postgresql://myapartment_operator_lifecycle:${LIFECYCLE_DATABASE_PASSWORD:-local-lifecycle-password}@postgres:5432/myapartment_app_db}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.myapartment.local}
@@ -63,6 +68,13 @@ services:
       AUTH0_OTP_ENABLED: ${AUTH0_OTP_ENABLED:-false}
       RESEND_API_KEY: ${RESEND_API_KEY:-replace-with-resend-key}
       RESEND_FROM: ${RESEND_FROM:-no-reply@block9.co.in}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      PHOTO_RETENTION_DAYS: ${PHOTO_RETENTION_DAYS:-90}
       FILEBASE_ENDPOINT: ${FILEBASE_ENDPOINT:-https://example.filebase.com}
       FILEBASE_BUCKET: ${FILEBASE_BUCKET:-block9-local-dev}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-replace-me}
@@ -91,8 +103,8 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 4010
-      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:-postgresql://postgres:postgres@postgres:5432/myapartment_platform_db}
-      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:-postgresql://postgres:postgres@postgres:5432/myapartment_tenant_template}
+      POSTGRES_PLATFORM_URL: ${POSTGRES_PLATFORM_URL:-postgresql://myapartment_platform:${PLATFORM_DATABASE_PASSWORD:-local-platform-password}@postgres:5432/myapartment_platform_db}
+      POSTGRES_TENANT_URL: ${POSTGRES_TENANT_URL:-postgresql://myapartment_app:${APP_DATABASE_PASSWORD:-local-app-password}@postgres:5432/myapartment_app_db}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.myapartment.local}

@@ -17,13 +17,13 @@ export class PostgresDatabaseAdapter implements DatabasePort {
       defaultCurrency: 'INR',
       locale: 'en-IN',
       timezone: 'Asia/Kolkata',
-      databaseLocator: `myapartment_tenant_${id}`,
+      databaseLocator: 'myapartment_app_db',
     }
     return ok(tenant) as Result<Tenant | null, PortFailure>
   }
 
   async resolveTenantLocator(tenantId: string): Promise<Result<string, PortFailure>> {
-    const locator = `myapartment_tenant_${tenantId}`
+    const locator = 'myapartment_app_db'
     this.locators.set(tenantId, locator)
     return ok(locator) as Result<string, PortFailure>
   }

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import type { Pool, PoolClient } from 'pg'
+import type { PoolClient } from 'pg'
+import type { TenantDatabase as Pool } from './persistence.js'
 import type { AdminMeetingDetail, MeetingAttendee, MeetingDraft, MeetingSummary, MeetingDetail } from '@block9/contracts'
 import { ApiFault } from './api-fault.js'
 import { publishCommunication } from './communication-publications.js'

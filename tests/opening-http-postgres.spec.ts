@@ -1,32 +1,54 @@
+import { objects, setFailPut } from './support/photo-storage'
+import { cleanupPhotoUploads } from '../apps/api/src/photo-maintenance'
+import { Pool } from '../apps/api/node_modules/pg'
 import sharp from '../apps/api/node_modules/sharp/dist/index.mjs'
 import { execFileSync } from 'node:child_process'
-import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { readFileSync, readdirSync } from 'node:fs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startApiServer } from '../apps/api/src/index.ts'
-import { getPlatformPool, getTenantPool } from '../apps/api/src/persistence.ts'
+import { closeDatabasePools, getPlatformPool, getTenantPool } from '../apps/api/src/persistence.ts'
+
+vi.mock('../apps/api/src/image-storage',async(importOriginal)=>{
+  const actual=await importOriginal<typeof import('../apps/api/src/image-storage')>()
+  const fake=await import('./support/photo-storage')
+  return{...actual,imageStorage:()=>fake.storage,imageStorageConfigured:()=>false}
+})
 
 // Local signed test identities exercise real JWT verification and membership
 // authorization. This is not an Auth0-provider integration or a browser test.
 describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances over authenticated HTTP',()=>{
   const platformName=`myapartment_http_platform_${randomUUID().replaceAll('-','')}`
-  const names:string[]=[],pools:Array<ReturnType<typeof getTenantPool>>=[]
+  const sharedName=`shared_http_${randomUUID().replaceAll('-','')}`
+  let owner: Pool
+  const runtimeRole=`http_${randomUUID().replaceAll('-','')}`
   const previous:Record<string,string|undefined>={}
   const pair=generateKeyPairSync('rsa',{modulusLength:2048})
-  let control:ReturnType<typeof getTenantPool>,platform:ReturnType<typeof getPlatformPool>
+  let control:Pool,platform:ReturnType<typeof getPlatformPool>
   let api:Server,issuerServer:Server,issuer='',base=''
   const listen=(server:Server)=>new Promise<void>((resolve,reject)=>{server.once('error',reject);server.once('listening',resolve)})
   const origin=(server:Server)=>{const address=server.address();if(!address||typeof address==='string')throw new Error('Test server did not bind');return`http://127.0.0.1:${address.port}`}
   beforeAll(async()=>{
-    for(const name of ['POSTGRES_TENANT_URL','POSTGRES_PLATFORM_URL','AUTH0_ISSUER','AUTH0_AUDIENCE'])previous[name]=process.env[name]
+    for(const name of ['POSTGRES_TENANT_URL','POSTGRES_PLATFORM_URL','POSTGRES_MAINTENANCE_URL','AUTH0_ISSUER','AUTH0_AUDIENCE'])previous[name]=process.env[name]
     const password=execFileSync('docker',['compose','-p','myapartment-schema-check','exec','-T','postgres','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
     const url=new URL('postgresql://postgres@127.0.0.1:55434/postgres');url.password=password
-    process.env.POSTGRES_TENANT_URL=url.toString();control=getTenantPool('postgres')
+    control=new Pool({connectionString:url.toString()})
     await control.query(`CREATE DATABASE "${platformName}" TEMPLATE template0`)
-    url.pathname=`/${platformName}`;process.env.POSTGRES_PLATFORM_URL=url.toString();platform=getPlatformPool()
+    url.pathname=`/${platformName}`;process.env.POSTGRES_PLATFORM_URL=url.toString();platform=new Pool({connectionString:url.toString(),options:'-c search_path=block9_platform,public'})
     const migrations=new URL('../migrations/myapartment_platform_db/',import.meta.url)
     for(const file of readdirSync(migrations).filter((name)=>name.endsWith('.sql')).sort())await platform.query(readFileSync(new URL(file,migrations),'utf8'))
+    await control.query(`CREATE DATABASE "${sharedName}" TEMPLATE template0`)
+    const ownerUrl=new URL(url);ownerUrl.pathname=`/${sharedName}`
+    owner=new Pool({connectionString:ownerUrl.toString(),options:'-c search_path=block9_tenant,public'})
+    const tenantMigrations=new URL('../migrations/myapartment_tenant_db/',import.meta.url)
+    for(const file of readdirSync(tenantMigrations).filter(name=>name.endsWith('.sql')).sort())await owner.query(readFileSync(new URL(file,tenantMigrations),'utf8'))
+    await owner.query(`CREATE ROLE ${runtimeRole} LOGIN PASSWORD 'disposable-http-runtime'; GRANT myapartment_runtime TO ${runtimeRole}`)
+    ownerUrl.username=runtimeRole;ownerUrl.password='disposable-http-runtime';process.env.POSTGRES_TENANT_URL=ownerUrl.toString()
+    await platform.query(`CREATE ROLE ${runtimeRole}_platform LOGIN PASSWORD 'disposable-platform'; GRANT USAGE ON SCHEMA block9_platform TO ${runtimeRole}_platform; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA block9_platform TO ${runtimeRole}_platform; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA block9_platform TO ${runtimeRole}_platform`)
+    const platformUrl=new URL(url);platformUrl.username=`${runtimeRole}_platform`;platformUrl.password='disposable-platform';process.env.POSTGRES_PLATFORM_URL=platformUrl.toString()
+    await owner.query(`CREATE ROLE ${runtimeRole}_lifecycle LOGIN PASSWORD 'disposable-lifecycle'; GRANT myapartment_lifecycle TO ${runtimeRole}_lifecycle`)
+    const lifecycleUrl=new URL(ownerUrl);lifecycleUrl.username=`${runtimeRole}_lifecycle`;lifecycleUrl.password='disposable-lifecycle';process.env.POSTGRES_MAINTENANCE_URL=lifecycleUrl.toString()
     const jwk={...pair.publicKey.export({format:'jwk'}),kid:'local-opening-test',alg:'RS256',use:'sig'}
     issuerServer=createServer((_request,response)=>{response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({keys:[jwk]}))})
     const issuerReady=listen(issuerServer);issuerServer.listen(0,'127.0.0.1');await issuerReady
@@ -36,9 +58,10 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
   },20000)
   afterAll(async()=>{
     for(const server of [api,issuerServer])if(server)await new Promise<void>((resolve,reject)=>{server.closeAllConnections();server.close((error)=>error?reject(error):resolve())})
-    await Promise.all(pools.map((pool)=>pool.end()))
+    await closeDatabasePools()
+    if(owner)await owner.end()
     if(platform)await platform.end()
-    if(control){for(const name of names)await control.query(`DROP DATABASE IF EXISTS "${name}"`);await control.query(`DROP DATABASE IF EXISTS "${platformName}"`);await control.end()}
+    if(control){await control.query(`DROP DATABASE IF EXISTS "${sharedName}"`);await control.query(`DROP DATABASE IF EXISTS "${platformName}"`);await control.query(`DROP ROLE IF EXISTS ${runtimeRole}; DROP ROLE IF EXISTS ${runtimeRole}_platform; DROP ROLE IF EXISTS ${runtimeRole}_lifecycle`);await control.end()}
     for(const[name,value]of Object.entries(previous)){if(value===undefined)delete process.env[name];else process.env[name]=value}
   },30000)
   const token=(subject:string)=>{
@@ -47,9 +70,8 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     const input=`${header}.${payload}`;return`${input}.${sign('RSA-SHA256',Buffer.from(input),pair.privateKey).toString('base64url')}`
   }
   const tenant=async()=>{
-    const id=randomUUID(),database=`myapartment_http_tenant_${randomUUID().replaceAll('-','')}`,residentId=randomUUID(),unitId=randomUUID(),resident=`resident|${randomUUID()}`,admin=`admin|${randomUUID()}`
-    await control.query(`CREATE DATABASE "${database}" TEMPLATE myapartment_tenant_template`);names.push(database)
-    const pool=getTenantPool(database);pools.push(pool)
+    const id=randomUUID(),database=sharedName,residentId=randomUUID(),unitId=randomUUID(),resident=`resident|${randomUUID()}`,admin=`admin|${randomUUID()}`
+    const pool=getTenantPool(id)
     await pool.query(`INSERT INTO organizations(id,tenant_id,name,locale,currency,timezone) VALUES($1::uuid,$1::text,'HTTP Test Community','en-IN','INR','Asia/Kolkata')`,[id])
     await pool.query(`INSERT INTO units(id,tenant_id,number,status) VALUES($1,$2,'A-101','occupied')`,[unitId,id])
     await pool.query(`INSERT INTO residents(id,auth_subject,unit_id,full_name,email,status) VALUES($1,$2,$3,'HTTP Test Resident','http-resident@example.test','active')`,[residentId,resident,unitId])
@@ -63,6 +85,73 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     const response=await fetch(base+path,{method:method??(body?'POST':'GET'),headers:{Authorization:`Bearer ${token(subject)}`,'X-Tenant-Id':tenantId,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})})
     return{status:response.status,body:await response.json()}
   }
+  const uploadPhoto=async(f:Awaited<ReturnType<typeof tenant>>,image?:Buffer,name='leak.webp')=>{
+    const bytes=image??await sharp({create:{width:160,height:80,channels:3,background:'#aaaacc'}}).withMetadata({orientation:6}).webp().toBuffer()
+    const metadata={name,type:'image/webp',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),requestKey:randomUUID()}
+    const intent=await request(f.resident,f.id,'/v1/tenant/photo-uploads',metadata)
+    expect(intent.status).toBe(201)
+    objects.set(decodeURIComponent(new URL(intent.body.url).pathname.slice(1)),bytes)
+    const completed=await request(f.resident,f.id,`/v1/tenant/photo-uploads/${intent.body.id}/complete`,{})
+    expect(completed.status).toBe(200)
+    return{id:intent.body.id,metadata,bytes,intent}
+  }
+  it('onboards and deletes shared workspaces through restricted database roles',async()=>{
+    const externalKeys=['AUTH0_DOMAIN','AUTH0_MGMT_CLIENT_ID','AUTH0_MGMT_CLIENT_SECRET','RESEND_API_KEY','RESEND_FROM','ADMIN_WEB_PUBLIC_URL','OPERATOR_IDS']
+    const saved=Object.fromEntries(externalKeys.map(key=>[key,process.env[key]]))
+    Object.assign(process.env,{AUTH0_DOMAIN:'provider.example.test',AUTH0_MGMT_CLIENT_ID:'test-client',AUTH0_MGMT_CLIENT_SECRET:'test-secret',RESEND_API_KEY:'test-email-key',RESEND_FROM:'test@example.test',ADMIN_WEB_PUBLIC_URL:'https://admin.example.test',OPERATOR_IDS:'operator|test'})
+    const originalFetch=globalThis.fetch
+    const stub=vi.spyOn(globalThis,'fetch').mockImplementation(async(input,options)=>{
+      const url=String(input)
+      if(url.startsWith('https://provider.example.test/')){
+        if(url.endsWith('/oauth/token'))return Response.json({access_token:'management-test-token',expires_in:3600})
+        if(url.includes('/users-by-email?'))return Response.json([])
+        if(url.endsWith('/api/v2/users'))return Response.json({user_id:'email|test-admin'})
+        if(options?.method==='DELETE')return new Response(null,{status:204})
+        return Response.json({user_id:'email|test-admin',email:'onboarding@example.test',identities:[{connection:'email'}]})
+      }
+      if(url==='https://api.resend.com/emails')return Response.json({id:'email-test'})
+      return originalFetch(input,options)
+    })
+    try{
+      const before=(await control.query('SELECT count(*)::int AS count FROM pg_database')).rows[0].count
+      const created=await request('operator|test',randomUUID(),'/v1/platform/organizations',{name:'Shared Onboarding Community',city:'Hyderabad',adminEmail:'onboarding@example.test',allowedBlocks:1,flatsPerBlock:[10],plan:'starter'})
+      expect(created.status).toBe(201)
+      const id=created.body.tenantId,pool=getTenantPool(id)
+      expect((await pool.query('SELECT name FROM organizations')).rows).toEqual([{name:'Shared Onboarding Community'}])
+      expect((await pool.query('SELECT name FROM apartments')).rowCount).toBe(1)
+      expect((await control.query('SELECT count(*)::int AS count FROM pg_database')).rows[0].count).toBe(before)
+      const other=await tenant()
+      await platform.query("INSERT INTO tenant_memberships(subject,tenant_id,role) VALUES('email|test-admin',$1,'resident')",[other.id])
+      expect((await request(other.admin,other.id,`/v1/platform/organizations/${id}/lifecycle`,{action:'delete'})).status).toBe(403)
+      const removed=await request('operator|test',id,`/v1/platform/organizations/${id}/lifecycle`,{action:'delete'})
+      expect(removed.status).toBe(200)
+      expect(removed.body.auth0AdminRemoved).toBe(false)
+      expect(stub.mock.calls.some(([url,options])=>String(url).includes('/api/v2/users/')&&options?.method==='DELETE')).toBe(false)
+      expect((await platform.query('SELECT 1 FROM tenant_records WHERE tenant_id=$1',[id])).rowCount).toBe(0)
+      await expect(pool.query('SELECT * FROM organizations')).rejects.toThrow('deleted')
+      expect((await other.pool.query('SELECT 1 FROM organizations')).rowCount).toBe(1)
+    }finally{
+      stub.mockRestore()
+      for(const[key,value]of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value}
+    }
+  })
+  it('publishes the same billing period independently for two communities',async()=>{
+    const first=await tenant(),second=await tenant()
+    for(const [f,maintenance]of [[first,100],[second,250]] as const){
+      await f.pool.query("UPDATE residents SET start_date='2020-01-01'")
+      const rules={template:'standard',maintenance,water:0,sinkingFund:0,maintenanceRatePerSqft:0,waterRatePerKl:0,dueDay:10,gracePeriodDays:0,lateFee:0}
+      expect((await request(f.admin,f.id,'/v1/admin/billing/rules',rules)).status).toBe(200)
+      expect((await request(f.admin,f.id,'/v1/admin/billing/rules',rules)).status).toBe(200)
+      const preview=await request(f.admin,f.id,'/v1/admin/billing/preview',{billingPeriod:'2026-10'})
+      expect(preview.status).toBe(200)
+      const published=await request(f.admin,f.id,'/v1/admin/billing/publish',{billingPeriod:'2026-10',previewToken:preview.body.previewToken})
+      expect(published.status).toBe(201)
+      expect((await f.pool.query('SELECT total_minor::int FROM invoices')).rows).toEqual([{total_minor:maintenance*100}])
+      expect((await f.pool.query('SELECT billing_period::text FROM billing_runs')).rows).toEqual([{billing_period:'2026-10-01'}])
+    }
+    expect((await first.pool.query('SELECT maintenance_minor::int FROM billing_rules')).rows).toEqual([{maintenance_minor:10000}])
+    expect((await second.pool.query('SELECT maintenance_minor::int FROM billing_rules')).rows).toEqual([{maintenance_minor:25000}])
+  })
   it('carries imported dues from admin review through resident reporting to one receipt',async()=>{
     const f=await tenant()
     const review=await request(f.admin,f.id,'/v1/admin/accounts/opening',{action:'preview',date:'2026-01-01',cash:1000,bank:4000,source:'Verified old books',residentBalances:[{residentId:f.residentId,amount:300}]})
@@ -223,7 +312,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     expect((await request(f.admin,f.id,`/v1/admin/accounts/entries/${source.id}`)).body.id).toBe(source.id)
     const reversed=await request(f.admin,f.id,`/v1/admin/accounts/entries/${source.id}`,{action:'reverse',date:'2026-01-15',reason:'Duplicate repair receipt verified against source.',requestKey:randomUUID()})
     expect(reversed.status).toBe(200)
-    await f.pool.query(`INSERT INTO account_entries(tenant_id,entry_type,account_name,entry_date,amount_minor,category,party,description,status,created_by,request_key) VALUES($1,'expense','Cash','2026-01-20',-200,'Cleaning','Draft cleaning bill','Not paid','draft',$2,$4),($1,'other_income','Bank','2026-02-01',300,'Interest','Bank interest','Verified interest','posted',$2,$5),($3,'expense','Bank','2026-01-10',-7000,'Repairs','Foreign source','Private entry','posted',$2,$6)`,[f.id,f.admin,other.id,randomUUID(),randomUUID(),randomUUID()])
+    await owner.query(`INSERT INTO account_entries(tenant_id,entry_type,account_name,entry_date,amount_minor,category,party,description,status,created_by,request_key) VALUES($1,'expense','Cash','2026-01-20',-200,'Cleaning','Draft cleaning bill','Not paid','draft',$2,$4),($1,'other_income','Bank','2026-02-01',300,'Interest','Bank interest','Verified interest','posted',$2,$5),($3,'expense','Bank','2026-01-10',-7000,'Repairs','Foreign source','Private entry','posted',$2,$6)`,[f.id,f.admin,other.id,randomUUID(),randomUUID(),randomUUID()])
     const corrections=await request(f.admin,f.id,'/v1/admin/accounts?period=2026-01&status=reversed')
     expect(corrections.body.total).toBe(1);expect(corrections.body.entries[0]).toMatchObject({id:source.id,reversedBy:reversed.body.id,status:'posted'})
     const posted=await request(f.admin,f.id,'/v1/admin/accounts?period=2026-01&status=posted&type=expense')
@@ -240,7 +329,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     expect((await request(f.admin,f.id,'/v1/admin/accounts?period=2026-01&page=99')).body.entries).toEqual([])
     expect((await request(f.resident,f.id,'/v1/admin/accounts?period=2026-01')).status).toBe(403)
     expect((await request(other.admin,f.id,'/v1/admin/accounts?period=2026-01')).status).toBe(403)
-    expect((await request(other.admin,other.id,'/v1/admin/accounts?period=2026-01')).body.total).toBe(0)
+    expect((await request(other.admin,other.id,'/v1/admin/accounts?period=2026-01')).body.total).toBe(1)
   },15000)
 
   it('filters resident ledger periods with carried balances and pages stable running activity',async()=>{
@@ -345,7 +434,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     expect((await request(f.admin,f.id,`/v1/admin/accounts/opening/credit/${f.residentId}`,{fingerprint:credit.body.fingerprint,requestKey:randomUUID()})).status).toBe(200)
     expect((await request(f.admin,f.id,`/v1/admin/collections/${report.body.id}/confirm`,{account:'Bank',reference:'SUMMARY-CURRENT-RECEIPT',expectedAmountMinor:10000})).status).toBe(200)
     expect((await request(f.resident,f.id,'/v1/tenant/payments/manual',{invoiceId:invoice,amount:50,requestKey:randomUUID()})).status).toBe(201)
-    await f.pool.query(`INSERT INTO account_entries(tenant_id,entry_type,account_name,entry_date,amount_minor,category,party,description,created_by,request_key) VALUES($1,'expense','Bank','2026-01-15',-900000,'Repairs','Foreign source','Excluded',$2,$3)`,[other.id,f.admin,randomUUID()])
+    await owner.query(`INSERT INTO account_entries(tenant_id,entry_type,account_name,entry_date,amount_minor,category,party,description,created_by,request_key) VALUES($1,'expense','Bank','2026-01-15',-900000,'Repairs','Foreign source','Excluded',$2,$3)`,[other.id,f.admin,randomUUID()])
     await f.pool.query(`INSERT INTO invoices(invoice_number,resident_id,billing_period,due_date,status,total_minor) VALUES($1,$2,'2026-03-01','2026-03-25','draft',900000)`,[`DRAFT-${randomUUID()}`,f.residentId])
     const january=await request(f.admin,f.id,'/v1/admin/accounts?period=2026-01&search=does-not-match&account=Bank&status=draft')
     expect(january.status).toBe(200);expect(january.body.total).toBe(0)
@@ -363,7 +452,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     const posted=await request(f.admin,f.id,'/v1/admin/accounts?period=2026-01&status=posted_with_reversals')
     expect(posted.body.entries.some((row:{id:string})=>row.id===bankExpense)).toBe(true);expect(posted.body.entries.every((row:{status:string})=>row.status==='posted')).toBe(true)
     const empty=await request(f.admin,f.id,'/v1/admin/accounts?period=2025-12');expect(empty.body.categories).toEqual([]);expect(empty.body.receivables.outstandingMinor).toBe(20000)
-    const isolated=await request(other.admin,other.id,'/v1/admin/accounts?period=2026-01');expect(isolated.body.categories).toEqual([]);expect(isolated.body.receivables.outstandingMinor).toBe(0)
+    const isolated=await request(other.admin,other.id,'/v1/admin/accounts?period=2026-01');expect(isolated.body.categories).toEqual([{entryType:'expense',account:'Bank',category:'Repairs',amountMinor:-900000,entryCount:1}]);expect(isolated.body.receivables.outstandingMinor).toBe(0)
     expect((await request(f.resident,f.id,'/v1/admin/accounts?period=2026-01')).status).toBe(403)
   },15000)
 
@@ -561,11 +650,11 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
   },15000)
   it('rolls back a failed poll publication and allows the same reviewed request to retry',async()=>{
     const f=await tenant(),key=randomUUID(),input={question:'Atomic publication test',options:['Saturday','Sunday'],startsAt:new Date(Date.now()+86400000).toISOString(),endsAt:new Date(Date.now()+172800000).toISOString(),anonymous:true,showResultsLive:false,resultsRetentionDays:7,requestKey:key}
-    await f.pool.query(`CREATE FUNCTION reject_test_poll_option() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Test storage failure'; END $$; CREATE TRIGGER reject_test_option BEFORE INSERT ON poll_options FOR EACH ROW EXECUTE FUNCTION reject_test_poll_option()`)
+    await owner.query(`CREATE FUNCTION reject_test_poll_option() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Test storage failure'; END $$; CREATE TRIGGER reject_test_option BEFORE INSERT ON poll_options FOR EACH ROW EXECUTE FUNCTION reject_test_poll_option()`)
     expect((await request(f.admin,f.id,'/v1/admin/polls',input)).status).toBe(503)
     expect((await f.pool.query('SELECT COUNT(*)::int AS count FROM polls WHERE tenant_id=$1',[f.id])).rows[0].count).toBe(0)
     expect((await f.pool.query('SELECT COUNT(*)::int AS count FROM communication_publications WHERE tenant_id=$1',[f.id])).rows[0].count).toBe(0)
-    await f.pool.query('DROP TRIGGER reject_test_option ON poll_options; DROP FUNCTION reject_test_poll_option()')
+    await owner.query('DROP TRIGGER reject_test_option ON poll_options; DROP FUNCTION reject_test_poll_option()')
     expect((await request(f.admin,f.id,'/v1/admin/polls',input)).status).toBe(201)
     expect((await f.pool.query('SELECT COUNT(*)::int AS count FROM communication_publications WHERE tenant_id=$1',[f.id])).rows[0].count).toBe(1)
   },15000)
@@ -610,22 +699,28 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     await f.pool.query(`INSERT INTO units(id,tenant_id,number,status) VALUES($1,$2,'A-102','occupied')`,[unit,f.id])
     await f.pool.query(`INSERT INTO residents(id,unit_id,auth_subject,full_name,email,status) VALUES($1,$2,$3,'Second Resident','second-photo@example.test','active')`,[secondId,unit,second])
     await platform.query(`INSERT INTO tenant_memberships(subject,tenant_id,role) VALUES($1,$2,'resident')`,[second,f.id])
-    const image=await sharp({create:{width:160,height:80,channels:3,background:'#aaaacc'}}).withMetadata({orientation:6}).jpeg().toBuffer()
-    const input={subject:'Photo of leaking connection',description:'The kitchen pipe connection has been dripping since morning.',category:'Plumbing',location:'Kitchen',requestKey:randomUUID(),photos:[{name:'leak.jpg',type:'image/jpeg',data:image.toString('base64')}]}
+    const image=await uploadPhoto(f)
+    const input={subject:'Photo of leaking connection',description:'The kitchen pipe connection has been dripping since morning.',category:'Plumbing',location:'Kitchen',requestKey:randomUUID(),photos:[image.id]}
     const copies=await Promise.all([request(f.resident,f.id,'/v1/tenant/complaints',input),request(f.resident,f.id,'/v1/tenant/complaints',input)])
     expect(copies.map((row)=>row.status)).toEqual([201,201]);expect(copies[0].body.id).toBe(copies[1].body.id)
     const id=copies[0].body.id,detail=await request(f.resident,f.id,`/v1/tenant/complaints/${id}`)
-    expect(detail.body.photos).toHaveLength(1);expect(detail.body.photos[0]).toMatchObject({name:'leak.jpg',width:80,height:160})
+    expect(detail.body.photos).toHaveLength(1);expect(detail.body.photos[0]).toMatchObject({name:'leak.webp',width:80,height:160})
     expect(detail.body.photos[0]).not.toHaveProperty('data')
     const photoId=detail.body.photos[0].id
     await expect(f.pool.query('UPDATE complaint_photos SET slot=4 WHERE id=$1',[photoId])).rejects.toThrow()
-    await expect(f.pool.query("UPDATE complaint_photos SET data=repeat('x',1048577)::bytea WHERE id=$1",[photoId])).rejects.toThrow()
+    await expect(f.pool.query("UPDATE complaint_photos SET byte_size=1048577 WHERE id=$1",[photoId])).rejects.toThrow()
     await expect(f.pool.query('UPDATE complaint_photos SET tenant_id=$2 WHERE id=$1',[photoId,other.id])).rejects.toThrow()
     const photoPath=`/v1/tenant/complaints/${id}/photos/${photoId}`
     const read=(subject:string,tenantId:string,path:string)=>fetch(base+path,{headers:{Authorization:`Bearer ${token(subject)}`,'X-Tenant-Id':tenantId}})
     const served=await read(f.resident,f.id,photoPath)
-    expect(served.status).toBe(200);expect(served.headers.get('content-type')).toBe('image/jpeg');expect(served.headers.get('cache-control')).toBe('no-store');expect(served.headers.get('x-content-type-options')).toBe('nosniff')
-    const metadata=await sharp(Buffer.from(await served.arrayBuffer())).metadata();expect(metadata.exif).toBeUndefined();expect(metadata.icc).toBeUndefined();expect(metadata.orientation).toBeUndefined()
+    expect(served.status).toBe(200);expect(served.headers.get('cache-control')).toBe('no-store')
+    const link=await served.json(),key=decodeURIComponent(new URL(link.url).pathname.slice(1))
+    expect(new URL(link.url).searchParams.get('expiresIn')).toBe('60')
+    const metadata=await sharp(objects.get(key)!).metadata();expect(metadata.format).toBe('webp');expect(metadata.exif).toBeUndefined();expect(metadata.icc).toBeUndefined();expect(metadata.orientation).toBeUndefined()
+    // Replaying a staged upload cannot overwrite the separate sanitized final object.
+    objects.set(decodeURIComponent(new URL(image.intent.body.url).pathname.slice(1)),Buffer.from('replayed'))
+    expect((await request(f.resident,f.id,`/v1/tenant/photo-uploads/${image.id}/complete`,{})).status).toBe(200)
+    expect(objects.get(key)).not.toEqual(Buffer.from('replayed'))
     expect((await read(f.admin,f.id,photoPath.replace('/tenant/','/admin/'))).status).toBe(200)
     expect((await read(second,f.id,photoPath)).status).toBe(404)
     expect((await read(other.resident,other.id,photoPath)).status).toBe(404)
@@ -634,21 +729,50 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     expect((await request(f.resident,f.id,`/v1/tenant/complaints/${id}`,{version:1,body:'అ'.repeat(5900),requestKey:randomUUID()})).status).toBe(200)
     expect((await request(f.resident,f.id,'/v1/tenant/complaints',{...input,photos:[]})).status).toBe(409)
     expect((await request(f.resident,f.id,'/v1/tenant/complaints',{...input,requestKey:randomUUID(),photos:Array(4).fill(input.photos[0])})).status).toBe(400)
-    expect((await request(f.resident,f.id,'/v1/tenant/complaints',{...input,requestKey:randomUUID(),photos:[{...input.photos[0],type:'image/png'}]})).status).toBe(400)
+    expect((await request(f.resident,f.id,'/v1/tenant/complaints',{...input,requestKey:randomUUID(),photos:[{type:'image/png'}]})).status).toBe(400)
     expect((await f.pool.query('SELECT COUNT(*)::int AS count FROM complaint_photos WHERE tenant_id=$1',[f.id])).rows[0].count).toBe(1)
     expect((await request(f.resident,f.id,'/v1/tenant/complaints',{...input,photos:[],requestKey:randomUUID(),description:'x'.repeat(23*1024*1024)})).status).toBe(413)
   },20000)
   it('rolls back complaint and photos together on a photo storage failure',async()=>{
-    const f=await tenant(),image=await sharp({create:{width:8,height:8,channels:3,background:'#eeeeee'}}).png().toBuffer()
-    const input={subject:'Rollback photo complaint',description:'This request tests a retriable attachment storage failure.',category:'Other',location:'Common area',photos:[{name:'area.png',type:'image/png',data:image.toString('base64')}],requestKey:randomUUID()}
-    await f.pool.query(`CREATE FUNCTION reject_test_photo() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Test photo storage failure'; END $$; CREATE TRIGGER reject_test_photo BEFORE INSERT ON complaint_photos FOR EACH ROW EXECUTE FUNCTION reject_test_photo()`)
+    const f=await tenant(),image=await uploadPhoto(f)
+    const input={subject:'Rollback photo complaint',description:'This request tests a retriable attachment storage failure.',category:'Other',location:'Common area',photos:[image.id],requestKey:randomUUID()}
+    await owner.query(`CREATE FUNCTION reject_test_photo() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Test photo storage failure'; END $$; CREATE TRIGGER reject_test_photo BEFORE INSERT ON complaint_photos FOR EACH ROW EXECUTE FUNCTION reject_test_photo()`)
     expect((await request(f.resident,f.id,'/v1/tenant/complaints',input)).status).toBe(503)
     expect((await f.pool.query('SELECT COUNT(*)::int AS count FROM complaints WHERE tenant_id=$1',[f.id])).rows[0].count).toBe(0)
-    await f.pool.query('DROP TRIGGER reject_test_photo ON complaint_photos; DROP FUNCTION reject_test_photo()')
+    await owner.query('DROP TRIGGER reject_test_photo ON complaint_photos; DROP FUNCTION reject_test_photo()')
     expect((await request(f.resident,f.id,'/v1/tenant/complaints',input)).status).toBe(201)
     expect((await f.pool.query('SELECT COUNT(*)::int AS count FROM complaint_photos WHERE tenant_id=$1',[f.id])).rows[0].count).toBe(1)
   },15000)
 
+  it('rejects stolen, corrupted, expired and unfinished uploads and retries transient failures',async()=>{
+    const f=await tenant(),other=await tenant(),image=await uploadPhoto(f)
+    expect((await request(other.resident,other.id,`/v1/tenant/photo-uploads/${image.id}/complete`,{})).status).toBe(404)
+    const payload={subject:'Test upload ownership',description:'A private photo must be owned by this resident.',category:'Other',location:'Hall',requestKey:randomUUID(),photos:[image.id]}
+    expect((await request(other.resident,other.id,'/v1/tenant/complaints',payload)).status).toBe(400)
+    const bytes=await sharp({create:{width:16,height:16,channels:3,background:'#aaaacc'}}).webp().toBuffer()
+    const metadata={name:'retry.webp',type:'image/webp',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),requestKey:randomUUID()}
+    const intent=await request(f.resident,f.id,'/v1/tenant/photo-uploads',metadata)
+    expect(intent.status).toBe(201)
+    expect((await request(f.resident,f.id,'/v1/tenant/complaints',{...payload,photos:[intent.body.id]})).status).toBe(400)
+    objects.set(decodeURIComponent(new URL(intent.body.url).pathname.slice(1)),bytes)
+    setFailPut(true)
+    try{expect((await request(f.resident,f.id,`/v1/tenant/photo-uploads/${intent.body.id}/complete`,{})).status).toBe(503)}finally{setFailPut(false)}
+    expect((await request(f.resident,f.id,`/v1/tenant/photo-uploads/${intent.body.id}/complete`,{})).status).toBe(200)
+    const created=await request(f.resident,f.id,'/v1/tenant/complaints',payload)
+    expect(created.status).toBe(201)
+    const photo=(await request(f.resident,f.id,`/v1/tenant/complaints/${created.body.id}`)).body.photos[0]
+    const expires=(await f.pool.query('SELECT expires_at-created_at AS duration FROM photo_uploads WHERE id=$1',[image.id])).rows[0].duration
+    expect(expires.days).toBe(90)
+    await f.pool.query("UPDATE complaint_photos SET expires_at=now()-interval '1 second' WHERE id=$1",[photo.id])
+    expect((await request(f.resident,f.id,`/v1/tenant/complaints/${created.body.id}/photos/${photo.id}`)).status).toBe(410)
+    await f.pool.query("UPDATE photo_uploads SET expires_at=now()-interval '1 second' WHERE id=$1",[image.id])
+    expect((await cleanupPhotoUploads(f.pool)).removed).toBe(1)
+    expect((await cleanupPhotoUploads(f.pool)).removed).toBe(0)
+    expect((await other.pool.query('SELECT 1 FROM photo_uploads')).rowCount).toBe(0)
+    const corrupt=await request(f.resident,f.id,'/v1/tenant/photo-uploads',{...metadata,requestKey:randomUUID()})
+    objects.set(decodeURIComponent(new URL(corrupt.body.url).pathname.slice(1)),Buffer.alloc(bytes.length,1))
+    expect((await request(f.resident,f.id,`/v1/tenant/photo-uploads/${corrupt.body.id}/complete`,{})).status).toBe(400)
+  })
   it('reviews and posts authorized invoice corrections and exposes them to the resident',async()=>{
     const f=await tenant(),other=await tenant(),invoiceId=randomUUID(),itemId=randomUUID()
     await f.pool.query(`INSERT INTO invoices(id,invoice_number,resident_id,billing_period,due_date,status,total_minor) VALUES($1,'ADJUST-HTTP',$2,'2026-01-01','2026-01-25','open',100000)`,[invoiceId,f.residentId])

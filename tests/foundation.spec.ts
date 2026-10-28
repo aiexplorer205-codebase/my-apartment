@@ -5,7 +5,7 @@ import {
   resolveTenantContext,
   requireOperatorIdentity,
   requirePermission,
-  provisionTenantDatabase,
+  provisionTenantWorkspace,
 } from '../packages/application/src/index.ts'
 import { AuthorizationError, ValidationError } from '../packages/shared/src/index.ts'
 
@@ -62,8 +62,8 @@ describe('foundation security and tenant resolution', () => {
   })
 
   it('provisions tenant database idempotently and safely', () => {
-    expect(provisionTenantDatabase('tenant-123', 'ready')).toMatchObject({ status: 'created', databaseLocator: 'myapartment_tenant_tenant-123' })
-    expect(() => provisionTenantDatabase('tenant_conflict', 'init')).toThrowError(/already exists/)
+    expect(provisionTenantWorkspace('tenant-123', 'ready')).toMatchObject({ status: 'created', databaseLocator: 'myapartment_app_db' })
+    expect(() => provisionTenantWorkspace('tenant_conflict', 'init')).toThrowError(/already exists/)
   })
 
   it('loads safe placeholder config', () => {

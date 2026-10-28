@@ -66,61 +66,40 @@ Optional hosts-file routing through the proxy on port 8080 (`login.myapartment.l
 
 Firebase and Filebase variables in `.env.example` are unused by current flows.
 
-## Migrations
+## Shared databases and migrations
 
-Init scripts on a **new** Postgres volume apply `migrations/myapartment_platform_db` `001`–`009` to database `myapartment_platform_db` in schema `block9_platform`, and `migrations/myapartment_tenant_db` `001`–`029` to `myapartment_tenant_template` in schema `block9_tenant`. Existing volumes are never reset. The runner does not record history; apply each file once, in order.
+Fresh initialization creates `myapartment_platform_db` (`block9_platform`) and
+`myapartment_app_db` (`block9_tenant`), applying every ordered SQL migration through
+tenant `037`. It creates separate platform, tenant-runtime, and lifecycle logins.
+There is no database-per-tenant template or cloning step.
 
-Tenant migrations `030`–`035` (bulk import, setup deletion, apartment setup reviews, readable `CMP-`/`MNT-` references, Minutes of Meeting) are not in the init script. Apply them to the template and every tenant after first start, and after any volume that was created before those files existed:
+Use the URLs and password variables in `.env.example`. Existing `.env` files
+must be updated: an old PostgreSQL superuser tenant URL is deliberately rejected.
+Compose defaults are development examples; production requires independent random
+credentials. Preserve passwords across container restarts.
 
-```sh
-scripts/run-migrations.sh tenant all-tenants \
-  030_bulk_resident_imports.sql \
-  031_property_setup_deletion.sql \
-  032_delete_all_property_setup.sql \
-  033_apartment_setup.sql \
-  034_readable_work_references.sql \
-  035_minutes_of_meeting.sql
-```
-
-If `030`–`034` have already run, apply only the new MoM migration once:
-
-```sh
-scripts/run-migrations.sh tenant all-tenants 035_minutes_of_meeting.sql
-```
-
-MoM appears under Community in admin and in resident navigation. Admins save drafts, select attendees by block/flat/person, review, and publish. Residents open the latest meeting by meeting date and fetch older meetings on demand. Published notes and attendance snapshots cannot be edited. No new provider keys or worker processes are needed.
-
-`all-tenants` updates `myapartment_tenant_template` and every database in `myapartment_platform_db.tenant_records`. Then rebuild the API:
+This change requires a fresh empty database. Existing Docker volumes do not
+rerun initialization. Preserve any useful developer fixtures before choosing a
+fresh volume or explicitly deleting a disposable local volume. The application
+will not silently reinterpret or migrate old data.
 
 ```sh
-docker compose up --build -d --no-deps api
+scripts/run-migrations.sh platform
+scripts/run-migrations.sh tenant
 ```
 
-## Local tenant data
+The runner targets one platform or shared application database, records SHA-256
+checksums, skips applied files, rejects changed history, and serializes runners.
+Individual filenames are optional. `all-tenants` and database-name arguments are
+removed. Rebuild/restart `api` after SQL or route changes.
 
-Nothing is seeded. Clone the template, insert platform memberships and tenant rows with **your** Auth0 `sub` values. Prefer one active tenant membership per account; ambiguous memberships fail with `tenant_selection_required`.
+Nothing is seeded. Prefer operator onboarding to create a community and invite
+its administrator. Local SQL fixtures must explicitly identify their tenant;
+runtime writes use a validated membership and transaction-local RLS context.
+A single tenant may contain multiple blocks and flats.
 
-```sh
-docker compose exec postgres createdb -U postgres -T myapartment_tenant_template myapartment_tenant_local
-
-docker compose exec -T postgres psql -U postgres -d myapartment_platform_db \
-  -v ON_ERROR_STOP=1 \
-  -v tenant_id=myapartment_tenant_local \
-  -v tenant_slug=local-community \
-  -v tenant_name='Local Test Community' \
-  -v database_name=myapartment_tenant_local \
-  -v admin_subject='auth0|replace-with-admin-subject' \
-  -v resident_subject='auth0|replace-with-resident-subject' <<'SQL'
-SET search_path TO block9_platform, public;
-INSERT INTO tenant_records (id, tenant_id, slug, org_name, status, database_locator, database_name)
-VALUES (gen_random_uuid(), :'tenant_id', :'tenant_slug', :'tenant_name', 'active', :'database_name', :'database_name');
-INSERT INTO tenant_memberships (subject, tenant_id, role, status)
-VALUES (:'admin_subject', :'tenant_id', 'admin', 'active'),
-       (:'resident_subject', :'tenant_id', 'resident', 'active');
-SQL
-```
-
-Then insert organization, unit, resident, and optional invoice/notice rows in `myapartment_tenant_local` under `block9_tenant`, using the same subjects. Operator onboarding also provisions a database named `myapartment_tenant_<id>` from the template and emails the first admin invitation.
+See [shared-database-operations.md](./shared-database-operations.md) for credentials,
+export/restore, lifecycle deletion, and database test commands.
 
 ## Smoke checks
 
@@ -145,3 +124,11 @@ pnpm build
 ```
 
 Database-backed tests need `MYAPARTMENT_DATABASE_TESTS=1` and the schema-check Postgres container used by those specs.
+
+## Private photo configuration
+
+Text-only complaints work without object storage. Photo upload requires a private
+R2/S3-compatible bucket and server-side `S3_*` settings; it fails closed if those
+are absent. Apply platform `010` / tenant `037` and rebuild API. Browser image
+bytes bypass the web proxy. Configure lifecycle/CORS and scheduled cleanup as
+specified in [private-image-storage.md](./private-image-storage.md).

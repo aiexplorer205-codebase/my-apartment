@@ -1,6 +1,6 @@
 import { assertAdminAssignee,assignmentSubject } from './admin-assignment.js'
 import { createHash, randomUUID } from 'node:crypto'
-import type { Pool } from 'pg'
+import type { TenantDatabase as Pool } from './persistence.js'
 import { ApiFault } from './api-fault.js'
 
 type Access = { tenantId: string; subject: string; role: 'admin' | 'resident' }

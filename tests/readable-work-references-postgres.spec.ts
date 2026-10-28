@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 // Temporary tables shadow application tables; rollback leaves local data intact.
 const check = (assertions: string) => {
   const migration = readFileSync(new URL('../migrations/myapartment_tenant_db/034_readable_work_references.sql', import.meta.url), 'utf8')
-  return execFileSync('docker', ['compose', 'exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-At'], {
+  return execFileSync('docker', ['compose', '-p', 'myapartment-schema-check', 'exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-At'], {
     input: `BEGIN;
       CREATE TEMP TABLE complaints (id UUID PRIMARY KEY, subject TEXT);
       CREATE TEMP TABLE maintenance_tasks (id UUID PRIMARY KEY, title TEXT);

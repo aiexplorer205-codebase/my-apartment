@@ -1,3 +1,4 @@
+import { reserveTenantStorageDeletion, deleteTenantPhotoStorage } from './photo-maintenance.js'
 import { readMeetingMinutes, writeMeetingMinutes } from './meeting-minutes.js'
 import { apartmentSetup } from './apartment-setup.js'
 import { propertySetupDeletion } from './property-setup-deletion.js'
@@ -15,7 +16,7 @@ import { adminAssignees } from './admin-assignment.js'
 import { adminCommunications } from './admin-communications.js'
 import { publishCommunication } from './communication-publications.js'
 import { residentUpdates } from './resident-updates.js'
-import { complaintPhoto, complaintPhotoLimits } from './complaint-photos.js'
+import { complaintPhoto, complaintPhotoLimits, createPhotoUpload, finalizePhotoUpload } from './complaint-photos.js'
 import { complaintRequest } from './complaints.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createHash, randomUUID } from 'node:crypto'
@@ -31,7 +32,7 @@ import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calcul
 import { createAdminInvitationToken, hashAdminInvitationToken, sendAdminInvitationEmail } from './admin-invitations.js'
 import { createResidentInvitationToken, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
 import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
-import { checkDatabaseReadiness, dropTenantDatabase, getPlatformPool, getTenantPool, provisionTenantDatabase } from './persistence.js'
+import { checkDatabaseReadiness, deleteTenantData, getPlatformPool, getTenantPool } from './persistence.js'
 
 interface AuthenticatedSubject {
   subject: string
@@ -43,7 +44,6 @@ interface TenantAccess {
   subject: string
   tenantId: string
   tenantName: string
-  databaseName: string
   role: 'resident' | 'admin'
 }
 
@@ -165,10 +165,7 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
   if (membership.role !== 'resident' && membership.role !== 'admin') {
     throw new ApiFault(403, 'forbidden', 'This account does not have tenant access')
   }
-  if (!membership.database_name) {
-    throw new ApiFault(503, 'dependency_unavailable', 'Tenant database provisioning is incomplete')
-  }
-  const residentProfileResult = await getTenantPool(membership.database_name).query<{ has_active_profile: boolean }>(
+  const residentProfileResult = await getTenantPool(membership.tenant_id).query<{ has_active_profile: boolean }>(
     `SELECT EXISTS (
        SELECT 1
        FROM residents r
@@ -196,7 +193,6 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
     subject: identity.subject,
     tenantId: membership.tenant_id,
     tenantName: membership.org_name,
-    databaseName: membership.database_name,
     role,
   }
 }
@@ -234,10 +230,7 @@ const getTenantMemberships = async (request: IncomingMessage) => {
     [identity.subject, identity.organizationId ?? null],
   )
   const availableMemberships = await Promise.all(result.rows.map(async (membership) => {
-    if (!membership.database_name) {
-      throw new ApiFault(503, 'dependency_unavailable', 'Tenant database provisioning is incomplete')
-    }
-    const residentProfileResult = await getTenantPool(membership.database_name).query<{ has_active_profile: boolean }>(
+    const residentProfileResult = await getTenantPool(membership.tenant_id).query<{ has_active_profile: boolean }>(
       `SELECT EXISTS (
          SELECT 1
          FROM residents r
@@ -531,11 +524,11 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/admin/assignees': { get: { tags: ['tenant'], summary: 'List current authorized community administrators for assignment', description: 'Active admin membership and accepted invitation required. Resident and other-community identities are excluded. Assignment writes revalidate eligibility.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Admin subjects and verified email labels when available' }, '403': { description: 'Administrator permission required' } } } },
     '/v1/admin/maintenance': { get: { tags: ['tenant'], summary: 'Page and filter scoped maintenance tasks', description: 'Query page (20 per page), search (literal text), status All/Planned/Completed/Overdue. Overdue uses Asia/Kolkata dates.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Create a maintenance task with optional checklist and complaint link', description: 'ownerSubject is an authorized community admin or null. Up to 30 distinct checklist labels; valid same-community complaintId; requestKey retries must retain the same task details.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
     '/v1/admin/maintenance/{taskId}': { get: { tags: ['tenant'], summary: 'Read a scoped task, checklist and related account entries', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Task and expense source navigation' }, '404': { description: 'Task not found' } } }, post: { tags: ['tenant'], summary: 'Save checklist progress or complete a task', description: 'action checklist/complete/assign, current version and requestKey required. Assignment accepts ownerSubject (authorized community admin or null) and can atomically save checklist progress. Completion requires all checks done and a note; it never posts expenses.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
-    '/v1/tenant/complaints/{complaintId}/photos/{photoId}': {get:{tags:['tenant'],summary:'Read one private, normalized complaint photo owned by the active resident',security:[{bearerAuth:[]}],responses:{'200':{description:'Uncached JPEG binary; nosniff and sandbox headers'},'404':{description:'Photo not found or not owned'}}}},
-    '/v1/admin/complaints/{complaintId}/photos/{photoId}': {get:{tags:['tenant'],summary:'Read one private complaint photo in the authorized community',security:[{bearerAuth:[]}],responses:{'200':{description:'Uncached JPEG binary'},'403':{description:'Administrator permission required'},'404':{description:'Photo not found'}}}},
+    '/v1/tenant/complaints/{complaintId}/photos/{photoId}': {get:{tags:['tenant'],summary:'Read one private, normalized complaint photo owned by the active resident',security:[{bearerAuth:[]}],responses:{'200':{description:'Private signed WebP GET URL valid for at most 60 seconds'},'404':{description:'Photo not found or not owned'}}}},
+    '/v1/admin/complaints/{complaintId}/photos/{photoId}': {get:{tags:['tenant'],summary:'Read one private complaint photo in the authorized community',security:[{bearerAuth:[]}],responses:{'200':{description:'Private signed WebP GET URL valid for at most 60 seconds'},'403':{description:'Administrator permission required'},'404':{description:'Photo not found'}}}},
     '/v1/admin/complaints': { get: { tags: ['tenant'], summary: 'Page and filter community complaints with scoped counts', description: 'Query: page (20 per page), search (literal text), status (All/Active or exact status), category, priority, block (UUID/unassigned/All), summary=true (counts only). Counts cover all authorized complaints independently of filters.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
     '/v1/admin/complaints/{complaintId}': { get: { tags: ['tenant'], summary: 'Read a complaint including internal notes', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Update versioned assignment, priority, status or conversation', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
-    '/v1/tenant/complaints': { get: { tags: ['tenant'], summary: 'Page and filter the active resident’s own complaints', description: 'Query: page (20 per page), search, status (All/Active or exact status), category, priority, block, summary=true (own counts only). Internal notes are never returned.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Create a private complaint with optional photos', description: 'requestKey UUID required; identical retries return the same record, changed details conflict. photos: at most 3 {name,type,data} values; base64 JPEG/PNG/WebP input up to 5 MiB and 20 megapixels each. No animation. Server normalizes to metadata-free JPEG, maximum 1600 pixels per side and 1 MiB stored per photo. Complaint/photos commit atomically; JSON body maximum 22 MiB.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
+    '/v1/tenant/complaints': { get: { tags: ['tenant'], summary: 'Page and filter the active resident’s own complaints', description: 'Query: page (20 per page), search, status (All/Active or exact status), category, priority, block, summary=true (own counts only). Internal notes are never returned.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Create a private complaint with optional photos', description: 'requestKey UUID required; identical retries return the same record, changed details conflict. photos: at most 3 verified upload UUIDs owned by the active resident. Browser compresses to WebP and PUTs to private storage; completion verifies SHA-256 and sanitizes before attachment. Complaint and photo metadata commit atomically. JSON maximum 32 KiB. Photos expire after the configured retention (90 days by default).', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
     '/v1/tenant/complaints/{complaintId}': { get: { tags: ['tenant'], summary: 'Read own complaint with public replies only', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } }, post: { tags: ['tenant'], summary: 'Reply, accept a resolution or reopen with a reason', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Authorized scoped result' }, '403': { description: 'Permission required' } } } },
 
     '/v1/health': {
@@ -597,6 +590,9 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/admin/residents/{residentId}/settle-dues': {
       post: { tags: ['tenant'], summary: 'Record receipt of a former resident’s outstanding dues', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Outstanding invoices marked paid with confirmed payment records' }, '403': { description: 'Administrator permission required' }, '404': { description: 'Resident not found' }, '409': { description: 'Pending payments must be resolved first' } } },
     },
+    '/v1/tenant/photo-uploads': { post: { tags: ['tenant'], summary: 'Reserve a private WebP upload and obtain a five-minute presigned PUT URL', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Upload id, URL and required headers' }, '400': { description: 'Invalid metadata' }, '429': { description: 'Daily upload quota exhausted' } } } },
+    '/v1/tenant/photo-uploads/{uploadId}/complete': { post: { tags: ['tenant'], summary: 'Verify and sanitize a private staged image before attachment', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Verified upload id' }, '400': { description: 'Invalid image or checksum' }, '404': { description: 'Upload not owned by this resident' }, '409': { description: 'Upload expired or being validated' } } } },
+
     '/v1/admin/resident-invitations': {
       get: { tags: ['tenant'], summary: 'List recent resident invitations', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped invitations' }, '403': { description: 'Administrator permission required' } } },
       post: { tags: ['tenant'], summary: 'Invite a resident to a unit by email', description: 'Requires fullName, email, optional phone, unitId, and occupancyType (owner or tenant). startDate is optional and defaults to the current date. Email OTP identity verification is required to accept. Resident access starts on startDate. The one-time link expires in seven days.', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Invitation saved and email sent' }, '400': { description: 'Invalid invitation details' }, '403': { description: 'Administrator permission required' }, '409': { description: 'Resident already exists or another administrator owns the pending invitation' }, '503': { description: 'Invitation saved but email delivery failed' } } },
@@ -713,7 +709,7 @@ const respond = (response: ServerResponse, statusCode: number, payload: unknown,
   response.end(JSON.stringify(payload))
 }
 
-const withTenantPool = (access: TenantAccess) => getTenantPool(access.databaseName)
+const withTenantPool = (access: TenantAccess) => getTenantPool(access.tenantId)
 
 const minorUnits = (value: string): number => {
   const parsed = BigInt(value)
@@ -1501,10 +1497,10 @@ export const parseResidentInvitationInput = (input: unknown): ResidentInvitation
 
 const requireResidentInvitationSchema = async (access: TenantAccess): Promise<void> => {
   const result = await withTenantPool(access).query<{ ready: boolean }>(
-    `SELECT to_regclass('public.resident_invitations') IS NOT NULL
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'residents' AND column_name = 'occupancy_type')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'residents' AND column_name = 'move_out_date')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'resident_invitations' AND column_name = 'start_date') AS ready`,
+    `SELECT to_regclass('block9_tenant.resident_invitations') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'residents' AND column_name = 'occupancy_type')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'residents' AND column_name = 'move_out_date')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'block9_tenant' AND table_name = 'resident_invitations' AND column_name = 'start_date') AS ready`,
   )
   if (!result.rows[0]?.ready) throw new ApiFault(503, 'dependency_unavailable', 'Resident lifecycle support is not installed for this tenant database. Apply migrations/myapartment_tenant_db/010_resident_lifecycle.sql, then retry.')
 }
@@ -1806,7 +1802,7 @@ const lookupResidentInvitation = async (rawInput: unknown) => {
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) throw new ApiFault(400, 'invalid_request', 'A resident invitation token is required')
   const { tenantId, tokenHash } = parseResidentInvitationToken((rawInput as Record<string, unknown>).token)
   const tenant = await getInvitationTenant(tenantId)
-  const result = await getTenantPool(tenant.database_name as string).query<{ email: string; full_name: string; building_name: string; number: string; start_date: string }>(
+  const result = await getTenantPool(tenantId).query<{ email: string; full_name: string; building_name: string; number: string; start_date: string }>(
     `SELECT i.email::text, i.full_name, i.start_date::text, u.building_name, u.number
      FROM resident_invitations i JOIN units u ON u.id = i.unit_id AND u.tenant_id = i.tenant_id
      WHERE i.tenant_id = $1 AND i.token_hash = $2 AND i.status = 'pending' AND i.expires_at > NOW()`,
@@ -1836,7 +1832,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
   }
 
   const tenant = await getInvitationTenant(tenantId)
-  const pool = getTenantPool(tenant.database_name as string)
+  const pool = getTenantPool(tenantId)
   const client = await pool.connect()
   let unitLabel = ''
   try {
@@ -2627,7 +2623,7 @@ const saveAdminBillingRules = async (access: TenantAccess, rawInput: unknown) =>
         maintenance_rate_per_sqft_minor, water_rate_per_kl_minor,
         due_day, grace_period_days, late_fee_minor, updated_by)
      VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     ON CONFLICT (id) DO UPDATE SET
+     ON CONFLICT (tenant_id, id) DO UPDATE SET
        template = EXCLUDED.template,
        maintenance_minor = EXCLUDED.maintenance_minor,
        water_minor = EXCLUDED.water_minor,
@@ -2851,7 +2847,7 @@ const publishAdminBilling = async (access: TenantAccess, rawInput: unknown) => {
     const accountLock = await client.query<{ locked: boolean }>('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked', [`${access.tenantId}:account-writes`])
     if (!accountLock.rows[0]?.locked) throw new ApiFault(409, 'invalid_request', 'Accounts are changing. Refresh the billing preview and retry publication.')
     await client.query(
-      `INSERT INTO billing_rules (id, updated_by) VALUES (1, $1) ON CONFLICT (id) DO NOTHING`,
+      `INSERT INTO billing_rules (id, updated_by) VALUES (1, $1) ON CONFLICT (tenant_id, id) DO NOTHING`,
       [access.subject],
     )
     await client.query('SELECT id FROM billing_rules WHERE id = 1 FOR UPDATE')
@@ -2868,7 +2864,7 @@ const publishAdminBilling = async (access: TenantAccess, rawInput: unknown) => {
     const run = await client.query<{ id: string }>(
       `INSERT INTO billing_runs (billing_period, due_date, invoice_count, total_minor, published_by)
        VALUES ($1::date, $2::date, $3, $4, $5)
-       ON CONFLICT (billing_period) DO NOTHING
+       ON CONFLICT (tenant_id, billing_period) DO NOTHING
        RETURNING id`,
       [`${period}-01`, snapshot.dueDate, snapshot.invoiceCount, snapshot.totalMinor, access.subject],
     )
@@ -3025,13 +3021,17 @@ const changeOrganizationLifecycle = async (request: IncomingMessage, tenantId: s
   await pool.query(`UPDATE tenant_records SET status = 'deleting', updated_at = NOW() WHERE tenant_id = $1`, [tenantId])
   try {
     const sharedEmail = await pool.query<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM tenant_records WHERE tenant_id <> $1 AND lower(admin_email) = lower($2)) AS exists`,
-      [tenantId, organization.admin_email],
+      `SELECT EXISTS (SELECT 1 FROM tenant_records WHERE tenant_id <> $1 AND lower(admin_email) = lower($2))
+          OR EXISTS (SELECT 1 FROM tenant_memberships WHERE tenant_id <> $1 AND subject = $3) AS exists`,
+      [tenantId, organization.admin_email, organization.admin_auth0_user_id],
     )
     const auth0AdminRemoved = !organization.admin_email || sharedEmail.rows[0]?.exists
       ? false
       : await deleteOrganizationPasswordlessUser(organization.admin_email, organization.admin_auth0_user_id)
-    if (organization.database_name) await dropTenantDatabase(organization.database_name)
+    await reserveTenantStorageDeletion(tenantId)
+    await deleteTenantData(tenantId)
+    await pool.query('UPDATE storage_deletions SET database_purged_at=now() WHERE tenant_id=$1',[tenantId])
+    await deleteTenantPhotoStorage(tenantId)
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
@@ -3087,27 +3087,32 @@ const recordProvisioningFailure = async (tenantId: string, phase: string, cause:
 const completeOrganizationOnboarding = async (record: OnboardingRecord) => {
   const platformPool = getPlatformPool()
   try {
-    await provisionTenantDatabase(record.database_name)
-    await getTenantPool(record.database_name).query(
-      `INSERT INTO organizations (id, tenant_id, name, locale, currency, timezone)
-       VALUES ($1, $2, $3, 'en-IN', 'INR', 'Asia/Kolkata')
-       ON CONFLICT (tenant_id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`,
-      [record.id, record.tenant_id, record.org_name],
-    )
-    await getTenantPool(record.database_name).query(
-      `INSERT INTO apartments (tenant_id, name, city, address, billing_start_month)
-       VALUES ($1, $2, $3, '', date_trunc('month', CURRENT_DATE)::date)
-       ON CONFLICT (tenant_id, name) DO NOTHING`,
-      [record.tenant_id, record.org_name, record.city],
-    )
+    const client = await getTenantPool(record.tenant_id).connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        `INSERT INTO organizations (id, tenant_id, name, locale, currency, timezone)
+         VALUES ($1, $2, $3, 'en-IN', 'INR', 'Asia/Kolkata')
+         ON CONFLICT (tenant_id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`,
+        [record.id, record.tenant_id, record.org_name],
+      )
+      await client.query(
+        `INSERT INTO apartments (tenant_id, name, city, address, billing_start_month)
+         VALUES ($1, $2, $3, '', date_trunc('month', CURRENT_DATE)::date)
+         ON CONFLICT (tenant_id, name) DO NOTHING`,
+        [record.tenant_id, record.org_name, record.city],
+      )
+      await client.query('COMMIT')
+    } catch (error) { await client.query('ROLLBACK'); throw error }
+    finally { client.release() }
     await platformPool.query(
       `UPDATE provisioning_state
-       SET phase = 'tenant_database', status = 'completed', last_error = NULL, updated_at = NOW()
+       SET phase = 'tenant_workspace', status = 'completed', last_error = NULL, updated_at = NOW()
        WHERE tenant_id = $1`,
       [record.tenant_id],
     )
   } catch (error) {
-    const detail = await recordProvisioningFailure(record.tenant_id, 'tenant_database', error)
+    const detail = await recordProvisioningFailure(record.tenant_id, 'tenant_workspace', error)
     throw new ApiFault(503, 'dependency_unavailable', `The organization is recorded, but its tenant workspace could not be provisioned: ${detail}`)
   }
 
@@ -3187,7 +3192,7 @@ const createOrganizationOnboarding = async (request: IncomingMessage, requestId:
   const input = parseOrganizationOnboardingInput(await readJsonBody(request))
   const id = randomUUID()
   const tenantId = id
-  const databaseName = `myapartment_tenant_${id.replaceAll('-', '')}`
+  const databaseName = 'myapartment_app_db'
   const slugBase = input.name
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -3485,11 +3490,17 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         respond(response, request.method === 'POST' && !maintenanceRoute[1] ? 201 : 200, result, requestId)
         return
       }
+      const uploadRoute=requestUrl.pathname.match(/^\/v1\/tenant\/photo-uploads(?:\/([0-9a-f-]{36})\/complete)?$/i)
+      if(request.method==='POST'&&uploadRoute){
+        const access=await resolveTenantAccess(request,'resident')
+        const result=uploadRoute[1]?await finalizePhotoUpload(withTenantPool(access),access,uploadRoute[1]):await createPhotoUpload(withTenantPool(access),access,await readJsonBody(request,4096))
+        respond(response,uploadRoute[1]?200:201,result,requestId);return
+      }
       const complaintPhotoRoute=requestUrl.pathname.match(/^\/v1\/(tenant|admin)\/complaints\/([0-9a-f-]{36})\/photos\/([0-9a-f-]{36})$/i)
       if(request.method==='GET'&&complaintPhotoRoute){
         const access=await resolveTenantAccess(request,complaintPhotoRoute[1]==='admin'?'admin':'resident')
         const photo=await complaintPhoto(withTenantPool(access),access,complaintPhotoRoute[2]!,complaintPhotoRoute[3]!)
-        response.writeHead(200,{'Content-Type':'image/jpeg','Content-Length':String(photo.data.length),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Content-Disposition':`inline; filename="complaint-photo-${complaintPhotoRoute[3]}.jpg"`,'X-Request-Id':requestId});response.end(photo.data);return
+        respond(response,200,photo,requestId);return
       }
       const complaintRoute = requestUrl.pathname.match(/^\/v1\/(tenant|admin)\/complaints(?:\/([0-9a-f-]{36}))?$/i)
       if (complaintRoute && (request.method === 'GET' || request.method === 'POST')) {

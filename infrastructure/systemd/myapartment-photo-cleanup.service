@@ -1,0 +1,11 @@
+[Unit]
+Description=MyApartment private photo retention and orphan cleanup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/myapartment
+ExecStart=/usr/bin/docker compose run --rm --no-deps api node apps/api/dist/apps/api/src/photo-maintenance-cli.js
+TimeoutStartSec=15min

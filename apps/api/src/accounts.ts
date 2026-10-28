@@ -1,7 +1,7 @@
 import { financialOverview } from './collections.js'
 import { residentLedgers } from './resident-ledgers.js'
 import { randomUUID } from 'node:crypto'
-import type { Pool } from 'pg'
+import type { TenantDatabase as Pool } from './persistence.js'
 import { ApiFault, accountPostingFault } from './api-fault.js'
 import { parseManualPaymentAmount } from './manual-payments.js'
 

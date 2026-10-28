@@ -1,7 +1,7 @@
 import { assertAdminAssignee,assignmentSubject } from './admin-assignment.js'
 import { createHash } from 'node:crypto'
-import { prepareComplaintPhotos } from './complaint-photos.js'
-import type { Pool } from 'pg'
+import { complaintUploadIds, attachComplaintPhotos } from './complaint-photos.js'
+import type { TenantDatabase as Pool } from './persistence.js'
 import { ApiFault } from './api-fault.js'
 
 type Access = { tenantId: string; subject: string; role: 'admin' | 'resident' }
@@ -74,7 +74,7 @@ export async function complaintRequest(pool: Pool, access: Access, method: 'GET'
       const messages = await pool.query(`SELECT id, actor_role AS "actorRole", body, internal, created_at AS "createdAt" FROM complaint_messages WHERE complaint_id=$1 AND ($2::boolean OR NOT internal) ORDER BY created_at, id`, [id, admin])
       const relatedTasks = admin ? (await pool.query(`SELECT id,reference,title,status,due_date::text AS "dueDate" FROM maintenance_tasks WHERE tenant_id=$1 AND complaint_id=$2 ORDER BY due_date,id`,[access.tenantId,id])).rows : undefined
       const relatedExpenses = admin ? (await pool.query(`SELECT id,party,status,entry_type AS "entryType",amount_minor::text AS amount FROM account_entries WHERE tenant_id=$1 AND complaint_id=$2 ORDER BY created_at,id`,[access.tenantId,id])).rows.map(({amount,...row})=>({...row,amountMinor:Number(amount)})) : undefined
-      const photos=(await pool.query(`SELECT id,name,width,height,octet_length(data) AS size FROM complaint_photos WHERE tenant_id=$1 AND complaint_id=$2 ORDER BY slot`,[access.tenantId,id])).rows
+      const photos=(await pool.query(`SELECT id,name,width,height,byte_size AS size,expires_at AS "expiresAt",expires_at<=now() AS expired FROM complaint_photos WHERE tenant_id=$1 AND complaint_id=$2 ORDER BY slot`,[access.tenantId,id])).rows
       return { ...complaint, assignedSubject:admin?complaint.assignedSubject:null, photos, messages: messages.rows, ...(admin ? {relatedTasks,relatedExpenses} : {}) }
     }
     return { complaints: records.rows }
@@ -87,8 +87,8 @@ export async function complaintRequest(pool: Pool, access: Access, method: 'GET'
     if (admin) throw new ApiFault(403, 'forbidden', 'Complaints must be created by residents')
     const subject = text(input.subject, 'Subject', 4, 160), description = text(input.description, 'Description', 10, 6000), location = text(input.location, 'Location', 1, 240)
     if (!(complaintCategories as readonly unknown[]).includes(input.category)) throw new ApiFault(400, 'invalid_request', 'Choose a valid category')
-    const photos=await prepareComplaintPhotos(input.photos)
-    const fingerprint=createHash('sha256').update(JSON.stringify({subject,description,category:input.category,location,photos:photos.map(({name,sourceHash})=>({name,sourceHash}))})).digest('hex')
+    const photos=complaintUploadIds(input.photos)
+    const fingerprint=createHash('sha256').update(JSON.stringify({subject,description,category:input.category,location,photos})).digest('hex')
     const client=await pool.connect()
     try{
       await client.query('BEGIN')
@@ -96,10 +96,7 @@ export async function complaintRequest(pool: Pool, access: Access, method: 'GET'
       const prior=(await client.query('SELECT id,creation_hash FROM complaints WHERE tenant_id=$1 AND resident_id=$2 AND request_key=$3',[access.tenantId,resident!.id,input.requestKey])).rows[0]
       if(prior){if(prior.creation_hash!==fingerprint)throw new ApiFault(409,'invalid_request','This complaint request was used for different details. Check the existing complaint before submitting another.');await client.query('COMMIT');return{id:prior.id,alreadyApplied:true}}
       const result=(await client.query(`INSERT INTO complaints(tenant_id,resident_id,subject,description,category,location,request_key,creation_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[access.tenantId,resident!.id,subject,description,input.category,location,input.requestKey,fingerprint])).rows[0]
-      for(let slot=0;slot<photos.length;slot++){
-        const photo=photos[slot]
-        await client.query('INSERT INTO complaint_photos(tenant_id,complaint_id,slot,name,width,height,data,source_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[access.tenantId,result.id,slot+1,photo.name,photo.width,photo.height,photo.data,photo.sourceHash])
-      }
+      await attachComplaintPhotos(client,access,result.id,photos)
       await client.query('COMMIT');return result
     }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
 

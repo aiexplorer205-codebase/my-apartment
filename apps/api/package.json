@@ -14,9 +14,11 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@block9/adapters": "workspace:^",
     "@block9/application": "workspace:*",
     "@block9/config": "workspace:*",
     "@block9/contracts": "workspace:*",
+    "@block9/ports": "workspace:^",
     "@block9/shared": "workspace:*",
     "jose": "^5.9.6",
     "pg": "^8.13.1",

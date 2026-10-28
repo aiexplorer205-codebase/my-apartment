@@ -37,26 +37,55 @@ Web apps keep server-side Auth0 sessions and proxy API calls through `/api/backe
 | `infrastructure/ports` | Ports |
 | `infrastructure/adapters` | Auth0, Postgres, Redis, Resend |
 
-Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`009`) and `migrations/myapartment_tenant_db` (`001`–`035`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
+Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`010`) and `migrations/myapartment_tenant_db` (`001`–`037`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
 
 Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,validation}.json`. Keep key parity. Validate with `pnpm platform:validate`.
 
 ## Tenant isolation
 
-SaaS tenant = one customer organization (may have multiple blocks/flats). Isolation is **database-per-tenant** on a shared private Postgres cluster:
+SaaS tenant = one customer organization (may have multiple blocks/flats). The
+platform database remains separate from shared application data:
 
-- `myapartment_platform_db`: tenant records, memberships, locators, operator audit, provisioning. Locators never go to clients.
-- `myapartment_tenant_<id>`: that organization's units, residents, invoices, payments, notices, complaints, maintenance, and ledgers, under schema `block9_tenant`.
-- `myapartment_tenant_template`: clone source for new organizations. It must include every tenant migration before onboarding.
+- `myapartment_platform_db`: tenant records, memberships, operator audit, and provisioning, under `block9_platform`.
+- `myapartment_app_db`: shared community tables under `block9_tenant`. Every tenant-owned table has a non-null `tenant_id`, tenant-aware foreign keys, and forced PostgreSQL row-level security (RLS).
+- There is no tenant database template or database creation during onboarding. Database locator fields are internal metadata; they never authorize requests or select the tenant database.
 
-`TenantContext` is derived server-side from a validated Auth0 subject plus active membership and tenant status. A client tenant id, host header, token custom claim, or UI picker is not authorization. Ambiguous multi-tenant membership fails closed (`tenant_selection_required`) in this slice.
+`TenantContext` is derived server-side from a validated Auth0 subject plus active
+membership and tenant status. Client hints never grant membership. Missing or
+ambiguous membership fails closed. Resident/admin permissions remain application
+checks within the authorized tenant; RLS does not replace those checks.
+
+`apps/api/src/persistence.ts` owns one bounded application connection pool.
+`getTenantPool(tenantId)` returns a scoped database interface, not another physical
+pool. Standalone queries run in a transaction; explicit repository transactions
+retain their isolation level and execute on one checked-out client. Every
+transaction assumes `myapartment_runtime`, sets `app.tenant_id` locally, and holds
+a shared tenant lifecycle lock. Commit/rollback clears context; an abandoned
+transaction destroys its connection. Runtime logins must not be superusers or
+have `BYPASSRLS`. Views use `security_invoker`.
+
+Migration `036_shared_tenant_rls.sql` is an **empty-database boundary**, not a
+customer-data migration. It scopes uniqueness, converts foreign keys to include
+tenant ownership, enables RLS on all tables, and installs lifecycle controls.
+Existing identifiers remain TEXT. UUID API identifiers and published financial
+and meeting history retain their existing behavior.
+
+Onboarding inserts organization and apartment rows and sends the existing Auth0
+invitation. Operator deletion first blocks platform access, then invokes
+`purge_tenant` using a separate lifecycle credential. That role cannot read tenant
+tables. Purge removes only the selected tenant, including immutable history, and
+keeps a non-personal deletion marker that rejects stale requests. Normal runtime
+DELETE cannot bypass history guards or invoke purge.
+
+See [shared-database-operations.md](./shared-database-operations.md) for setup,
+migration history, tenant export/restore, and verification.
 
 ## Auth and invitations
 
 - API validates JWT issuer, audience, signature/JWKS, and expiry.
 - Resident and admin sign-in: Auth0 email OTP, embedded in each app.
 - Operator: separate Auth0 app; API require `OPERATOR_IDS` exact `sub` match.
-- Operator onboarding clones `myapartment_tenant_template`, creates the admin in Auth0 via Management API, emails a seven-day single-use link (Resend). Accepting requires OTP on the invited email.
+- Operator onboarding creates shared workspace rows, creates the admin in Auth0 via Management API, emails a seven-day single-use link (Resend). Accepting requires OTP on the invited email.
 - Resident invitations use the same pattern. SMS/WhatsApp OTP is not enabled.
 
 ## Product (shipped)
@@ -88,3 +117,12 @@ Feature code lives next to routes in `apps/api/src/` (`apartment-setup.ts`, `pro
 ## Local vs production
 
 Compose publishes services on loopback. Successful local runs do not certify staging or production. See [security-and-ops.md](./security-and-ops.md).
+
+## Private photo storage
+
+Complaint photos are compressed to WebP in the browser, uploaded directly through
+short-lived S3 presigned PUT URLs, verified/sanitized by the API, and attached by
+UUID. PostgreSQL stores metadata only. Private reads require authorization and a
+short-lived signed GET. Default retention is 90 days, with one-day staging and
+orphan cleanup. Platform `010` and tenant `037` are required.
+See [private-image-storage.md](./private-image-storage.md).

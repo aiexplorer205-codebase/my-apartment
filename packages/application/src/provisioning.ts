@@ -7,7 +7,7 @@ export interface ProvisioningJobResult {
   reason?: string
 }
 
-export const provisionTenantDatabase = (tenantId: string, phase: 'init' | 'migration' | 'ready', attempt = 0): ProvisioningJobResult => {
+export const provisionTenantWorkspace = (tenantId: string, phase: 'init' | 'migration' | 'ready', attempt = 0): ProvisioningJobResult => {
   if (!tenantId || tenantId.trim().length === 0) {
     throw new ValidationError('Tenant id is required')
   }
@@ -25,7 +25,7 @@ export const provisionTenantDatabase = (tenantId: string, phase: 'init' | 'migra
     return {
       tenantId,
       status: 'created',
-      databaseLocator: `myapartment_tenant_${tenantId}`,
+      databaseLocator: 'myapartment_app_db',
     }
   }
 
@@ -33,7 +33,7 @@ export const provisionTenantDatabase = (tenantId: string, phase: 'init' | 'migra
     return {
       tenantId,
       status: 'created',
-      databaseLocator: `myapartment_tenant_${tenantId}`,
+      databaseLocator: 'myapartment_app_db',
     }
   }
 
@@ -44,6 +44,6 @@ export const provisionTenantDatabase = (tenantId: string, phase: 'init' | 'migra
   return {
     tenantId,
     status: 'created',
-    databaseLocator: `myapartment_tenant_${tenantId}`,
+    databaseLocator: 'myapartment_app_db',
   }
 }

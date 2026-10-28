@@ -1,4 +1,4 @@
-import type { Pool } from 'pg'
+import type { TenantDatabase as Pool } from './persistence.js'
 import { ApiFault } from './api-fault.js'
 
 type Access={tenantId:string;role:'admin'|'resident'}

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { Pool, PoolClient } from 'pg'
+import type { PoolClient } from 'pg'
+import type { TenantDatabase as Pool } from './persistence.js'
 import { ApiFault } from './api-fault.js'
 
 type Access = { tenantId: string; subject: string; role: string }

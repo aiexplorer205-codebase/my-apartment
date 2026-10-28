@@ -40,8 +40,8 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Test
-        run: pnpm test
+      - name: Test with PostgreSQL isolation and recovery checks
+        run: bash scripts/test-database.sh
 
       - name: Build
         run: pnpm build

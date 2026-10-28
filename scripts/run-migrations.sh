@@ -1,74 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+# Migrate one shared database, never enumerate or connect to customer databases.
+# With no filenames, apply all pending migrations; checksums prevent edited history.
+kind=${1:?Usage: scripts/run-migrations.sh platform|tenant [MIGRATION.sql ...]}
+shift
+case "$kind" in
+  platform) database=myapartment_platform_db ;;
+  tenant) database=myapartment_app_db ;;
+  *) echo 'Choose platform or tenant' >&2; exit 2 ;;
+esac
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
-
-usage() {
-  cat <<'USAGE'
-Usage:
-  scripts/run-migrations.sh platform DATABASE MIGRATION.sql [MIGRATION.sql ...]
-  scripts/run-migrations.sh tenant DATABASE MIGRATION.sql [MIGRATION.sql ...]
-  scripts/run-migrations.sh tenant all-tenants MIGRATION.sql [MIGRATION.sql ...]
-
-Examples:
-  scripts/run-migrations.sh platform myapartment_platform_db 009_per_block_flat_allowances.sql
-  scripts/run-migrations.sh tenant all-tenants 014_polls.sql
-  scripts/run-migrations.sh tenant myapartment_tenant_local 014_polls.sql
-USAGE
-}
-
-if (($# < 3)); then
-  usage >&2
-  exit 2
-fi
-
-kind=$1
-target=$2
-shift 2
-
-case "$kind" in
-  platform|tenant) ;;
-  *) echo "Migration group must be 'platform' or 'tenant'." >&2; usage >&2; exit 2 ;;
-esac
-migration_dir="myapartment_${kind}_db"
-
-if [[ "$target" != all-tenants && ! "$target" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,62}$ ]]; then
-  echo "Database name contains unsupported characters." >&2
-  exit 2
-fi
-
-for migration in "$@"; do
-  if [[ ! "$migration" =~ ^[0-9]{3}_[a-z0-9_]+\.sql$ || ! -f "migrations/$migration_dir/$migration" ]]; then
-    echo "Unknown $kind migration: $migration" >&2
-    exit 2
-  fi
-done
-
-migrations=("$@")
-
-apply_migrations() {
-  local database=$1 migration
-  echo "Applying ${kind} migrations to ${database}"
-  for migration in "${migrations[@]}"; do
-    docker compose exec -T postgres psql -U postgres -d "$database" \
-      -v ON_ERROR_STOP=1 -f "/migrations/$migration_dir/$migration"
-  done
-}
-
-if [[ "$kind" == tenant && "$target" == all-tenants ]]; then
-  databases=$(docker compose exec -T postgres psql -U postgres -d myapartment_platform_db -At \
-    -v ON_ERROR_STOP=1 -c "SELECT database_name FROM block9_platform.tenant_records WHERE database_name IS NOT NULL ORDER BY database_name")
-  apply_migrations myapartment_tenant_template
-  while IFS= read -r database; do
-    if [[ -n "$database" ]]; then
-      apply_migrations "$database"
-    fi
-  done <<< "$databases"
-else
-  if [[ "$target" == all-tenants ]]; then
-    echo "The all-tenants target is only valid for tenant migrations." >&2
-    exit 2
-  fi
-  apply_migrations "$target"
-fi
+docker compose exec -T postgres bash /scripts/migrate-database.sh "$kind" "$database" "$@"

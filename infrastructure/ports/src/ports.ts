@@ -60,3 +60,13 @@ export interface PaymentPort {
 export interface SecretsPort {
   getSecret(name: string): Promise<Result<string, PortFailure>>
 }
+
+/** Private image storage; staging objects are never served to residents. */
+export interface PrivateImageStoragePort {
+  presignUpload(key: string, size: number, sha256: string): Promise<{ url: string; headers: Record<string, string> }>
+  readStaged(key: string, maximumBytes: number): Promise<Uint8Array>
+  putImage(key: string, body: Uint8Array): Promise<void>
+  presignImage(key: string, expiresIn: number): Promise<string>
+  deleteObject(key: string): Promise<void>
+  deletePrefix(prefix: string): Promise<void>
+}

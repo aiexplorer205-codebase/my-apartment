@@ -19,6 +19,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    ...(process.env.MYAPARTMENT_DATABASE_TESTS === '1' ? { maxWorkers: 2, minWorkers: 1, hookTimeout: 30000 } : {}),
     include: ['tests/**/*.spec.ts', 'packages/app-platform/tests/**/*.spec.ts'],
   },
 })

@@ -16,12 +16,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1158.0",
+    "@aws-sdk/s3-request-presigner": "^3.1158.0",
     "@block9/domain": "workspace:*",
     "@block9/ports": "workspace:*",
     "@block9/shared": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "@types/node": "^22.11.0"
+    "@types/node": "^22.11.0",
+    "typescript": "^5.7.0"
   }
 }

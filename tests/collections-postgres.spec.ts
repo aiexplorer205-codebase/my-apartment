@@ -8,7 +8,7 @@ import { reconciliationRead, reconciliationWrite } from '../apps/api/src/reconci
 import { complaintRequest } from '../apps/api/src/complaints.ts'
 import { maintenanceRequest } from '../apps/api/src/maintenance.ts'
 import { accountRead, accountWrite, validateAccountDate } from '../apps/api/src/accounts.ts'
-import { getTenantPool } from '../apps/api/src/persistence.ts'
+import { getFixturePool as getTenantPool, applyFixtureSchema } from './support/fixture-database'
 import { confirmPaymentReport, financialOverview, listPaymentReports, settleFormerBalance, submitPaymentReport } from '../apps/api/src/collections.ts'
 
 // Opt in only: creates its own disposable database on the isolated schema-check
@@ -26,8 +26,11 @@ describe.skipIf(!enabled)('PostgreSQL collection and account invariants', () => 
     connection.password = password
     process.env.POSTGRES_TENANT_URL = connection.toString()
     control=getTenantPool('postgres')
-    await control.query(`CREATE DATABASE "${database}" TEMPLATE myapartment_tenant_template`)
-    pool=getTenantPool(database)
+    await control.query(`CREATE DATABASE "${database}" TEMPLATE template0`)
+    pool=getTenantPool(database); await applyFixtureSchema(pool,35)
+    // This historical financial-domain fixture does not upload photos. Match the
+    // metadata projection; complete storage/RLS behavior is covered over HTTP.
+    await pool.query('ALTER TABLE complaint_photos ADD COLUMN byte_size INTEGER, ADD COLUMN expires_at TIMESTAMPTZ')
   },15000)
   afterAll(async () => {
     if (pool) await pool.end()

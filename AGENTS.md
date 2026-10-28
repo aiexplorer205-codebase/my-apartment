@@ -1,6 +1,6 @@
 # AGENTS
 
-MyApartment by BLOCK9: apartment operations SaaS. Next.js login/resident/admin/operator apps, Node HTTP API, worker health stub, Postgres (platform + one DB per tenant), Redis, Auth0 OTP, Resend invitations.
+MyApartment by BLOCK9: apartment operations SaaS. Next.js login/resident/admin/operator apps, Node HTTP API, worker health stub, Postgres (platform + shared application DB with forced RLS), Redis, Auth0 OTP, Resend invitations.
 
 Do not invent NestJS, Prisma migrations, Flutter, fake payments, or job processors. Prisma in root `package.json` is unused. Schema is SQL in `migrations/`.
 
@@ -33,7 +33,16 @@ Minutes of Meeting: [feature details](docs/minutes-of-meeting-plan.md). Admin dr
 | Ports vs Auth0/Postgres/Resend | `infrastructure/ports` vs `infrastructure/adapters` |
 | Schema | Next numbered `migrations/myapartment_{platform,tenant}_db/*.sql` then `scripts/run-migrations.sh` |
 
-Init on a new volume applies tenant SQL only through `029`. Apply `030`–`035` with the runner (`all-tenants` includes `myapartment_tenant_template`). Runner has no history table; do not re-apply a file that already ran.
+Fresh initialization applies platform SQL and tenant SQL through `037` to
+`myapartment_platform_db` and `myapartment_app_db`. No tenant template or per-tenant
+databases. `036` requires empty tenant tables; there is no customer-data upgrade.
+Run pending migrations with `scripts/run-migrations.sh platform` or `tenant`.
+The runner records checksums and serializes execution; never edit applied SQL.
+Tenant runtime SQL must use `getTenantPool(serverAuthorizedTenantId)`, preserving
+explicit transactions. Never expose a raw application pool or use session-scoped
+tenant settings. New tenant-owned tables require non-null ownership, composite
+foreign keys, forced RLS, restricted grants, and isolation tests. Lifecycle purge
+uses a separate credential; normal product writes preserve immutable history.
 
 ## Hard rules
 
@@ -54,3 +63,12 @@ pnpm typecheck && pnpm lint && pnpm test && pnpm build
 ```
 
 Targeted: `pnpm run test tests/<file>.spec.ts`. Postgres specs need `MYAPARTMENT_DATABASE_TESTS=1`. After API schema or route changes, rebuild/restart `api`. Do not claim production-ready.
+
+## Private images
+
+Complaint photos use direct browser WebP uploads to private S3-compatible staging,
+then server validation and separate sanitized objects. API accepts verified upload
+UUIDs, not base64. Retention defaults to 90 days. See
+[docs/private-image-storage.md](docs/private-image-storage.md). New image flows
+must enforce entity/role authorization and use the storage port. Never expose
+public object URLs or log signed URLs. Required SQL: platform `010`, tenant `037`.

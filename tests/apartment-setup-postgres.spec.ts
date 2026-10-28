@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { getTenantPool } from '../apps/api/src/persistence'
+import { getFixturePool as getTenantPool, applyFixtureSchema } from './support/fixture-database'
 import { apartmentSetup } from '../apps/api/src/apartment-setup'
 import { parseResidentInvitationInput } from '../apps/api/src/index'
 
@@ -20,8 +20,8 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('apartment setup
     const url = new URL('postgresql://postgres@127.0.0.1:55434/postgres'); url.password = password
     process.env.POSTGRES_TENANT_URL = url.toString()
     control = getTenantPool('postgres')
-    await control.query(`CREATE DATABASE "${database}" TEMPLATE myapartment_tenant_template`)
-    pool = getTenantPool(database)
+    await control.query(`CREATE DATABASE "${database}" TEMPLATE template0`)
+    pool = getTenantPool(database); await applyFixtureSchema(pool)
     for (const file of ['030_bulk_resident_imports.sql', '031_property_setup_deletion.sql', '032_delete_all_property_setup.sql', '033_apartment_setup.sql', '033_apartment_setup.sql']) {
       await pool.query(readFileSync(new URL(`../migrations/myapartment_tenant_db/${file}`, import.meta.url), 'utf8'))
     }

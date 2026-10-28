@@ -2,11 +2,11 @@
 
 import { AdminAssignmentControl } from './admin-assignment'
 import { WorkspaceBreadcrumb, WorkspaceStatusTabs, WorkspaceFilter } from './workspace-navigation'
-import { ComplaintPhotoPicker, PrivateComplaintPhoto, complaintPhotoPayload, type ComplaintPhotoClient } from './complaint-photos'
+import { ComplaintPhotoPicker, PrivateComplaintPhoto, complaintPhotoPayload, type ComplaintPhotoClient, type PhotoUploadCache } from './complaint-photos'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 type Complaint = { id: string; reference: string; subject: string; description: string; category: string; location: string; status: string; priority: string; assignedSubject: string | null; version: number; createdAt: string; updatedAt: string; residentName: string; unit: string; block: string | null }
-type Detail = Complaint & { photos:Array<{id:string;name:string;width:number;height:number;size:number}>; relatedExpenses?:Array<{id:string;party:string;status:string;entryType:string;amountMinor:number}>; relatedTasks?:Array<{id:string;reference:string;title:string;status:string;dueDate:string}>; messages: Array<{ id: string; actorRole: string; body: string; internal: boolean; createdAt: string }> }
+type Detail = Complaint & { photos:Array<{id:string;name:string;width:number;height:number;size:number;expired?:boolean;expiresAt?:string}>; relatedExpenses?:Array<{id:string;party:string;status:string;entryType:string;amountMinor:number}>; relatedTasks?:Array<{id:string;reference:string;title:string;status:string;dueDate:string}>; messages: Array<{ id: string; actorRole: string; body: string; internal: boolean; createdAt: string }> }
 export type ComplaintClient = (path: string, body?: object) => Promise<unknown>
 const categories = ['Plumbing','Electrical','Lift','Water supply','Cleaning','Security','Common area','Other']
 const statuses = ['Open','In progress','Awaiting resident','Resolved','Closed']
@@ -40,6 +40,7 @@ export function Complaints({ admin = false, request, photoRequest, subject, init
   const [assigned, setAssigned] = useState<string|null>(null)
   const [files,setFiles]=useState<globalThis.File[]>([])
   const [preparing,setPreparing]=useState(false)
+  const uploadCache=useRef<PhotoUploadCache>(new Map())
   const preparingLock=useRef(false)
   const mounted=useRef(true)
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[])
@@ -70,7 +71,7 @@ export function Complaints({ admin = false, request, photoRequest, subject, init
     if (!requestKey.current) requestKey.current = globalThis.crypto.randomUUID()
     try {
       const result = await request(create ? base : `${base}/${id}`, { ...payload, requestKey: requestKey.current }) as { id: string }
-      requestKey.current = ''; setBody(''); setCreating(false); setInternal(false);if(create)setFiles([])
+      requestKey.current = ''; setBody(''); setCreating(false); setInternal(false);if(create){setFiles([]);uploadCache.current.clear()}
       setId(result.id); setRevision((value) => value+1)
     } catch (cause) { setError(`${cause instanceof Error ? cause.message : 'Save failed'}. Your input has been kept. If the connection was interrupted, refresh this record to check the outcome before retrying.`) }
     finally { locked.current = false; setSaving(false) }
@@ -102,14 +103,14 @@ export function Complaints({ admin = false, request, photoRequest, subject, init
     const form = new globalThis.FormData(event.currentTarget)
     setPreparing(true);setError('')
     try{
-      const photos=await complaintPhotoPayload(files)
+      const photos=await complaintPhotoPayload(files,request,uploadCache.current)
       if(mounted.current)await save({subject:form.get('subject'),category:form.get('category'),description:form.get('description'),location:form.get('location'),photos},true)
     }catch(cause){setError(cause instanceof Error?cause.message:'Could not prepare complaint photos')}
     finally{preparingLock.current=false;setPreparing(false)}
   }
 
 
-  const backToList = () => { setFiles([]); setCreating(false); open(null) }
+  const backToList = () => { uploadCache.current.clear();setFiles([]); setCreating(false); open(null) }
 
   return <section className={`complaints section-stack${admin ? ' admin-operations' : ''}`} aria-busy={loading || saving || preparing}>
     {admin && <WorkspaceBreadcrumb section="Complaints" record={creating ? 'New complaint' : id ? selectedReference ?? 'Loading complaint…' : undefined} onHome={onHome} onBack={backToList} disabled={saving || preparing} />}
@@ -139,7 +140,7 @@ export function Complaints({ admin = false, request, photoRequest, subject, init
       </div>}
       <div className="complaint-layout operations-conversation-layout"><article className="card">
       <div className="card-title-row"><span className="status-pill" data-status={detail.status}>{detail.status}</span><small>{detail.category} · {detail.block ? `${detail.block} · ` : ''}{detail.unit}</small></div>
-      {detail.photos?.length>0&&photoRequest&&<div className="complaint-photo-grid">{detail.photos.map((photo,index)=><PrivateComplaintPhoto key={photo.id} path={`${base}/${detail.id}/photos/${photo.id}`} name={photo.name} index={index} request={photoRequest}/>)}</div>}
+      {detail.photos?.length>0&&photoRequest&&<div className="complaint-photo-grid">{detail.photos.map((photo,index)=>photo.expired?<figure key={photo.id}><p>Photo removed under the retention policy.</p><figcaption>{photo.name}</figcaption></figure>:<PrivateComplaintPhoto key={photo.id} path={`${base}/${detail.id}/photos/${photo.id}`} name={photo.name} index={index} request={photoRequest}/>)}</div>}
       <small>Ticket {detail.reference}</small><h2>{detail.subject}</h2><p>{detail.residentName} · {detail.location}</p><p className="complaint-text">{detail.description}</p>
 
       <small>Created {new Date(detail.createdAt).toLocaleString('en-IN')} · {detail.priority} priority</small>

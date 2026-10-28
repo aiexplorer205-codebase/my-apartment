@@ -32,92 +32,103 @@ export const getPlatformPool = (): Pool => {
   return platformPool
 }
 
-export const getTenantPool = (databaseName: string): Pool => {
-  if (!/^[a-z][a-z0-9_]{0,62}$/.test(databaseName)) {
-    throw new Error('Tenant database name is invalid')
-  }
-  const baseConnectionString = process.env.POSTGRES_TENANT_URL
-  if (!baseConnectionString) {
-    throw new Error('POSTGRES_TENANT_URL is required')
-  }
+/** Minimal database interface shared by repositories and privileged test fixtures. */
+export type TenantDatabase = Pick<Pool, 'query' | 'connect'>
+let applicationPool: Pool | undefined
 
-  const poolKey = `${baseConnectionString}\u0000${databaseName}`
-  let pool = tenantPools.get(poolKey)
-  if (!pool) {
-    const connection = new URL(baseConnectionString)
-    connection.pathname = `/${databaseName}`
-    pool = new Pool({
-      connectionString: connection.toString(),
+const getApplicationPool = (): Pool => {
+  if (!applicationPool) {
+    const connectionString = process.env.POSTGRES_TENANT_URL
+    if (!connectionString) throw new Error('POSTGRES_TENANT_URL is required')
+    applicationPool = new Pool({ connectionString, max: 10,
       options: '-c search_path=block9_tenant,public',
-      max: 5,
-      application_name: 'myapartment-api-tenant',
-      connectionTimeoutMillis: 5000,
-      idleTimeoutMillis: 30000,
-    })
-    pool.on('error', reportPoolError('tenant'))
-    tenantPools.set(poolKey, pool)
+      application_name: 'myapartment-api-tenant', connectionTimeoutMillis: 5000, idleTimeoutMillis: 30000 })
+    applicationPool.on('error', reportPoolError('tenant'))
   }
-  return pool
+  return applicationPool
 }
 
-export const dropTenantDatabase = async (databaseName: string): Promise<void> => {
-  if (!/^[a-z][a-z0-9_]{0,62}$/.test(databaseName)) throw new Error('Tenant database name is invalid')
-  const tenantConnectionString = process.env.POSTGRES_TENANT_URL
-  const platformConnectionString = process.env.POSTGRES_PLATFORM_URL
-  if (!tenantConnectionString || !platformConnectionString) throw new Error('POSTGRES_TENANT_URL and POSTGRES_PLATFORM_URL are required')
-  const tenantPoolKey = `${tenantConnectionString}\u0000${databaseName}`
-  const tenantPool = tenantPools.get(tenantPoolKey)
-  if (tenantPool) {
-    await tenantPool.end()
-    tenantPools.delete(tenantPoolKey)
+/** One physical pool; each facade is bound to a server-authorized tenant. */
+export const getTenantPool = (tenantId: string): TenantDatabase => {
+  if (!tenantId || tenantId.length > 200 || /[\x00-\x1f]/.test(tenantId)) throw new Error('Tenant identity is required')
+  const connect = async () => {
+    const client = await getApplicationPool().connect()
+    try {
+      const role = await client.query<{ safe: boolean }>(`SELECT NOT login.rolsuper AND NOT login.rolbypassrls
+        AND NOT runtime.rolsuper AND NOT runtime.rolbypassrls
+        AND pg_has_role(current_user, 'myapartment_runtime', 'MEMBER')
+        AND NOT EXISTS(SELECT 1 FROM pg_class WHERE relnamespace='block9_tenant'::regnamespace AND relowner=runtime.oid) AS safe
+        FROM pg_roles login CROSS JOIN pg_roles runtime WHERE login.rolname=current_user AND runtime.rolname='myapartment_runtime'`)
+      if (!role.rows[0]?.safe) throw new Error('Tenant runtime requires a restricted myapartment_runtime member')
+    } catch (error) { client.release(true); throw error }
+    let transaction = false
+    const begin = async (sql: string) => {
+      await client.query(sql)
+      transaction = true
+      await client.query('SET LOCAL ROLE myapartment_runtime')
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId])
+      await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1 || ':purge',0))", [tenantId])
+      const deleted = await client.query('SELECT 1 FROM tenant_tombstones WHERE tenant_id=$1', [tenantId])
+      if (deleted.rowCount) throw new Error('Tenant workspace has been deleted')
+    }
+    const query = (async (...args: Parameters<Pool['query']>) => {
+      const statement: unknown = args[0]
+      const sql = typeof statement === 'string' ? statement : (statement as { text: string }).text
+      if (/^\s*BEGIN\b/i.test(sql)) {
+        if (transaction) throw new Error('Nested tenant transactions are not supported')
+        try { await begin(sql) } catch (error) { await client.query('ROLLBACK'); transaction = false; throw error }
+        return { rows: [], rowCount: null, command: 'BEGIN', oid: 0, fields: [] }
+      }
+      if (/^\s*(COMMIT|ROLLBACK)\s*;?\s*$/i.test(sql)) {
+        const result = await client.query(...args)
+        transaction = false
+        return result
+      }
+      if (transaction) return client.query(...args)
+      try {
+        await begin('BEGIN')
+        const result = await client.query(...args)
+        await client.query('COMMIT')
+        transaction = false
+        return result
+      } catch (error) { await client.query('ROLLBACK'); transaction = false; throw error }
+    }) as Pool['query']
+    return new Proxy(client, { get(target, property) {
+      if (property === 'query') return query
+      // Destroy an abandoned transaction instead of returning tenant state to the pool.
+      if (property === 'release') return (error?: Error | boolean) => target.release(transaction ? true : error)
+      const value = Reflect.get(target, property)
+      return typeof value === 'function' ? value.bind(target) : value
+    } })
   }
-  const connection = new URL(platformConnectionString)
-  connection.pathname = '/postgres'
-  const pool = new Pool({ connectionString: connection.toString(), max: 1, application_name: 'myapartment-api-deletion', connectionTimeoutMillis: 5000 })
-  try {
-    await pool.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()', [databaseName])
-    await pool.query(`DROP DATABASE IF EXISTS "${databaseName}"`)
-  } finally {
-    await pool.end()
+  return {
+    connect: connect as Pool['connect'],
+    query: (async (...args: Parameters<Pool['query']>) => {
+      const client = await connect()
+      try { return await client.query(...args) } finally { client.release() }
+    }) as Pool['query'],
   }
 }
 
-export const provisionTenantDatabase = async (databaseName: string): Promise<void> => {
-  if (!/^[a-z][a-z0-9_]{0,62}$/.test(databaseName)) {
-    throw new Error('Tenant database name is invalid')
-  }
-  const connectionString = process.env.POSTGRES_PLATFORM_URL
-  if (!connectionString) {
-    throw new Error('POSTGRES_PLATFORM_URL is required')
-  }
+/** Operator-only lifecycle credential can execute purge, but cannot read tenant tables. */
+export const deleteTenantData = async (tenantId: string): Promise<void> => {
+  const connectionString = process.env.POSTGRES_MAINTENANCE_URL
+  if (!connectionString) throw new Error('POSTGRES_MAINTENANCE_URL is required for organization deletion')
+  const pool = new Pool({ connectionString, max: 1 })
+  try { await pool.query('SELECT block9_tenant.purge_tenant($1)', [tenantId]) }
+  finally { await pool.end() }
+}
 
-  const connection = new URL(connectionString)
-  connection.pathname = '/postgres'
-  const pool = new Pool({
-    connectionString: connection.toString(),
-    max: 1,
-    application_name: 'myapartment-api-provisioning',
-    connectionTimeoutMillis: 5000,
-  })
-  pool.on('error', reportPoolError('provisioning'))
-  try {
-    const exists = await pool.query<{ exists: boolean }>(
-      'SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1) AS exists',
-      [databaseName],
-    )
-    if (exists.rows[0]?.exists) return
-
-    await pool.query(`CREATE DATABASE "${databaseName}" TEMPLATE myapartment_tenant_template`)
-  } finally {
-    await pool.end()
-  }
+export const closeDatabasePools = async (): Promise<void> => {
+  await Promise.all([platformPool?.end(), applicationPool?.end()])
+  platformPool = undefined
+  applicationPool = undefined
 }
 
 export const checkDatabaseReadiness = async (): Promise<boolean> => {
   try {
     await getPlatformPool().query('SELECT 1')
+    await getTenantPool('__readiness__').query('SELECT 1')
     return true
-  } catch {
-    return false
-  }
+  } catch { return false }
 }

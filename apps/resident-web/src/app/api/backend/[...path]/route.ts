@@ -27,7 +27,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
 
   let body:ArrayBuffer|undefined
   if(!['GET','HEAD'].includes(request.method)){
-    const maximumBytes=22*1024*1024
+    const maximumBytes=1024*1024
     if(Number(request.headers.get('content-length')??0)>maximumBytes)return NextResponse.json({message:'The request body is too large'},{status:413,headers:{'cache-control':'no-store'}})
     const reader=request.body?.getReader(),chunks:Uint8Array[]=[]
     let size=0

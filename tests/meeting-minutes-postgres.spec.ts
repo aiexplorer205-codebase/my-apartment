@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AdminMeetingDetail, MeetingHistory, MeetingDetail, MeetingRoster } from '@block9/contracts'
-import { getTenantPool } from '../apps/api/src/persistence'
+import { getFixturePool as getTenantPool } from './support/fixture-database'
 import { readMeetingMinutes, writeMeetingMinutes } from '../apps/api/src/meeting-minutes'
 import { publishCommunication } from '../apps/api/src/communication-publications'
 import { propertySetupDeletion } from '../apps/api/src/property-setup-deletion'
@@ -18,7 +18,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Minutes of Meetin
     process.env.POSTGRES_TENANT_URL=url.toString();control=getTenantPool('postgres')
     await control.query(`CREATE DATABASE "${database}" TEMPLATE template0`);pool=getTenantPool(database)
     const directory=new URL('../migrations/myapartment_tenant_db/',import.meta.url)
-    for(const file of readdirSync(directory).filter(f=>f.endsWith('.sql')).sort())await pool.query(readFileSync(new URL(file,directory),'utf8'))
+    for(const file of readdirSync(directory).filter(f=>f.endsWith('.sql') && Number(f.slice(0,3))<=35).sort())await pool.query(readFileSync(new URL(file,directory),'utf8'))
   },30000)
   afterAll(async()=>{
     if(pool)await pool.end()

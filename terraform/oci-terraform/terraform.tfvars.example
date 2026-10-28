@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+tenancy_ocid        = "ocid1.tenancy.oc1..xxxxxxxx"
+region              = "ap-hyderabad-1"
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+# Preferred: no inbound ports. Create a single-use key (expires in 1 day) in the Tailscale admin console.
+tailscale_auth_key  = "tskey-auth-xxxxxxxx"
+
+# Only if you are NOT using Tailscale (use your own public IP /32):
+# ssh_allowed_cidrs = ["203.0.113.10/32"]
+
+# Budget alert (amount is in your billing currency)
+alert_email   = "you@yourdomain.com"
+budget_amount = 1

@@ -5,7 +5,7 @@ This is a testable local product, not a production-supported release. Do not dep
 ## Invariants (do not weaken)
 
 - Never commit secrets, `.env`, tokens, database locators, or real resident data.
-- Parameterized SQL only. Tenant repositories use the connection bound to server-side `TenantContext`.
+- Parameterized SQL only. Tenant repositories use the scoped shared-database interface bound to server-side `TenantContext`, with transaction-local RLS. Runtime roles cannot own tables or bypass RLS.
 - UI visibility is not authorization. Enforce role and membership on every API read/write.
 - Operator access fails closed unless `OPERATOR_IDS` lists the exact Auth0 `sub`.
 - Auth0 OTP is the identity proof. Do not accept a second OTP issuer or skip invitation acceptance.
@@ -45,3 +45,14 @@ Secrets belong in the deployment secret manager, not image build args. Staging a
 - Completing a maintenance task does not post a resident charge. Vendor expenses are separate.
 - Resident PWA: network-only service worker; do not cache authenticated tenant data for offline access.
 - Nginx in this repo routes HTTP inside Compose. It does not issue TLS certificates.
+
+## Shared application database
+
+Tenant SQL through `036` installs forced RLS, tenant-aware relationships, and
+restricted runtime/lifecycle roles. This is an empty-data reset boundary. Follow
+[shared-database-operations.md](./shared-database-operations.md); the architecture
+change alone does not close the other production gates above.
+
+Encrypted backups must include BOTH platform and application databases, role
+configuration, and the migration ledger. A tenant JSON export is a maintenance
+artifact, not a complete disaster-recovery backup. Do not log its contents.

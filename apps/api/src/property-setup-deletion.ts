@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import type { Pool, PoolClient } from 'pg'
+import type { PoolClient } from 'pg'
+import type { TenantDatabase as Pool } from './persistence.js'
 import { ApiFault } from './api-fault.js'
 
 type Access = { tenantId: string; subject: string; role: string }
@@ -14,8 +15,8 @@ async function linkedRecords(client: PoolClient, table: string, ids: string[], i
      FROM pg_constraint fk
      JOIN pg_class rel ON rel.oid = fk.conrelid
      JOIN pg_namespace ns ON ns.oid = rel.relnamespace
-     JOIN pg_attribute attr ON attr.attrelid = fk.conrelid AND attr.attnum = fk.conkey[1]
-     WHERE fk.contype = 'f' AND fk.confrelid = $1::regclass AND cardinality(fk.conkey) = 1`, [table])
+     JOIN pg_attribute attr ON attr.attrelid = fk.conrelid AND attr.attnum = ANY(fk.conkey) AND attr.attname <> 'tenant_id'
+     WHERE fk.contype = 'f' AND fk.confrelid = $1::regclass`, [table])
   const reasons: string[] = []
   for (const ref of references.rows) {
     if (ref.schema === 'block9_tenant' && ignored.includes(ref.table)) continue

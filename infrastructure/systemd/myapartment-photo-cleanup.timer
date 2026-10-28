@@ -1,0 +1,11 @@
+[Unit]
+Description=Run MyApartment photo cleanup hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=120
+Unit=myapartment-photo-cleanup.service
+
+[Install]
+WantedBy=timers.target
