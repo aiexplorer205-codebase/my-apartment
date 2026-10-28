@@ -1,4 +1,5 @@
 import './globals.css'
+import { residentAuthProvider } from '../lib/resident-auth-config'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
 import { I18nProvider, getAppConfig } from '@block9/app-platform'
@@ -18,7 +19,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <I18nProvider namespaces={['common', 'resident', 'validation']}>
-          <AuthProvider>
+          <AuthProvider provider={residentAuthProvider()}>
             <AppMessagesProvider>
               <PwaControls appName={config.application.productName} />
               {children}

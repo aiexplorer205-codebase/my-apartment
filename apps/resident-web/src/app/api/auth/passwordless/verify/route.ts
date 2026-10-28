@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { residentAuthProvider } from '../../../../../lib/resident-auth-config'
 import { auth0 } from '../../../../../lib/auth0'
 
 export async function POST(request: NextRequest) {
+  if (residentAuthProvider() !== 'auth0') return new NextResponse(null, { status: 404 })
   const originHeader = request.headers.get('origin')
   const hostHeader = request.headers.get('host')
   const forwardedProtocol = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()

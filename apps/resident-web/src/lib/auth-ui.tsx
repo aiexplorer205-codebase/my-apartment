@@ -1,6 +1,7 @@
 'use client'
 
-import { useAuth0 } from '../app/auth-provider'
+import { BetterAuthLogin } from './better-auth-login'
+import { useResidentAuth } from '../app/auth-provider'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import type { ReactNode } from 'react'
@@ -10,12 +11,12 @@ import { getAppConfig, getFormattedCopyright } from '@block9/app-platform'
 
 
 export function AuthBoundary({ children }: { children: ReactNode }) {
-  const { isLoading, isAuthenticated } = useAuth0()
+  const { isLoading, isAuthenticated, provider } = useResidentAuth()
   const pathname = usePathname()
   const experienceName = pathname.startsWith('/dashboard') ? 'Tenant Admin' : 'Resident'
 
   if (isLoading) {
-    return <main className="auth-shell" aria-live="polite">Checking your Auth0 session…</main>
+    return <main className="auth-shell" aria-live="polite">Checking your session…</main>
   }
   if (!isAuthenticated) {
     return (
@@ -31,7 +32,7 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
           <section className="auth-card app-sign-in-card" aria-labelledby="signin-title">
             <div className="auth-heading"><span className="auth-mobile-mark">{getAppConfig().application.monogram}</span><b id="signin-title">Welcome back</b><p>Sign in to your {experienceName} workspace.</p></div>
             <EmbeddedLogin experienceName={experienceName} />
-            <p className="auth-security"><AppShieldIcon /> Secure, encrypted access · Email verification</p>
+            <p className="auth-security"><AppShieldIcon /> Secure access · {provider === 'better-auth' ? 'Email OTP or passkey' : 'Email verification'}</p>
           </section>
         </div>
         <footer className="auth-footer"><span>{getFormattedCopyright()}</span><span>Privacy · Terms · Help</span></footer>
@@ -44,7 +45,7 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
 }
 
 export function TenantWorkspacePicker() {
-  const { activeTenantId, setActiveTenantId } = useAuth0()
+  const { activeTenantId, setActiveTenantId } = useResidentAuth()
   const { data, loading, error, reload } = useApiQuery<TenantMembership[]>('/v1/tenant/memberships', { tenantScoped: false })
   const requiredRole = 'resident'
   const memberships = requiredRole ? data?.filter((membership) => membership.role === requiredRole) : data
@@ -96,7 +97,7 @@ function splitOtp(value: string): OtpParts {
   return [digits.slice(0, 1), digits.slice(1, 2), digits.slice(2, 3), digits.slice(3, 4)]
 }
 
-export function EmbeddedLogin({ experienceName, initialEmail = '', lockEmail = false }: { experienceName: string; initialEmail?: string; lockEmail?: boolean }) {
+function Auth0Login({ experienceName, initialEmail = '', lockEmail = false }: { experienceName: string; initialEmail?: string; lockEmail?: boolean }) {
   const [email, setEmail] = useState(initialEmail)
   const [emailTouched, setEmailTouched] = useState(false)
   const [otpParts, setOtpParts] = useState<OtpParts>(['', '', '', ''])
@@ -217,4 +218,9 @@ export function LoadState({ loading, error, onRetry }: { loading: boolean; error
     )
   }
   return null
+}
+
+export function EmbeddedLogin(props: { experienceName: string; initialEmail?: string; lockEmail?: boolean }) {
+  const { provider } = useResidentAuth()
+  return provider === 'better-auth' ? <BetterAuthLogin {...props} /> : <Auth0Login {...props} />
 }

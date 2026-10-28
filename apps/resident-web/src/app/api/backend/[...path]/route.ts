@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { residentAuthProvider, residentSessionBearer, sameResidentOrigin } from '../../../../lib/resident-auth-config'
 import { auth0 } from '../../../../lib/auth0'
 
 const API_BASE_URL = (process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4101').replace(/\/$/, '')
@@ -8,6 +9,7 @@ const PUBLIC_PREFIX = '/v1/public/'
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params
   const apiPath = `/${path.join('/')}`
+  if (!['GET', 'HEAD'].includes(request.method) && !sameResidentOrigin(request)) return NextResponse.json({ message: 'Request was not accepted' }, { status: 403 })
   const incomingUrl = new URL(request.url)
   const targetUrl = `${API_BASE_URL}${apiPath}${incomingUrl.search}`
   const headers = new globalThis.Headers()
@@ -17,8 +19,14 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   }
 
   try {
-    const { token } = await auth0.getAccessToken()
-    headers.set('authorization', `Bearer ${token}`)
+    if (residentAuthProvider() === 'better-auth') {
+      const cookie = request.cookies.get('__Secure-myapartment-resident.session_token') ?? request.cookies.get('myapartment-resident.session_token')
+      if (!cookie) throw new Error('Missing resident session')
+      headers.set('authorization', `Bearer ${residentSessionBearer(cookie.value)}`)
+    } else {
+      const { token } = await auth0.getAccessToken()
+      headers.set('authorization', `Bearer ${token}`)
+    }
   } catch {
     if (!apiPath.startsWith(PUBLIC_PREFIX)) {
       return NextResponse.json({ message: 'Authentication required' }, { status: 401, headers: { 'cache-control': 'no-store' } })

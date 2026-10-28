@@ -13,6 +13,7 @@ COPY --chown=node:node apps/api/package.json ./apps/api/
 COPY --chown=node:node apps/login-web/package.json ./apps/login-web/
 COPY --chown=node:node apps/operator-web/package.json ./apps/operator-web/
 COPY --chown=node:node apps/resident-web/package.json ./apps/resident-web/
+COPY --chown=node:node apps/resident-auth/package.json ./apps/resident-auth/
 COPY --chown=node:node apps/worker/package.json ./apps/worker/
 COPY --chown=node:node infrastructure/adapters/package.json ./infrastructure/adapters/
 COPY --chown=node:node infrastructure/ports/package.json ./infrastructure/ports/

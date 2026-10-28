@@ -4,13 +4,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { MeetingDetail, MeetingHistory, MeetingSummary } from '@block9/contracts'
 import { apiFetch } from '@block9/api-client'
 import { useTranslation } from '@block9/app-platform'
-import { useAuth0 } from '../../app/auth-provider'
+import { useResidentAuth } from '../../app/auth-provider'
 import { LoadState } from '../../lib/auth-ui'
 import { useApiQuery } from '../../lib/use-api'
 
 export function ResidentMeetingMinutes() {
   const { t } = useTranslation(['common'])
-  const { activeTenantId } = useAuth0()
+  const { activeTenantId } = useResidentAuth()
   const label=(key:string)=>t(`common:meetings.${key}`)
   const latest=useApiQuery<{item:MeetingDetail|null}>('/v1/tenant/meeting-minutes/latest')
   const [selected,setSelected]=useState<string|null>(null),[items,setItems]=useState<MeetingSummary[]>([])

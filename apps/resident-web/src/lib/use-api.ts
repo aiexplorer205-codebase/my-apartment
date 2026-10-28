@@ -1,12 +1,12 @@
 'use client'
 
-import { useAuth0 } from '../app/auth-provider'
+import { useResidentAuth } from '../app/auth-provider'
 import { apiFetch } from '@block9/api-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 
 export function useApiQuery<T extends object>(path: string, options: { tenantScoped?: boolean; retainDataOnReload?: boolean; enabled?: boolean } = {}) {
-  const { isAuthenticated, activeTenantId } = useAuth0()
+  const { isAuthenticated, activeTenantId } = useResidentAuth()
   const enabled = options.enabled ?? true
   const tenantScoped = options.tenantScoped ?? true
   const retainDataOnReload = options.retainDataOnReload ?? false
@@ -52,7 +52,7 @@ export function useApiQuery<T extends object>(path: string, options: { tenantSco
 }
 
 export function useApiPost() {
-  const { activeTenantId } = useAuth0()
+  const { activeTenantId } = useResidentAuth()
   return useCallback(async <T extends object = { markedCount: number }>(path: string, body?: object): Promise<T> => {
     return apiFetch<T>(path, {
       method: 'POST',
@@ -66,7 +66,7 @@ export function useApiPost() {
 }
 
 export function useApiPatch() {
-  const { activeTenantId } = useAuth0()
+  const { activeTenantId } = useResidentAuth()
   return useCallback(async <T extends object>(path: string, body: object): Promise<T> => {
     return apiFetch<T>(path, {
       method: 'PATCH',

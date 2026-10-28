@@ -26,10 +26,18 @@ CREATE TABLE IF NOT EXISTS block9_migrations.applied (
   name TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 SQL
+  if [[ "$kind" == tenant ]]; then
+    # These are SQL prerequisites on managed PostgreSQL too, not Docker-only setup.
+    printf 'CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;\nCREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;\n'
+  fi
   for file in "${files[@]}"; do
     [[ -f "$file" ]] || exit 2
     name=${file##*/}
-    checksum=$(sha256sum "$file" | cut -d ' ' -f 1)
+    if command -v sha256sum >/dev/null 2>&1; then
+      checksum=$(sha256sum "$file" | cut -d ' ' -f 1)
+    else
+      checksum=$(shasum -a 256 "$file" | cut -d ' ' -f 1)
+    fi
     printf "SELECT EXISTS(SELECT 1 FROM block9_migrations.applied WHERE name='%s') AS applied \\gset\n" "$name"
     printf '\\if :applied\n'
     printf "DO \$\$ BEGIN IF NOT EXISTS(SELECT 1 FROM block9_migrations.applied WHERE name='%s' AND checksum='%s') THEN RAISE EXCEPTION 'Migration checksum mismatch: %s'; END IF; END \$\$;\n" "$name" "$checksum" "$name"
@@ -38,4 +46,8 @@ SQL
     printf '\\endif\n'
   done
   printf 'SELECT pg_advisory_unlock(9049000);\n'
-} | psql -X --username "${POSTGRES_USER:-postgres}" --dbname "$database"
+} | if [[ -n "${MIGRATION_DATABASE_URL:-}" ]]; then
+  psql -X --dbname "$MIGRATION_DATABASE_URL"
+else
+  psql -X --username "${PGUSER:-${POSTGRES_USER:-postgres}}" --dbname "${PGDATABASE:-$database}"
+fi

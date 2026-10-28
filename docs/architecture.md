@@ -126,3 +126,5 @@ UUID. PostgreSQL stores metadata only. Private reads require authorization and a
 short-lived signed GET. Default retention is 90 days, with one-day staging and
 orphan cleanup. Platform `010` and tenant `037` are required.
 See [private-image-storage.md](./private-image-storage.md).
+
+Resident authentication can use a separate self-hosted Better Auth service behind the resident web proxy. Admin/operator remain on Auth0. See [resident provider configuration, database provisioning and deployment](resident-authentication.md).

@@ -1,6 +1,8 @@
+import { residentAuthProvider } from '../../../../../lib/resident-auth-config'
 import { NextResponse } from 'next/server'
 
 export async function GET() {
+  if (residentAuthProvider() !== 'auth0') return new NextResponse(null, { status: 404 })
   const configuredDomain = process.env.AUTH0_DOMAIN?.trim()
   const clientId = process.env.AUTH0_CLIENT_ID?.trim()
   if (!configuredDomain || !clientId) {

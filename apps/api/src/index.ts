@@ -1,3 +1,4 @@
+import { authenticateResidentSession, identityMayUseRole, residentAuthProvider } from './resident-auth.js'
 import { reserveTenantStorageDeletion, deleteTenantPhotoStorage } from './photo-maintenance.js'
 import { readMeetingMinutes, writeMeetingMinutes } from './meeting-minutes.js'
 import { apartmentSetup } from './apartment-setup.js'
@@ -35,6 +36,9 @@ import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser, sendPass
 import { checkDatabaseReadiness, deleteTenantData, getPlatformPool, getTenantPool } from './persistence.js'
 
 interface AuthenticatedSubject {
+  provider: 'auth0' | 'better-auth'
+  clientId?: string
+  verifiedEmail?: string
   subject: string
   organizationId?: string
   accessToken: string
@@ -77,6 +81,8 @@ const authenticate = async (request: IncomingMessage): Promise<AuthenticatedSubj
     throw new ApiFault(401, 'unauthorized', 'A valid Auth0 access token is required')
   }
 
+  if (token.startsWith('resident-session.')) return authenticateResidentSession(token)
+
   const issuer = expectedIssuer()
   const audience = process.env.AUTH0_AUDIENCE
   if (!audience) {
@@ -94,6 +100,8 @@ const authenticate = async (request: IncomingMessage): Promise<AuthenticatedSubj
     }
     return {
       subject: payload.sub,
+      provider: 'auth0',
+      clientId: typeof payload.azp === 'string' ? payload.azp : undefined,
       organizationId: typeof payload.org_id === 'string' ? payload.org_id : undefined,
       accessToken: token,
     }
@@ -180,9 +188,10 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
     membership.has_accepted_admin_invitation,
     residentProfileResult.rows[0]?.has_active_profile === true,
   )
+  const permittedRoles = roles.filter((role) => identityMayUseRole(identity.provider, role))
   const role = requiredRole
-    ? roles.includes(requiredRole) ? requiredRole : null
-    : roles.includes(membership.role as TenantAccess['role']) ? membership.role as TenantAccess['role'] : roles[0] ?? null
+    ? permittedRoles.includes(requiredRole) ? requiredRole : null
+    : permittedRoles.includes(membership.role as TenantAccess['role']) ? membership.role as TenantAccess['role'] : permittedRoles[0] ?? null
   if (!role) {
     throw new ApiFault(403, 'forbidden', requiredRole === 'resident'
       ? 'This account does not have an active resident profile in the selected organization'
@@ -244,7 +253,7 @@ const getTenantMemberships = async (request: IncomingMessage) => {
       membership.role,
       membership.has_accepted_admin_invitation,
       residentProfileResult.rows[0]?.has_active_profile === true,
-    ).map((role) => ({
+    ).filter((role) => identityMayUseRole(identity.provider, role)).map((role) => ({
       tenantId: membership.tenant_id,
       name: membership.org_name,
       apartmentCode: membership.apartment_code,
@@ -371,6 +380,7 @@ const lookupAdminInvitation = async (request: IncomingMessage) => {
 
 const acceptAdminInvitation = async (request: IncomingMessage, requestId: string) => {
     const identity = await authenticate(request)
+    if (identity.provider !== 'auth0') throw new ApiFault(403, 'forbidden', 'Administrator sign-in requires Auth0')
     const input = await readJsonBody(request)
     if (!input || typeof input !== 'object' || Array.isArray(input) || typeof (input as Record<string, unknown>).token !== 'string') {
       throw new ApiFault(400, 'invalid_request', 'A valid administrator invitation token is required')
@@ -457,7 +467,7 @@ const requireOperator = async (request: IncomingMessage): Promise<AuthenticatedS
   if (operatorIds.length === 0) {
     throw new ApiFault(503, 'configuration_error', 'Platform operator identity is not configured')
   }
-  if (!operatorIds.includes(identity.subject)) {
+  if (identity.provider !== 'auth0' || !operatorIds.includes(identity.subject)) {
     throw new ApiFault(403, 'forbidden', 'This account is not an approved platform operator')
   }
   return identity
@@ -1621,7 +1631,7 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
   }
 
   try {
-    await provisionPasswordlessUser(input.email)
+    if (residentAuthProvider() === 'auth0') await provisionPasswordlessUser(input.email)
   } catch {
     console.error(JSON.stringify({ level: 'error', event: 'resident_invitation_auth0_provisioning_failed', requestId, tenantId: access.tenantId, invitationId }))
     throw new ApiFault(503, 'dependency_unavailable', 'The invitation was saved, but the resident’s Email OTP identity could not be prepared. Check Auth0 user-provisioning settings and retry.')
@@ -1817,16 +1827,21 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
   const identity = await authenticate(request)
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) throw new ApiFault(400, 'invalid_request', 'A resident invitation token is required')
   const { tenantId, tokenHash } = parseResidentInvitationToken((rawInput as Record<string, unknown>).token)
-  const domain = process.env.AUTH0_DOMAIN?.trim()
-  if (!domain || domain.includes('/') || domain.includes('example.auth0.com')) throw new ApiFault(503, 'configuration_error', 'Auth0 domain is not configured')
-  let profileResponse: Awaited<ReturnType<typeof globalThis.fetch>>
-  try {
-    profileResponse = await globalThis.fetch(`https://${domain}/userinfo`, { headers: { Authorization: `Bearer ${identity.accessToken}` } })
-  } catch {
-    throw new ApiFault(503, 'dependency_unavailable', 'Could not verify the Auth0 email address')
+  if (identity.provider !== residentAuthProvider()) throw new ApiFault(403, 'forbidden', 'Use the configured resident sign-in')
+  let profile: { sub?: unknown; email?: unknown; email_verified?: unknown }
+  if (identity.provider === 'better-auth') {
+    profile = { sub: identity.subject, email: identity.verifiedEmail, email_verified: true }
+  } else {
+    if (!process.env.AUTH0_RESIDENT_CLIENT_ID || identity.clientId !== process.env.AUTH0_RESIDENT_CLIENT_ID) throw new ApiFault(403, 'forbidden', 'Use the resident application to accept this invitation')
+    const domain = process.env.AUTH0_DOMAIN?.trim()
+    if (!domain || domain.includes('/') || domain.includes('example.auth0.com')) throw new ApiFault(503, 'configuration_error', 'Auth0 domain is not configured')
+    let profileResponse: Awaited<ReturnType<typeof globalThis.fetch>>
+    try {
+      profileResponse = await globalThis.fetch(`https://${domain}/userinfo`, { headers: { Authorization: `Bearer ${identity.accessToken}` }, signal: AbortSignal.timeout(5000) })
+    } catch { throw new ApiFault(503, 'dependency_unavailable', 'Could not verify the email address') }
+    if (!profileResponse.ok) throw new ApiFault(401, 'unauthorized', 'The session must include the email profile scope')
+    profile = await profileResponse.json() as typeof profile
   }
-  if (!profileResponse.ok) throw new ApiFault(401, 'unauthorized', 'The Auth0 session must include the email profile scope')
-  const profile = await profileResponse.json() as { sub?: unknown; email?: unknown; email_verified?: unknown }
   if (profile.sub !== identity.subject || typeof profile.email !== 'string' || profile.email_verified !== true) {
     throw new ApiFault(403, 'forbidden', 'Sign in with the invited email address and verify it through Email OTP')
   }
@@ -3334,6 +3349,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || (application !== 'admin' && application !== 'resident')) {
           throw new ApiFault(400, 'invalid_request', 'Enter a valid email address and application')
         }
+        if (application === 'resident' && residentAuthProvider() !== 'auth0') throw new ApiFault(410, 'invalid_request', 'Use resident email verification')
         await sendPasswordlessOtpToRegisteredUser(email, application)
         respond(response, 200, { message: 'If this email is registered, a sign-in code has been sent.' }, requestId)
         return

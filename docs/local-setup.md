@@ -132,3 +132,5 @@ R2/S3-compatible bucket and server-side `S3_*` settings; it fails closed if thos
 are absent. Apply platform `010` / tenant `037` and rebuild API. Browser image
 bytes bypass the web proxy. Configure lifecycle/CORS and scheduled cleanup as
 specified in [private-image-storage.md](./private-image-storage.md).
+
+Resident authentication can use a separate self-hosted Better Auth service behind the resident web proxy. Admin/operator remain on Auth0. See [resident provider configuration, database provisioning and deployment](resident-authentication.md).

@@ -56,3 +56,5 @@ change alone does not close the other production gates above.
 Encrypted backups must include BOTH platform and application databases, role
 configuration, and the migration ledger. A tenant JSON export is a maintenance
 artifact, not a complete disaster-recovery backup. Do not log its contents.
+
+Resident authentication can use a separate self-hosted Better Auth service behind the resident web proxy. Admin/operator remain on Auth0. See [resident provider configuration, database provisioning and deployment](resident-authentication.md).

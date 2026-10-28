@@ -2,10 +2,10 @@
 import { useCallback } from 'react'
 import { apiFetch } from '@block9/api-client'
 import { ComplaintHomeShortcut, Complaints } from '@block9/ui'
-import { useAuth0 } from '../../app/auth-provider'
+import { useResidentAuth } from '../../app/auth-provider'
 
 export function ComplaintWorkspace({onOpen}:{onOpen?:()=>void} = {}) {
-  const { activeTenantId } = useAuth0()
+  const { activeTenantId } = useResidentAuth()
   const request = useCallback((path: string, body?: object) => apiFetch(path, {
     method: body ? 'POST' : 'GET',
     headers: { ...(activeTenantId ? { 'X-Tenant-Id': activeTenantId } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },

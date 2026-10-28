@@ -9,7 +9,7 @@ import { ComplaintWorkspace } from '../complaints/complaints'
 import { useCallback, useEffect, useRef, useState, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react'
 import { AuthBoundary, LoadState, TenantWorkspacePicker } from '../../lib/auth-ui'
 import { useApiPost, useApiQuery } from '../../lib/use-api'
-import { useAuth0 } from '../../app/auth-provider'
+import { useResidentAuth } from '../../app/auth-provider'
 import { getAppConfig, useTranslation, LanguageSwitcher } from '@block9/app-platform'
 import { useAppMessages } from '@block9/ui'
 
@@ -535,7 +535,7 @@ function ResidentContent() {
 }
 
 function ResidentWorkspace() {
-  const { activeTenantId, user } = useAuth0()
+  const { activeTenantId, user } = useResidentAuth()
   return <ResidentContent key={`${user?.sub ?? ''}:${activeTenantId ?? ''}`} />
 }
 
