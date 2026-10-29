@@ -1,0 +1,379 @@
+:root {
+  --bg: var(--canvas);
+  --panel: var(--surface);
+  --panel-strong: var(--brand-tint);
+  --primary: var(--brand);
+  --primary-soft: var(--brand-tint);
+  --text: var(--ink);
+}
+
+body {
+  font-family: var(--font);
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 16px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.primary,
+.admin-shell .primary,
+.myapartment-button-primary {
+  min-height: 44px;
+  background: var(--brand);
+  color: #fff;
+}
+
+.secondary,
+.admin-shell .secondary {
+  min-height: 44px;
+}
+
+.dashboard-shell.admin-shell,
+.dashboard-shell.resident-shell {
+  grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font);
+}
+
+.admin-shell.admin-reference {
+  --canvas: var(--myapartment-canvas);
+  --surface: var(--myapartment-surface);
+  --ink: var(--myapartment-ink);
+  --bg: var(--canvas);
+  --panel: var(--surface);
+  --panel-alt: var(--canvas);
+  --brand: var(--myapartment-brand);
+  --brand-dark: var(--myapartment-brand-dark);
+  --brand-tint: var(--myapartment-brand-tint);
+  --primary: var(--myapartment-brand);
+  --primary-soft: var(--myapartment-brand-tint);
+  --text: var(--ink);
+  --muted: var(--myapartment-muted);
+  --border: var(--myapartment-border);
+  --success: var(--myapartment-success);
+  --success-tint: var(--myapartment-success-tint);
+  --warning: var(--myapartment-warning);
+  --warning-tint: var(--myapartment-warning-tint);
+  --danger: var(--myapartment-danger);
+  --danger-tint: var(--myapartment-danger-tint);
+  --focus: var(--myapartment-focus);
+  --radius: var(--myapartment-radius);
+  --shadow: var(--myapartment-shadow);
+  color: var(--ink);
+  background: var(--canvas);
+  font-family: var(--font);
+}
+
+.admin-shell.admin-reference > .sidebar {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+.admin-shell.admin-reference .card {
+  border-color: var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.admin-shell.admin-reference .brand-row,
+.admin-shell.admin-reference .admin-page-heading h1,
+.admin-shell.admin-reference .topbar h1,
+.admin-shell.admin-reference .card h2,
+.admin-shell.admin-reference .card h3 {
+  color: var(--ink);
+}
+
+.admin-shell.admin-reference .brand-mark,
+.admin-shell.admin-reference .primary,
+.admin-shell.admin-reference .setup-steps li[aria-current='step']::before {
+  background: var(--brand);
+  color: #fff;
+}
+
+.admin-shell.admin-reference .nav-item.active {
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+
+.admin-shell.admin-reference .nav-item.active .admin-nav-icon {
+  color: var(--brand);
+}
+
+.admin-shell.admin-reference .admin-header-search {
+  background: var(--canvas);
+}
+
+.admin-shell.admin-reference .primary {
+  min-height: 44px;
+  border-color: var(--brand);
+}
+
+.admin-shell.admin-reference :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.admin-shell.admin-reference .primary:hover:not(:disabled) {
+  background: var(--brand-dark);
+}
+
+.admin-shell.admin-reference .billing-template-option.selected {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+  box-shadow: 0 0 0 1px var(--brand);
+}
+
+.admin-shell.admin-reference .setup-steps li[aria-current='step'] {
+  border-color: var(--brand);
+}
+
+.admin-shell.admin-reference .admin-mobile-tabs {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.admin-shell.admin-reference .admin-mobile-tabs button.active {
+  color: var(--brand);
+}
+
+.admin-shell.admin-reference .color-0,
+.admin-shell.admin-reference .apartment-step-number.is-active {
+  background: var(--brand);
+  color: #fff;
+}
+
+.admin-shell.admin-reference .admin-poll-result-track {
+  background: var(--brand-tint);
+}
+
+.admin-shell .card,
+.resident-shell .card {
+  border-color: var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.admin-shell .card p,
+.admin-shell .kpi-card span {
+  color: var(--muted);
+}
+
+.admin-shell .kpi-card strong,
+.resident-shell strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-shell .card h2 {
+  font-size: 18px;
+}
+
+.admin-shell .admin-content-body {
+  width: 100%;
+  max-width: var(--workspace-content-max);
+  margin-inline: auto;
+}
+
+.admin-shell .nav-item {
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.admin-shell .secondary,
+.admin-shell .primary,
+.data-table {
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td small {
+  font-size: 12px;
+}
+
+.resident-shell {
+  --resident-ink: var(--ink);
+  --resident-muted: var(--muted);
+  --resident-purple: var(--brand);
+  --resident-line: var(--border);
+  grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font);
+}
+
+.resident-shell > .resident-sidebar {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.resident-shell > .content-panel {
+  width: min(100%, var(--workspace-content-max));
+}
+
+.resident-sidebar .brand-row .brand-mark {
+  background: var(--brand);
+}
+
+.resident-shell .resident-sidebar .nav-item.active {
+  border-color: var(--border);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+
+.resident-shell .resident-mobile-home-header h1 {
+  color: var(--ink);
+}
+
+.resident-shell .resident-due-hero,
+.resident-shell .resident-mobile-due-card,
+.resident-shell[data-active-tab='history'] .resident-history-stat {
+  background: var(--hero);
+}
+
+.resident-shell .resident-mobile-section-heading button,
+.resident-shell .resident-mobile-receipt-icon,
+.resident-shell .resident-mobile-announcement-date,
+.resident-shell .resident-history-stat-icon {
+  color: var(--brand);
+}
+
+.resident-shell .resident-mobile-receipt-icon,
+.resident-shell .resident-mobile-announcement-date,
+.resident-shell .resident-history-stat-icon {
+  background: var(--brand-tint);
+}
+
+.resident-shell .status-pill {
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+
+.pwa-controls {
+  position: relative;
+  z-index: 30;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.pwa-controls summary {
+  min-height: 32px;
+  color: var(--brand);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.pwa-controls p {
+  max-width: 64ch;
+  line-height: 1.6;
+}
+
+.pwa-controls button {
+  margin: 4px 8px 4px 0;
+}
+
+.pwa-status {
+  padding: 12px 16px;
+  background: var(--warning-tint);
+  color: var(--warning);
+}
+
+.pwa-status p {
+  margin: 0;
+}
+
+@media (min-width: 921px) and (max-width: 1050px) {
+  .dashboard-shell.admin-shell,
+  .dashboard-shell.resident-shell {
+    grid-template-columns: var(--workspace-sidebar-width-compact) minmax(0, 1fr);
+  }
+
+  .admin-shell > .content-panel {
+    padding-inline: 22px;
+  }
+
+  .resident-shell > .resident-sidebar {
+    padding-inline: 10px;
+  }
+
+  .resident-shell > .content-panel {
+    padding-inline: 22px;
+  }
+}
+
+@media (max-width: 700px) {
+  .admin-shell .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-shell .topbar {
+    flex-wrap: wrap;
+  }
+
+  .admin-shell .kpi-card {
+    min-width: 0;
+    padding: 12px;
+  }
+
+  .admin-shell .kpi-card strong {
+    overflow-wrap: anywhere;
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 640px) {
+  .resident-shell .resident-sidebar .nav-list {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .resident-shell .resident-sidebar .nav-item {
+    min-width: 0;
+  }
+
+  .resident-shell .resident-sidebar .nav-item.active {
+    background: transparent;
+    color: var(--brand);
+  }
+
+  .resident-shell .resident-sidebar .nav-label {
+    max-width: 100%;
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 380px) {
+  .resident-shell .resident-sidebar .nav-list {
+    padding-inline: 4px;
+  }
+
+  .resident-shell .resident-sidebar .nav-label {
+    font-size: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}

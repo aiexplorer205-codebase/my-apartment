@@ -1,7 +1,54 @@
 :root {
+  --myapartment-brand: #3946a5;
+  --myapartment-brand-dark: #a05c86;
+  --myapartment-brand-tint: #e7f4f5;
+  --myapartment-canvas: #f5f7fa;
+  --myapartment-surface: #fff;
+  --myapartment-ink: #152337;
+  --myapartment-muted: #647185;
+  --myapartment-border: #e2e8f0;
+  --myapartment-focus: #246bc4;
+  --myapartment-success: #08754e;
+  --myapartment-success-tint: #e9f7ef;
+  --myapartment-warning: #925300;
+  --myapartment-warning-tint: #fff3dd;
+  --myapartment-danger: #b52e40;
+  --myapartment-danger-tint: #fff0f2;
+  --myapartment-radius: 16px;
+  --myapartment-font: Inter, 'Segoe UI', Arial, 'Noto Sans Telugu', sans-serif;
+  --myapartment-shadow: 0 3px 14px #18345005;
+  --brand: var(--myapartment-brand);
+  --brand-dark: var(--myapartment-brand-dark);
+  --brand-tint: var(--myapartment-brand-tint);
+  --hero: linear-gradient(115deg, var(--brand-dark), var(--brand));
+  --canvas: var(--myapartment-canvas);
+  --surface: var(--myapartment-surface);
+  --ink: var(--myapartment-ink);
+  --muted: var(--myapartment-muted);
+  --border: var(--myapartment-border);
+  --focus: var(--myapartment-focus);
+  --success: var(--myapartment-success);
+  --success-tint: var(--myapartment-success-tint);
+  --warning: var(--myapartment-warning);
+  --warning-tint: var(--myapartment-warning-tint);
+  --danger: var(--myapartment-danger);
+  --danger-tint: var(--myapartment-danger-tint);
+  --radius: var(--myapartment-radius);
+  --font: var(--myapartment-font);
+  --shadow: var(--myapartment-shadow);
+  --bg: var(--canvas);
+  --panel: var(--surface);
+  --panel-strong: var(--brand-tint);
+  --primary: var(--brand);
+  --primary-soft: var(--brand-tint);
+  --text: var(--ink);
   --myapartment-focus-ring: 0 0 0 3px rgba(29, 78, 216, 0.28);
   --myapartment-radius-control: 10px;
   --myapartment-font-sans: Inter, 'Segoe UI', Arial, sans-serif;
+  --workspace-sidebar-width: 236px;
+  --workspace-sidebar-width-compact: 190px;
+  --workspace-content-max: 1440px;
+  --workspace-header-height: 76px;
 }
 
 :focus-visible {
