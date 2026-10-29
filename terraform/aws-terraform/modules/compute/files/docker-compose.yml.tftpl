@@ -1,0 +1,71 @@
+# Managed by Terraform on first boot. Edit freely afterwards.
+# Queue option: QUEUE_BACKEND=pgboss (default, no extra container) or QUEUE_BACKEND=redis.
+# For redis also set COMPOSE_PROFILES=redis and REDIS_URL=redis://redis:6379 in .env.
+name: myapartment
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: $${PGUSER}
+      POSTGRES_PASSWORD: $${PGPASSWORD}
+      POSTGRES_DB: $${PGDATABASE}
+    command: postgres -c shared_buffers=192MB -c effective_cache_size=512MB -c work_mem=8MB -c maintenance_work_mem=64MB -c max_connections=60
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 600m
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    profiles: ['redis']
+    restart: unless-stopped
+    command: redis-server --maxmemory 100mb --maxmemory-policy noeviction --appendonly yes
+    volumes:
+      - redisdata:/data
+    mem_limit: 150m
+
+  app:
+    image: ${app_image}:$${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+        required: false
+    mem_limit: 600m
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/health || exit 1']
+      interval: 30s
+      retries: 3
+
+  worker:
+    image: ${app_image}:$${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    command: node worker.js
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+        required: false
+    mem_limit: 256m
+
+  cloudflared:
+    image: cloudflare/cloudflared:${cloudflared_tag}
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: $${TUNNEL_TOKEN}
+    mem_limit: 100m
+
+volumes:
+  pgdata:
+  redisdata:

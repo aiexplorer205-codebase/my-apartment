@@ -1,0 +1,29 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+region      = "ap-south-1"
+aws_profile = "myapartment"          # your AWS CLI / SSO profile name, or remove this line
+
+instance_type  = "t4g.small"         # t4g.small = ARM, cheapest. t3.small = x86.
+root_volume_gb = 30
+
+# Choose the job queue. You can change it later on the VM without rewriting anything.
+queue_backend = "pgboss"             # "pgboss" (no Redis) or "redis"
+
+app_image       = "ghcr.io/YOUR_GH_USER/myapartment"
+cloudflared_tag = "latest"           # pin a version after the first successful deploy
+
+# Output of: age-keygen -o age-key.txt   (public key only, starts with age1)
+age_public_key = "age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Budgets and alerts
+alert_email          = "you@yourdomain.com"
+ceiling_usd          = 25
+alert_thresholds_usd = [5, 10, 20]
+cash_alert_usd       = 1
+
+# Turn on after you have opened Cost Explorer once in the console
+enable_anomaly_detection = false
+
+# Optional: deploy from GitHub Actions over SSM (no keys stored in GitHub)
+enable_ci_deploy = false
+# github_repo    = "your-user/myapartment"
+# github_branch  = "main"

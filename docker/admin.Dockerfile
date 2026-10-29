@@ -46,7 +46,16 @@ WORKDIR /workspace/apps/admin-web
 EXPOSE 3000
 CMD ["node", "node_modules/next/dist/bin/next", "dev", "-H", "0.0.0.0", "-p", "3000"]
 
-FROM development AS production
+FROM base AS builder
 RUN pnpm --filter @block9/admin-web run build
 
-CMD ["node", "node_modules/next/dist/bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]
+FROM node:22-alpine AS production
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+WORKDIR /app
+RUN addgroup -S app && adduser -S app -G app
+COPY --from=builder --chown=app:app /workspace/apps/admin-web/.next/standalone ./
+COPY --from=builder --chown=app:app /workspace/apps/admin-web/.next/static ./apps/admin-web/.next/static
+COPY --from=builder --chown=app:app /workspace/apps/admin-web/public ./apps/admin-web/public
+USER app
+EXPOSE 3000
+CMD ["node", "apps/admin-web/server.js"]

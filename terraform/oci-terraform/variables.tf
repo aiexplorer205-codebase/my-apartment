@@ -13,6 +13,11 @@ variable "oci_config_profile" {
 variable "tenancy_ocid" {
   description = "Tenancy OCID (the tenancy= line in ~/.oci/config)"
   type        = string
+
+  validation {
+    condition     = can(regex("^ocid1\\.tenancy\\.", var.tenancy_ocid))
+    error_message = "tenancy_ocid must be a tenancy OCID beginning with ocid1.tenancy. Get the tenancy= value from ~/.oci/config, not an ocid1.user... value."
+  }
 }
 
 variable "compartment_ocid" {
@@ -83,6 +88,11 @@ variable "availability_domain_index" {
   description = "0 = first availability domain. Try 1 or 2 if your region has several and one is out of capacity."
   type        = number
   default     = 0
+
+  validation {
+    condition     = var.availability_domain_index >= 0 && var.availability_domain_index <= 2
+    error_message = "availability_domain_index must be 0, 1, or 2."
+  }
 }
 
 # ---- Budget alert ----

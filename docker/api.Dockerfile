@@ -42,6 +42,18 @@ RUN pnpm --filter @block9/config run build && \
     pnpm --filter @block9/api run build
 
 
-
+FROM base AS development
+WORKDIR /workspace/apps/api
 EXPOSE 4001
-CMD ["node", "apps/api/dist/apps/api/src/index.js"]
+CMD ["node", "dist/apps/api/src/index.js"]
+
+FROM base AS production-build
+RUN pnpm --filter @block9/api deploy --prod /workspace/runtime
+
+FROM node:22-alpine AS production
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=production-build --chown=node:node /workspace/runtime ./
+USER node
+EXPOSE 4001
+CMD ["node", "dist/apps/api/src/index.js"]

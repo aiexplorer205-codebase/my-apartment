@@ -1,0 +1,14 @@
+# OPTIONAL remote state in S3 (create the bucket by hand first, private, versioned, encrypted):
+#   aws s3api create-bucket --bucket myapartment-tfstate-<account-id> --region ap-south-1 \
+#     --create-bucket-configuration LocationConstraint=ap-south-1
+# Rename to backend.tf and run: terraform init -migrate-state
+# use_lockfile needs Terraform 1.10 or newer; remove it on older versions.
+terraform {
+  backend "s3" {
+    bucket       = "myapartment-tfstate-<account-id>"
+    key          = "aws/terraform.tfstate"
+    region       = "ap-south-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

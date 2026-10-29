@@ -12,6 +12,9 @@ dist
 coverage
 **/coverage
 docker-data
+docs
+terraform
+*.md
 *.log
 .DS_Store
 figma-prototype

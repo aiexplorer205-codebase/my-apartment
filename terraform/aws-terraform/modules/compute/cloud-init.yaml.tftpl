@@ -1,0 +1,64 @@
+#cloud-config
+hostname: ${hostname}
+manage_etc_hosts: true
+package_update: true
+package_upgrade: true
+
+packages:
+  - unattended-upgrades
+  - curl
+  - ca-certificates
+  - jq
+  - age
+  - rclone
+  - cron
+
+users:
+  - default
+  - name: deploy
+    shell: /bin/bash
+    lock_passwd: true
+
+write_files:
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}
+  - path: /etc/cron.weekly/docker-prune
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      docker image prune -af --filter "until=168h"
+  - path: /opt/myapartment/docker-compose.yml
+    permissions: '0644'
+    encoding: gz+b64
+    content: ${compose}
+  - path: /opt/myapartment/backup.sh
+    permissions: '0755'
+    encoding: gz+b64
+    content: ${backup_sh}
+  - path: /opt/myapartment/init-env.sh
+    permissions: '0755'
+    encoding: gz+b64
+    content: ${init_env}
+  - path: /etc/cron.d/myapartment-backup
+    permissions: '0644'
+    content: |
+      # 21:00 UTC = 02:30 IST
+      0 21 * * * deploy /opt/myapartment/backup.sh >> /var/log/myapartment-backup.log 2>&1
+
+runcmd:
+  - fallocate -l 2G /swapfile
+  - chmod 600 /swapfile
+  - mkswap /swapfile
+  - swapon /swapfile
+  - echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker deploy
+  - /opt/myapartment/init-env.sh
+  - touch /var/log/myapartment-backup.log
+  - chown deploy:deploy /var/log/myapartment-backup.log
+  - chown -R deploy:deploy /opt/myapartment
+  - touch /var/lib/cloud/instance/myapartment-bootstrap-done
+
+final_message: "myapartment bootstrap finished after $UPTIME seconds"

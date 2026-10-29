@@ -10,6 +10,7 @@ This repository is a local, testable product. It is **not** a production-support
 - [Local setup](docs/local-setup.md) — Auth0, Compose, migrations, seed
 - [Architecture](docs/architecture.md) — stack, isolation, shipped features
 - [Security and operations](docs/security-and-ops.md)
+- [Deployment plan](docs/deployment-plan.md) — provider comparison, OCI pilot, ECS production, CI/CD, and rollout phases
 - [Contributing](CONTRIBUTING.md)
 - [Security reporting](SECURITY.md)
 

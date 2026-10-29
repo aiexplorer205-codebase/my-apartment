@@ -20,8 +20,10 @@ function InvitationContent() {
   const params = useSearchParams()
   const now = new Date()
   const todayDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  const token = params.get('token')
-  const qr = params.get('qr')
+  const tokenParam = params.get('token')
+  const looksLikeQrToken = Boolean(tokenParam && /^[A-Za-z0-9_-]{1,200}\.[A-Za-z0-9_-]{43}$/.test(tokenParam))
+  const token = looksLikeQrToken ? null : tokenParam
+  const qr = params.get('qr') ?? params.get('qrToken') ?? (looksLikeQrToken ? tokenParam : null)
   const { isAuthenticated, user, logout, provider } = useResidentAuth()
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [lookupError, setLookupError] = useState<string | null>(null)

@@ -1,5 +1,7 @@
 locals {
-  hostname = "${var.name_prefix}-vm"
+  hostname             = "${var.name_prefix}-vm"
+  availability_domain  = try(data.oci_identity_availability_domains.ads.availability_domains[var.availability_domain_index].name, "")
+  ubuntu_arm_image_id  = try(data.oci_core_images.ubuntu_arm.images[0].id, "")
 }
 
 data "oci_identity_availability_domains" "ads" {
@@ -17,7 +19,7 @@ data "oci_core_images" "ubuntu_arm" {
 
 resource "oci_core_instance" "this" {
   compartment_id      = var.compartment_id
-  availability_domain = data.oci_identity_availability_domains.ads.availability_domains[var.availability_domain_index].name
+  availability_domain = local.availability_domain
   display_name        = local.hostname
   shape               = "VM.Standard.A1.Flex"
 
@@ -28,7 +30,7 @@ resource "oci_core_instance" "this" {
 
   source_details {
     source_type             = "image"
-    source_id               = data.oci_core_images.ubuntu_arm.images[0].id
+    source_id               = local.ubuntu_arm_image_id
     boot_volume_size_in_gbs = var.boot_volume_gbs
   }
 
@@ -63,7 +65,12 @@ resource "oci_core_instance" "this" {
     ]
 
     precondition {
-      condition     = length(data.oci_core_images.ubuntu_arm.images) > 0
+      condition     = try(length(data.oci_identity_availability_domains.ads.availability_domains) > 0, false)
+      error_message = "No availability domains were returned. Verify tenancy_ocid is the tenancy OCID from ~/.oci/config and that OCI credentials are valid."
+    }
+
+    precondition {
+      condition     = try(length(data.oci_core_images.ubuntu_arm.images) > 0, false)
       error_message = "No Ubuntu aarch64 image found for this version and region. Try os_version = \"22.04\"."
     }
   }

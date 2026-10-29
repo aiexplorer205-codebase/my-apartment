@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Nightly encrypted Postgres dump to S3 (write-only role, expiry handled by bucket lifecycle).
+set -euo pipefail
+cd /opt/myapartment
+
+get() { grep "^$1=" .env | head -1 | cut -d= -f2-; }
+PGUSER=$(get PGUSER)
+PGDATABASE=$(get PGDATABASE)
+AGE=$(get AGE_PUBLIC_KEY)
+
+if [ -z "$AGE" ]; then
+  echo "AGE_PUBLIC_KEY is empty in .env. Refusing to upload plaintext backups." >&2
+  exit 1
+fi
+
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+
+# rclone configured through environment variables, credentials come from the instance role
+export RCLONE_CONFIG_S3_TYPE=s3
+export RCLONE_CONFIG_S3_PROVIDER=AWS
+export RCLONE_CONFIG_S3_ENV_AUTH=true
+export RCLONE_CONFIG_S3_REGION=${region}
+export RCLONE_CONFIG_S3_NO_CHECK_BUCKET=true
+
+docker compose exec -T db pg_dump -U "$PGUSER" -Fc "$PGDATABASE" \
+  | age -r "$AGE" \
+  | rclone rcat "s3:${bucket}/db/$TS.dump.age"
+
+echo "backup ok $TS"
