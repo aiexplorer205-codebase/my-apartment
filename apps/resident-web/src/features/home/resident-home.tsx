@@ -114,6 +114,7 @@ const paymentStatusLabel=(payment:Payment)=>payment.kind==='adjustment'?'Invoice
 function ResidentContent() {
   const { pushMessage } = useAppMessages()
   const { t } = useTranslation(['common', 'resident'])
+  const [navigationSearch, setNavigationSearch] = useState('')
   const [activeTab, setActiveTab] = useState<ActiveTab>('home')
   useEffect(() => {
     const openInstall = () => setActiveTab('install')
@@ -177,7 +178,6 @@ function ResidentContent() {
   const unreadNoticeCount = updatesSummary.data?.summary.unreadLiveAnnouncements ?? 0
   const bannerAnnouncements = (notices.data ?? []).filter((item) => item.isBanner && !dismissedAnnouncementIds.includes(item.id))
   const bannerPolls = polls.data?.filter((poll) => poll.isLive && !poll.hasVoted) ?? []
-  const openInvoiceCount = home.data?.invoiceBalances.filter(({ remainingDueMinor }) => remainingDueMinor > 0).length ?? 0
   const firstName = home.data?.profile.fullName.trim().split(/\s+/)[0] || t('resident:greeting.defaultName', 'there')
   const localHour = new Date().getHours()
   const greeting = localHour < 12 ? t('resident:greeting.morning', 'Good morning') : localHour < 17 ? t('resident:greeting.afternoon', 'Good afternoon') : t('resident:greeting.evening', 'Good evening')
@@ -319,8 +319,11 @@ function ResidentContent() {
       </aside>
       <section className="content-panel">
         <header className="workspace-topbar">
-          <span className="workspace-community">{home.data?.brand.name ?? t('resident:workspace.yourCommunity', 'Your community')}</span>
-          <div className="workspace-user"><LanguageSwitcher /><button type="button" className="workspace-notifications" aria-label={t('common:navigation.updates', 'Updates')} onClick={() => setActiveTab('notices')}><ResidentNavIcon name="bell" />{unreadNoticeCount > 0 && <span>{unreadNoticeCount}</span>}</button><button type="button" className="workspace-user-button" onClick={() => setActiveTab('profile')} aria-label={t('common:navigation.profile', 'Profile')}><span className="workspace-avatar">{home.data?.profile.fullName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('') || '—'}</span><span className="workspace-user-name">{home.data?.profile.fullName}</span></button></div>
+          <div className="resident-navigation-search">
+            <input type="search" aria-label="Search resident pages" placeholder="Search screens, payments, updates…" value={navigationSearch} onChange={(event) => setNavigationSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setNavigationSearch('') }} />
+            {navigationSearch.trim() && <div className="resident-navigation-results">{residentNavigation.filter(({label,navKey}) => t(`common:navigation.${navKey}`, label).toLowerCase().includes(navigationSearch.trim().toLowerCase())).map(({tab,label,navKey}) => <button type="button" key={tab} onClick={() => {setActiveTab(tab);setNavigationSearch('')}}>{t(`common:navigation.${navKey}`, label)}</button>)}</div>}
+          </div>
+          <div className="workspace-user"><LanguageSwitcher /><button type="button" className="workspace-notifications" aria-label={t('common:navigation.updates', 'Updates')} onClick={() => setActiveTab('notices')}><ResidentNavIcon name="bell" />{unreadNoticeCount > 0 && <span>{unreadNoticeCount}</span>}</button><button type="button" className="workspace-user-button" onClick={() => setActiveTab('profile')} aria-label={t('common:navigation.profile', 'Profile')}><span className="workspace-avatar">{home.data?.profile.fullName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('') || '—'}</span><span className="workspace-user-name"><strong>{home.data?.profile.fullName}</strong><small>{getAppConfig().application.residentName}</small></span></button></div>
         </header>
         <div className="resident-content-body">
         <div className={`resident-pull-indicator${refreshing ? ' refreshing' : ''}`} style={{ height: refreshing ? 46 : pullDistance }} role="status" aria-live="polite" aria-hidden={!refreshing && pullDistance === 0}>
@@ -346,7 +349,7 @@ function ResidentContent() {
 
         {!['profile','history','complaints','notices','install'].includes(activeTab) && <>
         <header className="topbar">
-          <div className="resident-heading"><div className="eyebrow">{home.data?.brand.name ?? t('resident:dashboard.brand', 'RESIDENT EXPERIENCE')}</div><h1>{activeTab === 'home' ? `${greeting}, ${firstName}` : t(`common:navigation.${activeNavigation.navKey}`, activeNavigation.label)}</h1><p>{t(`resident:dashboard.subtitle.${activeTab}`)}</p>{home.data?.brand.apartmentCode && <small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small>}</div>
+          <div className="resident-heading"><div className="eyebrow">{home.data?.brand.name ?? t('resident:dashboard.brand', 'RESIDENT EXPERIENCE')}{home.data?.profile.unit && ` · ${home.data.profile.unit}`}</div><h1>{activeTab === 'home' ? `${greeting}, ${firstName}` : t(`common:navigation.${activeNavigation.navKey}`, activeNavigation.label)}</h1><p>{activeTab === 'home' ? 'Your home, your community. All in one place.' : t(`resident:dashboard.subtitle.${activeTab}`)}</p>{home.data?.brand.apartmentCode && <small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small>}</div>
           <div className="resident-top-actions"><span className="resident-unit-chip">{home.data?.profile.unit ?? t('resident:dashboard.account', 'Resident account')}</span><button type="button" className="secondary" onClick={home.reload}>{t('common:actions.refresh', 'Refresh')}</button></div>
         </header>
         </>}
@@ -380,55 +383,29 @@ function ResidentContent() {
           </div>
           <div className="stack">
             <section className="hero resident-due-hero">
+              {home.data.dueDate && <span className="resident-home-due-date">Due {new Date(`${home.data.dueDate}T00:00:00`).toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'})}</span>}
               <div><div className="eyebrow">{home.data.billingPeriod ? t('resident:dashboard.currentBill', { period: formatBillingPeriod(home.data.billingPeriod) }) : t('resident:dashboard.currentBalance')}</div><h2>{formatMoney(home.data.currentDueMinor, home.data.currency)}</h2><span className="resident-due-caption">{home.data.currentDueMinor > 0 ? t('resident:dashboard.amountDue') : t('resident:dashboard.allCaughtUp')}</span></div>
               <div className="hero-meta">
-                <span>{home.data.pendingPaymentMinor > 0
-                  ? t('resident:dashboard.amountAwaitingAdmin', { amount: formatMoney(home.data.pendingPaymentMinor, home.data.currency) })
-                  : home.data.currentDueMinor > 0
-                    ? `Due date: ${home.data.dueDate ?? 'Not available'}`
-                    : home.data.billingPeriod
-                      ? t('resident:dashboard.paidInFull')
-                      : t('resident:dashboard.noOpenInvoice')}</span>
+                <div className="resident-balance-line"><span>{t('resident:dashboard.awaitingConfirmation')}</span><strong>{formatMoney(home.data.pendingPaymentMinor, home.data.currency)}</strong></div>
+                <div className="resident-balance-line"><span>Available to report</span><strong>{formatMoney(home.data.manualPaymentAvailableMinor, home.data.currency)}</strong></div>
                 <button type="button" className="primary" disabled={!home.data.invoiceBalances.some(({ availableToReportMinor }) => availableToReportMinor > 0)} onClick={() => setActiveTab('payments')}>{t('resident:dashboard.recordPayment')} <span aria-hidden="true">→</span></button>
+                <p className="resident-offline-note">Only report money already paid outside this app. Your balance updates after admin confirmation.</p>
               </div>
             </section>
-            <div className="resident-summary-grid">
-              <article className="resident-summary-card"><span>{t('resident:dashboard.outstanding')}</span><strong>{formatMoney(home.data.totalOutstandingMinor, home.data.currency)}</strong><small>{t('resident:dashboard.openInvoices', { count: openInvoiceCount })}</small></article>
-              <article className="resident-summary-card"><span>{t('resident:dashboard.awaitingConfirmation')}</span><strong>{formatMoney(home.data.totalPendingPaymentMinor, home.data.currency)}</strong><small>{t('resident:dashboard.reportedOfflinePayments')}</small></article>
-              <article className="resident-summary-card"><span>{t('resident:dashboard.unreadNotices')}</span><strong>{updatesSummary.data?unreadNoticeCount:'—'}</strong><small>{t('resident:dashboard.communityUpdates')}</small></article>
-            </div>
-            <div className="grid-two">
-              <section className="card resident-card">
-                <h3>{t('resident:dashboard.currentBillTitle')} {home.data.billingPeriod ? `· ${home.data.billingPeriod}` : ''}</h3>
-                {([
-                  [t('resident:dashboard.maintenance'), 'maintenanceMinor'],
-                  [t('resident:dashboard.water'), 'waterMinor'],
-                  [t('resident:dashboard.sinkingFund'), 'sinkingFundMinor'],
-                  [t('resident:dashboard.previousDues'), 'previousDuesMinor'],
-                  ['Opening balance', 'openingBalanceMinor'],
-                  [t('resident:dashboard.fees'), 'feesMinor'],
-                  [t('resident:dashboard.roundOff'), 'roundOffMinor'],
-                ] as const).map(([label, key]) => (
-                  <div className="list-row" key={key}><span>{label}</span><strong>{formatMoney(home.data!.breakdown[key] ?? 0, home.data!.currency)}</strong></div>
-                ))}
-                <div className="list-row total"><span>{t('resident:dashboard.invoiceTotal')}</span><strong>{formatMoney(home.data.totalMinor, home.data.currency)}</strong></div>
-                <p className="muted-note">{t('resident:dashboard.paymentUnavailable')}</p>
+            <div className="resident-home-right">
+              <button className="card resident-report-shortcut" type="button" onClick={() => setActiveTab('complaints')}><ResidentNavIcon name="history" /><span><strong>Report an issue</strong><small>Private help from apartment admins</small></span><span aria-hidden="true">→</span></button>
+              <section className="card resident-community-updates">
+                <div className="card-title-row"><h2>{t('resident:dashboard.communityUpdates')}</h2><button className="resident-record-link" type="button" onClick={() => setActiveTab('notices')}>See all</button></div>
+                {home.data.announcements.slice(0, 3).map((notice) => <button className="resident-home-update" key={notice.id} type="button" onClick={() => {setActiveTab('notices');setUpdatesState((value) => ({...value,record:{kind:'announcement',id:notice.id}}))}}><time dateTime={notice.publishedAt}>{new Date(notice.publishedAt).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</time><span><strong>{notice.title}</strong><small>{notice.body}</small></span><span aria-hidden="true">→</span></button>)}
+                {bannerPolls.slice(0, 1).map((poll) => <button className="resident-home-update" key={poll.id} type="button" onClick={() => {setActiveTab('notices');setUpdatesState((value) => ({...value,record:{kind:'poll',id:poll.id}}))}}><ResidentNavIcon name="bell" /><span><strong>{poll.question}</strong><small>Poll closes {new Date(poll.endsAt).toLocaleDateString('en-IN')}</small></span><span aria-hidden="true">→</span></button>)}
+                {!home.data.announcements.length && !bannerPolls.length && <p className="muted-note">No community updates to show.</p>}
               </section>
-              <section className="card resident-card">
-                <h3>{t('resident:dashboard.recentTransactions')}</h3>
-                {home.data.recentPayments.length === 0 ? <p>{t('resident:dashboard.noPaymentRecords')}</p> : home.data.recentPayments.map((payment) => (
-                  <div className="transaction-item" key={payment.id}>
-                    <div><button type="button" className="resident-record-link" aria-label={`View ${paymentDescription(payment)}, ${formatMoney(payment.amountMinor, payment.currency)}, ${new Date(payment.createdAt).toLocaleString('en-IN')}`} onClick={() => { setHistoryState((value) => ({...value,record:{kind:payment.kind,id:payment.id}})); setActiveTab('history') }}>{paymentDescription(payment)}</button><small>{new Date(payment.createdAt).toLocaleDateString('en-IN')}</small></div>
-                    <div className="align-right"><strong>{formatMoney(payment.amountMinor, payment.currency)}</strong><small>{paymentStatusLabel(payment)}</small></div>
-                  </div>
-                ))}
-              </section>
+              <ComplaintWorkspace onOpen={() => setActiveTab('complaints')} />
             </div>
           </div>
           </>
         )}
 
-        {activeTab === 'home' && home.data && <ComplaintWorkspace onOpen={() => setActiveTab('complaints')} />}
 
         {activeTab === 'payments' && <button type="button" className="secondary" onClick={() => { setHistoryState((value) => ({...value,record:null})); setActiveTab('history') }}>Payment history</button>}
         {activeTab === 'payments' && home.data && !submittedReport && (

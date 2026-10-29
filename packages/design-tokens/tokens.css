@@ -1,7 +1,7 @@
 /* Single shared design system. Edit the root tokens to rebrand the apps. */
 :root {
-  --myapartment-brand: #087e88;
-  --myapartment-brand-dark: #173a65;
+  --myapartment-brand: #3946a5;
+  --myapartment-brand-dark: #a05c86;
   --myapartment-brand-tint: #e7f4f5;
   --myapartment-canvas: #f5f7fa;
   --myapartment-surface: #fff;
@@ -436,4 +436,63 @@
 @media (max-width: 700px) {
   .pwa-install-page > h1 { font-size: 25px; }
   .pwa-install-card { padding: 22px; }
+}
+
+/* Resident desktop frame: navigation and header stay put while pages scroll. */
+.resident-navigation-search { position: relative; flex: 1; max-width: 420px; }
+.resident-navigation-search input { width: 100%; min-height: 44px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fafbfd; color: var(--ink); font-size: 13px; }
+.resident-navigation-results { position: absolute; inset: calc(100% + 6px) 0 auto; z-index: 40; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+.resident-navigation-results button { display: block; width: 100%; padding: 12px; text-align: left; border-radius: 6px; }
+.resident-navigation-results button:hover { background: var(--brand-tint); }
+.resident-shell .workspace-user-name strong, .resident-shell .workspace-user-name small { display: block; text-align: left; }
+.resident-balance-line { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #ffffff30; }
+.resident-offline-note { margin: 0; font-size: 11px; line-height: 1.7; color: #e2eff6; }
+.resident-home-right { display: grid; gap: 20px; min-width: 0; }
+.resident-report-shortcut { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 124px; text-align: left; color: var(--ink); }
+.resident-report-shortcut > span:nth-child(2) { flex: 1; }
+.resident-report-shortcut strong, .resident-report-shortcut small { display: block; }
+.resident-report-shortcut small { margin-top: 6px; font-size: 12px; }
+.resident-report-shortcut > svg { width: 38px; height: 38px; padding: 8px; border-radius: 12px; background: var(--brand-tint); color: var(--brand); }
+.resident-community-updates h2 { margin: 0; font-size: 18px; }
+.resident-community-updates .card-title-row { margin-bottom: 20px; }
+.resident-home-update { display: flex; align-items: center; gap: 14px; width: 100%; padding: 18px 0; border-bottom: 1px solid var(--border); text-align: left; }
+.resident-home-update:last-child { border-bottom: 0; }
+.resident-home-update > span:nth-child(2) { min-width: 0; flex: 1; }
+.resident-home-update strong, .resident-home-update small { display: block; }
+.resident-home-update small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 6px; font-size: 12px; }
+.resident-home-update time { display: grid; place-items: center; width: 48px; min-height: 48px; flex-shrink: 0; padding: 6px; border-radius: 12px; background: var(--brand-tint); color: var(--brand); font-size: 12px; font-weight: 700; }
+@media (min-width: 701px) {
+  .dashboard-shell.blue-teal-shell.resident-shell { height: 100dvh; min-height: 0; overflow: hidden; }
+  .dashboard-shell.blue-teal-shell.resident-shell > .resident-sidebar { position: relative; height: 100%; min-height: 0; overflow-y: auto; }
+  .dashboard-shell.blue-teal-shell.resident-shell > .content-panel { display: grid; grid-template-rows: var(--workspace-header-height) minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+  .blue-teal-shell.resident-shell .workspace-topbar { position: relative; z-index: 30; }
+  .blue-teal-shell.resident-shell .resident-content-body { width: 100%; max-width: none; min-height: 0; margin: 0; padding: 30px 32px 44px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .blue-teal-shell.resident-shell .resident-content-body > .topbar { max-width: 1060px; margin-bottom: 28px; }
+  .blue-teal-shell.resident-shell[data-active-tab='home'] .resident-top-actions { display: none; }
+  .blue-teal-shell.resident-shell .resident-sidebar .nav-item { border-left: 3px solid transparent; }
+  .blue-teal-shell.resident-shell .resident-sidebar .nav-item.active { border-left-color: var(--brand); }
+  .blue-teal-shell.resident-shell[data-active-tab='home'] .resident-content-body > .stack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .blue-teal-shell.resident-shell .resident-due-hero { grid-column: 1; grid-row: 1; background: linear-gradient(115deg, #a05c86, #3946a5); }
+  .blue-teal-shell.resident-shell .resident-home-right { grid-column: 2; grid-row: 1 / span 2; }
+  .blue-teal-shell.resident-shell[data-active-tab='home'] .resident-content-body > .stack > .grid-two { grid-column: 1; grid-row: 2; }
+  .blue-teal-shell.resident-shell .resident-due-hero .eyebrow { color: white; font-size: 14px; letter-spacing: 0; text-transform: none; }
+  .blue-teal-shell.resident-shell .resident-due-hero .hero-meta { display: grid; gap: 0; }
+  .blue-teal-shell.resident-shell .resident-due-hero .hero-meta .primary { margin-bottom: 12px; }
+}
+@media (min-width: 701px) and (max-width: 900px) {
+  .blue-teal-shell.resident-shell[data-active-tab='home'] .resident-content-body > .stack { grid-template-columns: 1fr; }
+  .blue-teal-shell.resident-shell .resident-home-right { grid-column: 1; grid-row: 2; }
+  .blue-teal-shell.resident-shell[data-active-tab='home'] .resident-content-body > .stack > .grid-two { grid-row: 3; }
+  .resident-shell .workspace-user-name { display: none; }
+}
+@media (max-width: 700px) {
+  .resident-navigation-search { max-width: 240px; }
+  .resident-navigation-search input { font-size: 12px; }
+  .resident-home-right { grid-column: 1; }
+}
+
+.resident-shell .resident-due-hero { position: relative; }
+.resident-home-due-date { display: inline-block; margin-bottom: 12px; padding: 5px 9px; border-radius: 999px; background: var(--warning-tint); color: var(--warning); font-size: 11px; font-weight: 700; }
+@media (min-width: 1100px) {
+  .resident-home-due-date { float: right; margin-left: 12px; }
 }
