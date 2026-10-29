@@ -7,7 +7,7 @@ Do not invent NestJS, Prisma migrations, Flutter, fake payments, or job processo
 ## Layout
 
 ```
-apps/login-web | resident-web | admin-web | operator-web | api | worker
+apps/resident-web | admin-web | operator-web | api | worker
 packages/domain application contracts api-client shared config auth-types
 packages/ui  app-platform (locales en/te)  design-tokens
 infrastructure/ports adapters  proxy/nginx.conf
@@ -16,6 +16,13 @@ docker/  compose.yaml  compose.dev.yaml
 ```
 
 Local how-to: [docs/local-setup.md](docs/local-setup.md). System: [docs/architecture.md](docs/architecture.md). Gates: [docs/security-and-ops.md](docs/security-and-ops.md). HTML frames (not product truth): `ui-prototype/ui_design_prototype/myapartment-screen-designs`.
+
+Required development baseline and checklist review:
+[docs/security-development-baseline.md](docs/security-development-baseline.md).
+Follow its future-change rules for validation, tenant/entity authorization, CSRF,
+private uploads, audit, idempotency and caching. Its open gates are requirements,
+not implemented capabilities. Validate new/changed external inputs server-side
+with Zod; preserve existing domain checks and avoid unrelated rewrites.
 
 Minutes of Meeting: [feature details](docs/minutes-of-meeting-plan.md). Admin drafts/review/publication; resident latest/history. Published notes and attendance snapshots are immutable. Use resident UUIDs for selection; block/flat numbers are display labels, not authorization. Requires tenant migration `035`.
 

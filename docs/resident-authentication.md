@@ -12,6 +12,7 @@ Switching providers creates independent identities and requires fresh resident o
 Browser requests stay on the resident origin. The service owns Better Auth, email OTP, passkeys and session tables.
 Six digit OTPs expire after five minutes, allow five attempts, and are stored hashed. Resend delivers codes.
 Database-backed IP rate limits and an atomic per-address resend cooldown are shared across instances.
+Read-only `/get-session` checks are exempt from the authentication attempt limiter because every resident API request validates its session through that endpoint. Sign-in, OTP and QR limits remain enabled.
 Successful OTP can create an identity, but grants **no tenant access**. The original seven-day, single-use
 invitation still requires matching verified email and explicit acceptance. Flat/block labels are not authorization.
 

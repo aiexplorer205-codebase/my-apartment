@@ -19,7 +19,7 @@ cp .env.example .env
 
 ## Auth0
 
-Create **three Regular Web Applications** (Resident, Admin, Operator) in one Auth0 tenant. Login web only lists app choices and does not need an Auth0 application.
+Create **three Regular Web Applications** (Resident, Admin, Operator) in one Auth0 tenant.
 
 Enable the Email connection (`email`) and the Passwordless OTP grant on Resident and Admin. Set **Organization Usage** to **No Organization**. MyApartment stores tenants and memberships in its own databases.
 
@@ -44,7 +44,7 @@ Optional: an Auth0 Post Login Action that denies operator-client logins unless `
 
 ## Compose
 
-Default host ports: Login `3099`, Resident `3098`, Admin `3100`, Operator `3101`, API `4101`, Worker `4110`, PostgreSQL `5434`, Redis `6381`, proxy `8080`. Inside Compose, Postgres is `postgres:5432` and Redis is `redis:6379`. Keep `POSTGRES_*_URL` and `REDIS_URL` on those service names, not `localhost`.
+Default host ports: Resident `3098`, Admin `3100`, Operator `3101`, API `4101`, Worker `4110`, PostgreSQL `5434`, Redis `6381`, proxy `8080`. Inside Compose, Postgres is `postgres:5432` and Redis is `redis:6379`. Keep `POSTGRES_*_URL` and `REDIS_URL` on those service names, not `localhost`.
 
 ```sh
 docker compose config --quiet
@@ -58,11 +58,14 @@ Hot reload:
 docker compose -f compose.yaml -f compose.dev.yaml up -d --build --wait
 ```
 
+Open Resident at `http://localhost:3098` or Admin at `http://localhost:3100`
+(the admin root redirects to `/dashboard`). Each app provides its own sign-in.
+
 A local `pnpm --filter @block9/admin-web build` does not update a running image. Rebuild the service container after Dockerfile or dependency changes.
 
-Set public origins (`LOGIN_WEB_PUBLIC_URL`, `RESIDENT_WEB_PUBLIC_URL`, `ADMIN_WEB_PUBLIC_URL`, `OPERATOR_WEB_PUBLIC_URL`) to the same values as Auth0 allowlists. Invitation emails use those URLs. CORS must include the authenticated app origins.
+Set public origins (`RESIDENT_WEB_PUBLIC_URL`, `ADMIN_WEB_PUBLIC_URL`, `OPERATOR_WEB_PUBLIC_URL`) to the same values as Auth0 allowlists. Invitation emails use those URLs. CORS must include the authenticated app origins.
 
-Optional hosts-file routing through the proxy on port 8080 (`login.myapartment.local`, `app.myapartment.local`, `admin.myapartment.local`, `ops.myapartment.local`, `api.myapartment.local`). Loopback ports still work.
+Optional hosts-file routing through the proxy on port 8080 (`app.myapartment.local`, `admin.myapartment.local`, `ops.myapartment.local`, `api.myapartment.local`). Loopback ports still work.
 
 Firebase and Filebase variables in `.env.example` are unused by current flows.
 
@@ -110,7 +113,7 @@ curl --fail http://localhost:4101/openapi.json
 curl --fail http://localhost:4110/health
 ```
 
-Web health: `http://localhost:3098/api/v1/health`, `http://localhost:3099/api/v1/health`, `http://localhost:3100/api/v1/health`, `http://localhost:3101/api/v1/health`. Health is not Auth0 or tenant-authorization proof.
+Web health: `http://localhost:3098/api/v1/health`, `http://localhost:3100/api/v1/health`, `http://localhost:3101/api/v1/health`. Health is not Auth0 or tenant-authorization proof.
 
 `docker compose down` keeps volumes. `docker compose down --volumes` deletes local Postgres and Redis data.
 

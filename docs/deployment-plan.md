@@ -109,7 +109,6 @@ Recommended domains:
 app.example.in       resident web
 admin.example.in     admin web
 ops.example.in       operator web, private/WAF/Tailscale access
-login.example.in     login chooser
 api.example.in       API
 ```
 

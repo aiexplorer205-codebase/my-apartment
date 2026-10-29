@@ -53,7 +53,12 @@ export const auth = betterAuth({
     defaultCookieAttributes: { httpOnly: true, sameSite: 'lax', path: '/' },
     ipAddress: { ipAddressHeaders: ['x-resident-client-ip'] },
   },
-  rateLimit: { enabled: true, storage: 'database', modelName: 'resident_auth_rate_limit', window: 60, max: 60 },
+  rateLimit: {
+    enabled: true, storage: 'database', modelName: 'resident_auth_rate_limit', window: 60, max: 60,
+    // Every resident API request validates its cookie through this read-only endpoint.
+    // Keep authentication attempts limited without throttling normal session checks.
+    customRules: { '/get-session': false },
+  },
   plugins: [
     emailOTP({
       otpLength: 6, expiresIn: 300, allowedAttempts: 5, storeOTP: 'hashed',

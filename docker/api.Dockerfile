@@ -10,7 +10,6 @@ USER node
 COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --chown=node:node apps/admin-web/package.json ./apps/admin-web/
 COPY --chown=node:node apps/api/package.json ./apps/api/
-COPY --chown=node:node apps/login-web/package.json ./apps/login-web/
 COPY --chown=node:node apps/operator-web/package.json ./apps/operator-web/
 COPY --chown=node:node apps/resident-web/package.json ./apps/resident-web/
 COPY --chown=node:node apps/resident-auth/package.json ./apps/resident-auth/

@@ -47,7 +47,6 @@ Primary source map:
 | `apps/admin-web/src/lib/auth-ui.tsx`, `apps/resident-web/src/lib/auth-ui.tsx` | Email OTP, workspace picker, access/error states |
 | `apps/admin-web/src/app/(auth)/invite/page.tsx` | Admin invitation lookup, email matching, acceptance |
 | `apps/resident-web/src/app/resident-invite/page.tsx` | Resident invitation, explicit acceptance, future start date |
-| `apps/login-web/src/features/sign-in/sign-in-screen.tsx` | Shared role entry linking to separate apps |
 | `apps/api/src/index.ts`, `manual-payments.ts`, `resident-invitations.ts`, `billing-calculations.ts` | Persisted operations and server-side rules |
 | `apps/{admin-web,resident-web}/src/app/manifest.ts` | Separate standalone manifests with SVG icons |
 | `apps/resident-web/public/sw.js`, `src/app/pwa-registration.tsx` | Resident registration; no fetch caching/offline data |

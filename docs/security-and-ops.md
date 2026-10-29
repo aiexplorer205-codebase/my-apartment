@@ -2,13 +2,16 @@
 
 This is a testable local product, not a production-supported release. Do not deploy until the gates below are owned and verified.
 
+See the [security checklist assessment and required development baseline](security-development-baseline.md)
+for source evidence, gaps and acceptance criteria reviewed on 2026-10-29.
+
 ## Invariants (do not weaken)
 
 - Never commit secrets, `.env`, tokens, database locators, or real resident data.
 - Parameterized SQL only. Tenant repositories use the scoped shared-database interface bound to server-side `TenantContext`, with transaction-local RLS. Runtime roles cannot own tables or bypass RLS.
 - UI visibility is not authorization. Enforce role and membership on every API read/write.
 - Operator access fails closed unless `OPERATOR_IDS` lists the exact Auth0 `sub`.
-- Auth0 OTP is the identity proof. Do not accept a second OTP issuer or skip invitation acceptance.
+- Admin/operator identity uses Auth0. Residents use the explicitly configured Auth0 or Better Auth provider; see [resident authentication](resident-authentication.md). Do not invent another OTP issuer or skip invitation acceptance.
 - Do not fake payment success, checkout, or worker job completion.
 - Invitation links are single-use and expire after seven days; delivery is email only.
 - Minutes of Meeting drafts are admin-only. Published notes/attendance snapshots are immutable; resident responses include attendee names and block/flat labels but no contact details, internal attendee IDs, or publisher subjects. Attendance never grants access.
@@ -20,6 +23,8 @@ This is a testable local product, not a production-supported release. Do not dep
 
 See [SECURITY.md](../SECURITY.md). Do not file public issues with exploit details, credentials, or resident data.
 
+Pilot configuration and remaining evidence: [pilot release gates](pilot-release-gates.md).
+
 ## Production gates (open)
 
 | Gate | Current | Required before production |
@@ -27,13 +32,13 @@ See [SECURITY.md](../SECURITY.md). Do not file public issues with exploit detail
 | Payment provider and settlement | Checkout disabled; `PaymentPort` unused | Owner-approved provider, merchant model, webhooks, refunds |
 | SMS / WhatsApp OTP | Disabled | Auth0-compatible adapter, consent, abuse controls |
 | Operator private access | Method not chosen | Identity-aware or private network path |
-| Backups / RPO / RTO / retention | None committed | Encrypted backups, restore evidence, legal hold |
+| Backups / RPO / RTO / retention | Encrypted two-database backup script added; schedule and restore unverified | Encrypted backups of both databases, roles and ledgers; restore evidence, retention and legal-hold policy |
 | Custom domains | Not supported | Host routing policy |
 | Campaigns / ads | Operator UI stub | Policy and implementation |
 | Report exports | Admin reports placeholder | Tenant-scoped export |
 | Support access to tenant data | Default deny; no elevation tool | Time-limited audited access if ever allowed |
 | Worker / queues | Health only | Processors only behind ports, with retries and poison handling |
-| Object storage / push | Filebase / FCM env unused | Per-environment resources behind ports |
+| Object storage / push | Private S3-compatible complaint photo flow implemented; push absent | Verify private per-environment storage, lifecycle/CORS/cleanup; separately review push if needed |
 | CI/CD production | Foundation CI for PRs | Named approver, rollback owner, secret manager |
 | Paid cloud fallback | Not permitted without explicit approval | Written approval |
 

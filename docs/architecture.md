@@ -4,11 +4,10 @@ MyApartment by BLOCK9 is a multi-tenant apartment operations product for India (
 
 ## Runtime
 
-TypeScript pnpm/Turbo monorepo. Four Next.js apps, one Node HTTP API, a worker stub, PostgreSQL, Redis.
+TypeScript pnpm/Turbo monorepo. Three Next.js apps, one Node HTTP API, a worker stub, PostgreSQL, Redis.
 
 | Piece | Path | Role |
 | --- | --- | --- |
-| Login | `apps/login-web` | App chooser; no Auth0 session |
 | Resident | `apps/resident-web` | PWA: home, invoices, offline payment report, notices/polls, complaints, profile |
 | Admin | `apps/admin-web` | Property setup, residents, billing, collections, accounts, complaints, maintenance, communications |
 | Operator | `apps/operator-web` | Platform overview, org onboarding/lifecycle, audit list |
@@ -81,6 +80,9 @@ See [shared-database-operations.md](./shared-database-operations.md) for setup,
 migration history, tenant export/restore, and verification.
 
 ## Auth and invitations
+
+Open the resident app directly at `/`, the admin app at `/` (redirects to
+`/dashboard`), or the operator app at `/login`. Each app handles its own sign-in.
 
 - API validates JWT issuer, audience, signature/JWKS, and expiry.
 - Resident and admin sign-in: Auth0 email OTP, embedded in each app.

@@ -3,8 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "exports": {
-    "./tokens.css": "./tokens.css",
-    "./prototype.css": "./prototype.css",
-    "./workspace.css": "./workspace.css"
+    "./tokens.css": "./tokens.css"
   }
 }

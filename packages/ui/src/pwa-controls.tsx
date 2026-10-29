@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 type InstallPrompt = globalThis.Event & {
   prompt: () => Promise<void>
@@ -9,7 +10,8 @@ type InstallPrompt = globalThis.Event & {
 
 /** Network-only private app: never caches authenticated pages or queues writes. */
 export function PwaControls({ appName = 'MyApartment' }: { appName?: string }) {
-  const controls=useRef<globalThis.HTMLDetailsElement>(null)
+  const [sidebarTarget, setSidebarTarget] = useState<globalThis.HTMLElement | null>(null)
+  const [pageTarget, setPageTarget] = useState<globalThis.HTMLElement | null>(null)
   const [online, setOnline] = useState(true)
   const [reconnected, setReconnected] = useState(false)
   const [installed, setInstalled] = useState(false)
@@ -17,6 +19,22 @@ export function PwaControls({ appName = 'MyApartment' }: { appName?: string }) {
   const [waiting, setWaiting] = useState<globalThis.ServiceWorker | null>(null)
   const [installing, setInstalling] = useState(false)
   const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 701px)')
+    const syncTarget = () => {
+      setSidebarTarget(desktop.matches ? document.querySelector<globalThis.HTMLElement>('[data-app-install-slot]') : null)
+      setPageTarget(document.querySelector<globalThis.HTMLElement>('[data-app-install-page]'))
+    }
+    syncTarget()
+    const observer = new globalThis.MutationObserver(syncTarget)
+    observer.observe(document.body, { childList: true, subtree: true })
+    desktop.addEventListener('change', syncTarget)
+    return () => {
+      observer.disconnect()
+      desktop.removeEventListener('change', syncTarget)
+    }
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -37,7 +55,7 @@ export function PwaControls({ appName = 'MyApartment' }: { appName?: string }) {
       candidate = registration?.installing ?? null
       candidate?.addEventListener('statechange', stateChanged)
     }
-    const openInstall=()=>{if(controls.current){controls.current.open=true;controls.current.scrollIntoView({block:'start'});controls.current.querySelector('summary')?.focus()}}
+    const openInstall = () => { window.dispatchEvent(new globalThis.Event('myapartment:show-install-page')) }
     window.addEventListener('myapartment:open-install',openInstall)
     window.addEventListener('offline', offline)
     window.addEventListener('online', connected)
@@ -86,14 +104,36 @@ export function PwaControls({ appName = 'MyApartment' }: { appName?: string }) {
     waiting?.postMessage({ type: 'ACTIVATE_UPDATE' })
   }
 
-  return <>
-    {!online && <div className="pwa-status" role="alert"><p>You’re offline. Reconnect to view current records or save changes. If a save was interrupted, check the record before trying again.</p></div>}
-    {reconnected && <div className="pwa-status" role="status"><p>Connection restored. Refresh the current view to check the latest records.</p><button type="button" onClick={() => setReconnected(false)}>Dismiss</button></div>}
-    <details ref={controls} className="pwa-controls">
-      <summary>{waiting ? 'App update available' : installed ? 'App installed · connection and updates' : `Install ${appName}`}</summary>
+  const installControls = (
+    <section className="pwa-install-actions" aria-label="Installation and updates">
       {installed ? <p>{appName} is running as an installed app. Financial records and private information require a connection.</p> : installPrompt ? <><p>Add {appName} to your home screen for quick access.</p><button className="primary" type="button" disabled={installing || !online} onClick={() => void install()}>{installing ? 'Opening installer…' : 'Install app'}</button></> : <p>On iPhone or iPad, open this app in Safari, choose Share, then Add to Home Screen. In other supported browsers, use the browser menu’s Install app or Add to Home Screen option. Availability depends on your browser and device.</p>}
       {waiting && <><p>A new version is ready. Finish your current task before updating.</p><button className="primary" type="button" onClick={update}>Update and reload</button></>}
       {message && <p role="status">{message}</p>}
-    </details>
+    </section>
+  )
+
+  const installEntry = <button className={`pwa-install-entry${sidebarTarget ? ' pwa-sidebar-entry' : ''}`} type="button" onClick={() => window.dispatchEvent(new globalThis.Event('myapartment:show-install-page'))}>{waiting ? 'App update available' : installed ? 'App installed' : 'Install app'}</button>
+
+  return <>
+    {!online && <div className="pwa-status" role="alert"><p>You’re offline. Reconnect to view current records or save changes. If a save was interrupted, check the record before trying again.</p></div>}
+    {reconnected && <div className="pwa-status" role="status"><p>Connection restored. Refresh the current view to check the latest records.</p><button type="button" onClick={() => setReconnected(false)}>Dismiss</button></div>}
+    {sidebarTarget ? createPortal(installEntry, sidebarTarget) : installEntry}
+    {pageTarget && createPortal(installControls, pageTarget)}
   </>
+}
+
+/** App-owned installation screen; the persistent controls supply browser state. */
+export function PwaInstallPage({ onBack }: { onBack: () => void }) {
+  const heading = useRef<globalThis.HTMLHeadingElement>(null)
+  useEffect(() => { heading.current?.focus() }, [])
+  return <section className="pwa-install-page">
+    <button className="pwa-install-back" type="button" onClick={onBack}>Back</button>
+    <h1 ref={heading} tabIndex={-1}>Add to Home Screen</h1>
+    <div className="pwa-install-card">
+      <img className="pwa-install-icon" src="/icons/block9.svg" alt="" width={64} height={64} />
+      <h2>Your community, one tap away</h2>
+      <p>Add this app to your home screen for quick access. Installation is optional.</p>
+      <div data-app-install-page />
+    </div>
+  </section>
 }

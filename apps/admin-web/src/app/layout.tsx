@@ -1,6 +1,6 @@
 import './globals.css'
 import './admin-reference.css'
-import '@block9/design-tokens/workspace.css'
+import '@block9/design-tokens/tokens.css'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
 import { I18nProvider, getAppConfig } from '@block9/app-platform'

@@ -6,6 +6,9 @@ const API_BASE_URL = (process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_AP
 const PUBLIC_PREFIX = '/v1/public/'
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  if (!['GET', 'HEAD'].includes(request.method) && request.headers.get('origin') !== new URL(process.env.APP_BASE_URL ?? 'http://localhost:3101').origin) {
+    return NextResponse.json({ message: 'Request was not accepted' }, { status: 403, headers: { 'cache-control': 'no-store' } })
+  }
   const { path } = await context.params
   const apiPath = `/${path.join('/')}`
   const incomingUrl = new URL(request.url)
@@ -25,10 +28,30 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     }
   }
 
-  const body = ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer()
-  const upstream = await globalThis.fetch(targetUrl, { method: request.method, headers, body, cache: 'no-store' })
+  let body:ArrayBuffer|undefined
+  if(!['GET','HEAD'].includes(request.method)){
+    const maximumBytes=1024*1024
+    if(Number(request.headers.get('content-length')??0)>maximumBytes)return NextResponse.json({message:'The request body is too large'},{status:413,headers:{'cache-control':'no-store'}})
+    const reader=request.body?.getReader(),chunks:Uint8Array[]=[]
+    let size=0
+    if(reader)while(true){
+      const chunk=await reader.read();if(chunk.done)break
+      size+=chunk.value.length
+      if(size>maximumBytes){await reader.cancel();return NextResponse.json({message:'The request body is too large'},{status:413,headers:{'cache-control':'no-store'}})}
+      chunks.push(chunk.value)
+    }
+    const bytes=new Uint8Array(size);let offset=0
+    for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length}
+    body=bytes.buffer
+  }
+  let upstream: globalThis.Response
+  try {
+    upstream = await globalThis.fetch(targetUrl, { method: request.method, headers, body, cache: 'no-store', redirect: 'error', signal: globalThis.AbortSignal.timeout(15_000) })
+  } catch {
+    return NextResponse.json({ message: 'Service is temporarily unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } })
+  }
   const responseHeaders = new globalThis.Headers()
-  for (const name of ['content-type', 'retry-after']) {
+  for (const name of ['x-request-id', 'content-type', 'retry-after']) {
     const value = upstream.headers.get(name)
     if (value) responseHeaders.set(name, value)
   }

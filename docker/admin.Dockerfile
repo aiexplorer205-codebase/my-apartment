@@ -10,7 +10,6 @@ USER node
 COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --chown=node:node apps/admin-web/package.json ./apps/admin-web/
 COPY --chown=node:node apps/api/package.json ./apps/api/
-COPY --chown=node:node apps/login-web/package.json ./apps/login-web/
 COPY --chown=node:node apps/operator-web/package.json ./apps/operator-web/
 COPY --chown=node:node apps/resident-web/package.json ./apps/resident-web/
 COPY --chown=node:node apps/resident-auth/package.json ./apps/resident-auth/
@@ -47,6 +46,10 @@ EXPOSE 3000
 CMD ["node", "node_modules/next/dist/bin/next", "dev", "-H", "0.0.0.0", "-p", "3000"]
 
 FROM base AS builder
+ARG WEB_HSTS=false
+ENV WEB_HSTS=$WEB_HSTS
+ARG PHOTO_STORAGE_ORIGIN
+ENV PHOTO_STORAGE_ORIGIN=$PHOTO_STORAGE_ORIGIN
 RUN pnpm --filter @block9/admin-web run build
 
 FROM node:22-alpine AS production

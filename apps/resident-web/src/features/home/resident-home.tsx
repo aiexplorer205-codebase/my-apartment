@@ -11,7 +11,7 @@ import { AuthBoundary, LoadState, TenantWorkspacePicker } from '../../lib/auth-u
 import { useApiPost, useApiQuery } from '../../lib/use-api'
 import { useResidentAuth } from '../../app/auth-provider'
 import { getAppConfig, useTranslation, LanguageSwitcher } from '@block9/app-platform'
-import { useAppMessages } from '@block9/ui'
+import { PwaInstallPage, useAppMessages } from '@block9/ui'
 
 type Payment = {
   kind: 'report' | 'credit' | 'adjustment' | 'adjustment_credit' | 'refund'
@@ -74,7 +74,7 @@ type ResidentHome = {
 
 type ResidentNotice = Omit<Notice, 'publishedAt'> & { createdAt: string; channel: string; startsAt: string; endsAt: string | null }
 type ResidentPoll = { id:string; question:string; startsAt:string; endsAt:string; resultsVisibleUntil:string; resultsRetentionDays:number; status:string; anonymous:boolean; showResultsLive:boolean; hasVoted:boolean; myOptionId:string|null; canChangeVote:boolean; isLive:boolean; options:Array<{id:string;label:string}>; results:Array<{id:string;label:string;votes:number}>|null; voters:Array<{full_name:string;unit:string;option:string}> }
-type ActiveTab = 'meetingMinutes' | 'complaints' | 'home' | 'payments' | 'history' | 'notices' | 'profile'
+type ActiveTab = 'install' | 'meetingMinutes' | 'complaints' | 'home' | 'payments' | 'history' | 'notices' | 'profile'
 
 const residentNavigation: Array<{ tab: ActiveTab; label: string; navKey: string; icon: 'home' | 'wallet' | 'history' | 'bell' | 'user' }> = [
   { tab: 'home', label: 'Home', navKey: 'home', icon: 'home' },
@@ -115,6 +115,11 @@ function ResidentContent() {
   const { pushMessage } = useAppMessages()
   const { t } = useTranslation(['common', 'resident'])
   const [activeTab, setActiveTab] = useState<ActiveTab>('home')
+  useEffect(() => {
+    const openInstall = () => setActiveTab('install')
+    window.addEventListener('myapartment:show-install-page', openInstall)
+    return () => window.removeEventListener('myapartment:show-install-page', openInstall)
+  }, [])
   const [historyState, setHistoryState] = useState<PaymentHistoryState>({page:1,search:'',status:'all',period:'',record:null})
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
   const [submittingManualPayment, setSubmittingManualPayment] = useState(false)
@@ -286,9 +291,9 @@ function ResidentContent() {
 
 
   return (
-    <main className="dashboard-shell resident-shell" data-active-tab={activeTab} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={finishPull} onTouchCancel={cancelPull}>
+    <main className="dashboard-shell resident-shell blue-teal-shell" data-active-tab={activeTab} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={finishPull} onTouchCancel={cancelPull}>
       <aside className="sidebar resident-sidebar">
-        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></div>
+        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span><strong>{getAppConfig().application.productName}</strong><small>by BLOCK9</small></span></div>
         <div className="resident-sidebar-language" style={{ padding: '0 12px 8px 12px' }}>
           <LanguageSwitcher />
         </div>
@@ -310,8 +315,14 @@ function ResidentContent() {
             )
           })}
         </nav>
+        <div className="workspace-install-footer" data-app-install-slot />
       </aside>
       <section className="content-panel">
+        <header className="workspace-topbar">
+          <span className="workspace-community">{home.data?.brand.name ?? t('resident:workspace.yourCommunity', 'Your community')}</span>
+          <div className="workspace-user"><LanguageSwitcher /><button type="button" className="workspace-notifications" aria-label={t('common:navigation.updates', 'Updates')} onClick={() => setActiveTab('notices')}><ResidentNavIcon name="bell" />{unreadNoticeCount > 0 && <span>{unreadNoticeCount}</span>}</button><button type="button" className="workspace-user-button" onClick={() => setActiveTab('profile')} aria-label={t('common:navigation.profile', 'Profile')}><span className="workspace-avatar">{home.data?.profile.fullName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('') || '—'}</span><span className="workspace-user-name">{home.data?.profile.fullName}</span></button></div>
+        </header>
+        <div className="resident-content-body">
         <div className={`resident-pull-indicator${refreshing ? ' refreshing' : ''}`} style={{ height: refreshing ? 46 : pullDistance }} role="status" aria-live="polite" aria-hidden={!refreshing && pullDistance === 0}>
           {(refreshing || pullDistance > 0) && <><span className="resident-pull-spinner" />{refreshing ? t('common:messages.refreshing', 'Refreshing…') : pullDistance >= 58 ? t('common:messages.releaseToRefresh', 'Release to refresh') : t('common:messages.pullToRefresh', 'Pull to refresh')}</>}
         </div>
@@ -333,9 +344,9 @@ function ResidentContent() {
           <button type="button" aria-label={`Announcements${unreadNoticeCount ? `, ${unreadNoticeCount} unread` : ''}`} onClick={() => setActiveTab('notices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0" /></svg>{unreadNoticeCount > 0 && <i />}</button>
         </header>}
 
-        {!['profile','history','complaints','notices'].includes(activeTab) && <>
+        {!['profile','history','complaints','notices','install'].includes(activeTab) && <>
         <header className="topbar">
-          <div className="resident-heading"><div className="eyebrow">{home.data?.brand.name ?? t('resident:dashboard.brand', 'RESIDENT EXPERIENCE')}</div><h1>{t(`common:navigation.${activeNavigation.navKey}`, activeNavigation.label)}</h1><p>{t(`resident:dashboard.subtitle.${activeTab}`)}</p>{home.data?.brand.apartmentCode && <small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small>}</div>
+          <div className="resident-heading"><div className="eyebrow">{home.data?.brand.name ?? t('resident:dashboard.brand', 'RESIDENT EXPERIENCE')}</div><h1>{activeTab === 'home' ? `${greeting}, ${firstName}` : t(`common:navigation.${activeNavigation.navKey}`, activeNavigation.label)}</h1><p>{t(`resident:dashboard.subtitle.${activeTab}`)}</p>{home.data?.brand.apartmentCode && <small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small>}</div>
           <div className="resident-top-actions"><span className="resident-unit-chip">{home.data?.profile.unit ?? t('resident:dashboard.account', 'Resident account')}</span><button type="button" className="secondary" onClick={home.reload}>{t('common:actions.refresh', 'Refresh')}</button></div>
         </header>
         </>}
@@ -527,8 +538,11 @@ function ResidentContent() {
         {activeTab === 'meetingMinutes' && <ResidentMeetingMinutes />}
         {activeTab === 'notices' && <ResidentUpdatesWorkspace state={updatesState} setState={setUpdatesState} onRead={refreshUpdates}/>}
 
+        {activeTab === 'install' && <PwaInstallPage onBack={() => setActiveTab('home')} />}
+
         {activeTab === 'profile' && <ResidentProfileWorkspace data={profile.data} loading={profile.loading} error={profile.error} onRetry={profile.reload} onSaved={() => {profile.reload();home.reload()}} />}
 
+        </div>
       </section>
     </main>
   )

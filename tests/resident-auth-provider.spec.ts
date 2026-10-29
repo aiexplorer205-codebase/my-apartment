@@ -43,6 +43,12 @@ describe('resident provider boundaries', () => {
     fetch.mockResolvedValue(new Response('null'))
     await expect(authenticateResidentSession('resident-session.YQ')).rejects.toThrow('verified resident session')
   })
+  it('preserves throttling as a retryable response instead of rejecting the login', async () => {
+    vi.stubEnv('RESIDENT_AUTH_PROVIDER', 'better-auth')
+    vi.stubEnv('RESIDENT_AUTH_INTERNAL_URL', 'http://resident-auth:4120')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 429 })))
+    await expect(authenticateResidentSession('resident-session.YQ')).rejects.toMatchObject({ status: 429, code: 'rate_limited' })
+  })
   it('accepts a QR-enrolled passkey identity without claiming its email is verified', async () => {
     vi.stubEnv('RESIDENT_AUTH_PROVIDER', 'better-auth')
     vi.stubEnv('RESIDENT_AUTH_INTERNAL_URL', 'http://resident-auth:4120')

@@ -43,7 +43,7 @@ export function useAppMessages() {
   return context
 }
 
-export { PwaControls } from './pwa-controls'
+export { PwaControls, PwaInstallPage } from './pwa-controls'
 export { ComplaintHomeShortcut, Complaints, type ComplaintClient } from './complaints'
 export { WorkspaceBreadcrumb, WorkspaceStatusTabs, WorkspaceFilter } from './workspace-navigation'
 export { ReceiptReview } from './receipt-review'

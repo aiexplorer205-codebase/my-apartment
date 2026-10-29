@@ -130,25 +130,6 @@ services:
       retries: 12
       start_period: 20s
 
-  login-web:
-    build:
-      context: .
-      dockerfile: docker/login-web.Dockerfile
-    restart: unless-stopped
-    environment:
-      NODE_ENV: production
-      PORT: 3000
-      ADMIN_WEB_PUBLIC_URL: ${ADMIN_WEB_PUBLIC_URL:-http://localhost:3100}
-      RESIDENT_WEB_PUBLIC_URL: ${RESIDENT_WEB_PUBLIC_URL:-http://localhost:3098}
-    ports:
-      - '127.0.0.1:${LOGIN_WEB_PORT:-3099}:3000'
-    healthcheck:
-      test: ['CMD-SHELL', "node -e \"fetch('http://127.0.0.1:3000/api/v1/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
-
   resident-auth:
     build:
       context: .
@@ -178,6 +159,9 @@ services:
     build:
       context: .
       dockerfile: docker/resident-web.Dockerfile
+      args:
+        PHOTO_STORAGE_ORIGIN: ${PHOTO_STORAGE_ORIGIN:-}
+        WEB_HSTS: ${WEB_HSTS:-false}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -191,6 +175,8 @@ services:
       AUTH0_CLIENT_SECRET: ${AUTH0_RESIDENT_CLIENT_SECRET:-}
       AUTH0_SECRET: ${AUTH0_RESIDENT_SECRET:-replace-with-unique-32-byte-random-secret}
       APP_BASE_URL: ${RESIDENT_WEB_PUBLIC_URL:-http://localhost:3098}
+      PHOTO_STORAGE_ORIGIN: ${PHOTO_STORAGE_ORIGIN:-}
+      WEB_HSTS: ${WEB_HSTS:-false}
     depends_on:
       api:
         condition: service_healthy
@@ -207,6 +193,9 @@ services:
     build:
       context: .
       dockerfile: docker/admin.Dockerfile
+      args:
+        PHOTO_STORAGE_ORIGIN: ${PHOTO_STORAGE_ORIGIN:-}
+        WEB_HSTS: ${WEB_HSTS:-false}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -218,6 +207,8 @@ services:
       AUTH0_CLIENT_SECRET: ${AUTH0_ADMIN_CLIENT_SECRET:-}
       AUTH0_SECRET: ${AUTH0_ADMIN_SECRET:-replace-with-unique-32-byte-random-secret}
       APP_BASE_URL: ${ADMIN_WEB_PUBLIC_URL:-http://localhost:3100}
+      PHOTO_STORAGE_ORIGIN: ${PHOTO_STORAGE_ORIGIN:-}
+      WEB_HSTS: ${WEB_HSTS:-false}
       RESIDENT_WEB_PUBLIC_URL: ${RESIDENT_WEB_PUBLIC_URL:-http://localhost:3098}
     depends_on:
       api:
@@ -235,6 +226,9 @@ services:
     build:
       context: .
       dockerfile: docker/operator.Dockerfile
+      args:
+        PHOTO_STORAGE_ORIGIN: ${PHOTO_STORAGE_ORIGIN:-}
+        WEB_HSTS: ${WEB_HSTS:-false}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -246,6 +240,8 @@ services:
       AUTH0_CLIENT_SECRET: ${AUTH0_OPERATOR_CLIENT_SECRET:-}
       AUTH0_SECRET: ${AUTH0_OPERATOR_SECRET:-replace-with-unique-32-byte-random-secret}
       APP_BASE_URL: ${OPERATOR_WEB_PUBLIC_URL:-http://localhost:3101}
+      PHOTO_STORAGE_ORIGIN: ${PHOTO_STORAGE_ORIGIN:-}
+      WEB_HSTS: ${WEB_HSTS:-false}
       OPERATOR_WEB_PRIVATE_INGRESS: ${OPERATOR_WEB_PRIVATE_INGRESS:-true}
     depends_on:
       api:
@@ -265,7 +261,6 @@ services:
     volumes:
       - ./infrastructure/proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - login-web
       - resident-web
       - admin-web
       - operator-web

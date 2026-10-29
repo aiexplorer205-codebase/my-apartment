@@ -1,18 +1,5 @@
 # Development override only. Always combine with compose.yaml, which defines the services.
 services:
-  login-web:
-    build:
-      target: development
-    restart: "no"
-    environment:
-      NODE_ENV: development
-    command: ["node", "node_modules/next/dist/bin/next", "dev", "-H", "0.0.0.0", "-p", "3000"]
-    volumes:
-      - ./apps/login-web/src:/workspace/apps/login-web/src
-      - ./packages/auth-types:/workspace/packages/auth-types
-      - ./packages/api-client:/workspace/packages/api-client
-      - ./packages/design-tokens:/workspace/packages/design-tokens
-      - ./packages/ui:/workspace/packages/ui
   resident-web:
     build:
       target: development

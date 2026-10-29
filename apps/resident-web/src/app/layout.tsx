@@ -1,5 +1,5 @@
 import './globals.css'
-import '@block9/design-tokens/workspace.css'
+import '@block9/design-tokens/tokens.css'
 import { ResidentQrBanner } from '../lib/resident-qr-banner'
 import { residentAuthProvider } from '../lib/resident-auth-config'
 import type { ReactNode } from 'react'

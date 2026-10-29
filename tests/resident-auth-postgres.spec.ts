@@ -40,6 +40,15 @@ describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
     method: body ? 'POST' : 'GET', headers: { origin: 'http://localhost:3098', 'content-type': 'application/json', cookie: session, 'x-resident-client-ip': `192.0.2.${++requestNumber}` },
     body: body ? JSON.stringify(body) : undefined,
   }))
+  it('allows repeated session checks from the same IP without consuming the auth attempt limit', async () => {
+    for (let index = 0; index < 65; index++) {
+      const response = await service.auth.handler(new Request('http://localhost:3098/api/resident-auth/get-session', {
+        headers: { 'x-resident-client-ip': '192.0.2.250' },
+      }))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toBeNull()
+    }
+  })
   it('creates a verified identity only after OTP and stores a hash', async () => {
     const sent = await request('email-otp/send-verification-otp', { email: 'resident@example.test', type: 'sign-in' })
     expect(sent.status).toBe(200)

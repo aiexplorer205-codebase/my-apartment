@@ -29,6 +29,7 @@ export async function authenticateResidentSession(token: string) {
       redirect: 'error', signal: globalThis.AbortSignal.timeout(5000),
     })
   } catch { throw new ApiFault(503, 'dependency_unavailable', 'Resident authentication is temporarily unavailable') }
+  if (response.status === 429) throw new ApiFault(429, 'rate_limited', 'Resident authentication is busy. Please try again shortly.')
   if (!response.ok) throw new ApiFault(response.status >= 500 ? 503 : 401, response.status >= 500 ? 'dependency_unavailable' : 'unauthorized', 'Could not validate resident session')
   const result = await response.json() as { user?: { id?: unknown; email?: unknown; emailVerified?: unknown; qrEnrolled?: unknown }; session?: { expiresAt?: unknown } } | null
   if (!result?.user || typeof result.user.id !== 'string' || !result.user.id || typeof result.user.email !== 'string' || (result.user.emailVerified !== true && result.user.qrEnrolled !== true) || typeof result.session?.expiresAt !== 'string' || !(Date.parse(result.session.expiresAt) > Date.now())) {

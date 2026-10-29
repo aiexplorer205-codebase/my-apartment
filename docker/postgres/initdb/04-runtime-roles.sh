@@ -17,4 +17,5 @@ REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA block9_platform TO myapartment_platform;
 GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA block9_platform TO myapartment_platform;
 GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA block9_platform TO myapartment_platform;
+REVOKE UPDATE,DELETE,TRUNCATE ON block9_platform.platform_audit FROM myapartment_platform;
 SQL

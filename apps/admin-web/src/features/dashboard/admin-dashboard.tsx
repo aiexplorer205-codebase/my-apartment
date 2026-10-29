@@ -20,7 +20,7 @@ import { formValidationMessage } from '../../lib/form-validation'
 import { useApiPost, useApiQuery } from '../../lib/use-api'
 import { useAuth0 } from '../../app/auth-provider'
 import { getAppConfig, useTranslation, LanguageSwitcher } from '@block9/app-platform'
-import { ReceiptReview, useAppMessages, WorkspaceBreadcrumb } from '@block9/ui'
+import { PwaInstallPage, ReceiptReview, useAppMessages, WorkspaceBreadcrumb } from '@block9/ui'
 
 type AdminOverview = {
   tenantId: string
@@ -89,8 +89,13 @@ function AdminNavIcon({ name }: { name: AdminIconName }) {
 }
 
 function AdminContent() {
-  type Section = 'Minutes of Meeting' | 'Accounts' | 'More' | 'Maintenance' | 'Complaints' | 'Dashboard' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
+  type Section = 'Add to Home Screen' | 'Minutes of Meeting' | 'Accounts' | 'More' | 'Maintenance' | 'Complaints' | 'Dashboard' | 'Flats & Residents' | 'Announcements' | 'Polls' | 'Billing' | 'Collections' | 'Overdues' | 'Reports' | 'Settings'
   const [section, setSection] = useState<Section>('Dashboard')
+  useEffect(() => {
+    const openInstall = () => setSection('Add to Home Screen')
+    window.addEventListener('myapartment:show-install-page', openInstall)
+    return () => window.removeEventListener('myapartment:show-install-page', openInstall)
+  }, [])
   const [navigationSearch, setNavigationSearch] = useState('')
   const [expenseTaskId, setExpenseTaskId] = useState<string | undefined>(undefined)
   const [expenseComplaintId,setExpenseComplaintId]=useState<string|undefined>()
@@ -123,9 +128,10 @@ function AdminContent() {
   ] : []
 
   return (
-    <main className="dashboard-shell admin-shell admin-reference">
+    <main className="dashboard-shell admin-shell admin-reference blue-teal-shell">
       <aside className="sidebar">
-        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span><strong>{getAppConfig().application.productName}</strong></span></div>
+        <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span><strong>{getAppConfig().application.productName}</strong><small>{getAppConfig().application.adminName}</small></span></div>
+        <div className="blue-teal-workspace"><strong>{data?.organization ?? pageTitle}</strong>{data?.apartmentCode && <small>{data.apartmentCode}</small>}</div>
         {hasBlocks && <nav className="nav-list admin-nav" aria-label="Administrator navigation">
           {adminNavigation.map(({ label, navKey, icon, group }, index) => {
             const translatedLabel = navKey === 'overview' || navKey === 'flatsResidents' || navKey === 'announcements' || navKey === 'polls' ? label : t(`common:navigation.${navKey}`, label)
@@ -140,6 +146,7 @@ function AdminContent() {
             )
           })}
         </nav>}
+        <div className="workspace-install-footer" data-app-install-slot />
         <div className="sidebar-account admin-sidebar-footer">
           <span className="account-avatar" aria-hidden="true">{accountInitials}</span>
           <span className="admin-account-details"><strong title={accountName}>{accountName}</strong><small>{t('admin:header.shortRole', 'Admin')}</small></span>
@@ -158,21 +165,23 @@ function AdminContent() {
               {searchResults.length ? searchResults.map((item) => <button type="button" key={item.label} onClick={() => openSearchResult(item.label)}><AdminNavIcon name={item.icon} /><span>{item.navKey === 'overview' ? 'Dashboard' : t(`common:navigation.${item.navKey}`, item.label)}</span></button>) : <p role="status">No matching pages.</p>}
             </div>}
           </div>
+          <div className="workspace-user"><LanguageSwitcher /><span className="workspace-avatar" aria-hidden="true">{accountInitials}</span><span className="workspace-user-name">{accountName}</span></div>
           <details className="admin-header-notifications">
             <summary aria-label="Notifications" title="Notifications"><AdminNavIcon name="bell" /></summary>
             <div className="admin-notification-panel"><strong>Notifications</strong><p>A notification feed is not available yet.</p></div>
           </details>
         </header>
         <div className="admin-content-body">
-          {!(hasBlocks && ['Complaints', 'Maintenance', 'Collections', 'Overdues', 'Accounts'].includes(section)) && <div className="admin-page-heading">
+          {section !== 'Add to Home Screen' && !(hasBlocks && ['Complaints', 'Maintenance', 'Collections', 'Overdues', 'Accounts'].includes(section)) && <div className="admin-page-heading">
             <h1>{pageTitle}</h1>
             {data?.apartmentCode && <small className="admin-apartment-code">Apartment ID: {data.apartmentCode}</small>}
           </div>}
+        {section === 'Add to Home Screen' && <PwaInstallPage onBack={() => setSection('Dashboard')} />}
         {blockInventory.loading && <LoadState loading error={null} onRetry={blockInventory.reload} />}
         {blockInventory.error && <LoadState loading={false} error={blockInventory.error} onRetry={blockInventory.reload} />}
-        {needsInitialBlock && <ApartmentSetup initialSetup onComplete={() => { blockInventory.reload(); reload(); setSection('Flats & Residents') }} />}
+        {needsInitialBlock && section !== 'Add to Home Screen' && <ApartmentSetup initialSetup onComplete={() => { blockInventory.reload(); reload(); setSection('Flats & Residents') }} />}
         {hasBlocks && <>
-        {section === 'Dashboard' ? <>
+        {section === 'Add to Home Screen' ? null : section === 'Dashboard' ? <>
           <div className="admin-overview-heading">
             <div>
               <span className="eyebrow">{t('admin:overview.eyebrow', 'APARTMENT OPERATIONS')}</span>

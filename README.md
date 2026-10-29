@@ -38,7 +38,6 @@ Full Auth0 allowlists, migrations (including tenant `030`–`034` on the runner)
 
 | Service | URL |
 | --- | --- |
-| Login | http://localhost:3099 |
 | Resident | http://localhost:3098 |
 | Admin | http://localhost:3100 |
 | Operator (loopback) | http://localhost:3101 |
