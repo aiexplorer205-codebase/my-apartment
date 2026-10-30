@@ -14,6 +14,18 @@ describe('versioned API path boundaries',()=>{
     await expect(apiFetch('/v1/admin/meeting-minutes',{method:'POST'})).rejects.toMatchObject({status:400,message:'Choose attendees'})
     await expect(apiFetch('/v1/admin/meeting-minutes')).rejects.toBeInstanceOf(ApiRequestError)
   })
+  it('requests workspace recovery only for tenant unavailability, including private downloads',async()=>{
+    const dispatch=vi.fn();vi.stubGlobal('dispatchEvent',dispatch)
+    vi.stubGlobal('fetch',async()=>({ok:false,status:403,json:async()=>({error:'tenant_unavailable',message:'Apartment unavailable'})}))
+    await expect(apiFetch('/v1/tenant/home')).rejects.toMatchObject({status:403,code:'tenant_unavailable'})
+    await expect(apiFetchBlob('/v1/tenant/complaints/id/photos/photo')).rejects.toMatchObject({status:403,code:'tenant_unavailable'})
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    expect(dispatch.mock.calls[0][0].type).toBe('myapartment:tenant-unavailable')
+    dispatch.mockClear()
+    vi.stubGlobal('fetch',async()=>({ok:false,status:403,json:async()=>({error:'forbidden',message:'Wrong role'})}))
+    await expect(apiFetch('/v1/admin/buildings')).rejects.toThrow('Wrong role')
+    expect(dispatch).not.toHaveBeenCalled()
+  })
   it('rejects external, literal and encoded traversal paths before making a request',async()=>{
     const fetch=vi.fn();vi.stubGlobal('fetch',fetch)
     for(const path of ['https://example.test/v1/tenant/home','//example.test/v1/home','/v1/../auth/logout','/v1/%2e%2e/auth/logout','/v1/%5c..%5cauth/logout','/v1/%'])await expect(apiFetch(path)).rejects.toThrow('relative versioned')

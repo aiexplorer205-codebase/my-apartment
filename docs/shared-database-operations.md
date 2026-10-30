@@ -97,6 +97,34 @@ step: deleted identities retain a tombstone and cannot be resurrected by this to
 A schema-compatible new community identity requires a separate reviewed import,
 not an implicit identifier rewrite.
 
+## Tenant deactivation
+
+Operator deactivation changes only the selected apartment to `inactive`; identities,
+credentials, memberships and data remain available for reactivation. Admin and
+resident authorization excludes inactive apartments, including automatic selection.
+Admin invitation acceptance cannot reactivate an inactive or deleting apartment.
+
+Authorized API operations hold a shared platform lifecycle row lock until their
+handler finishes. Deactivation takes the exclusive row lock and atomically records
+the status change and audit event. It waits for existing operations; queued requests
+recheck status and fail closed. Resident QR registration uses a shared platform
+advisory lifecycle lock, also taken exclusively by the lifecycle action. Lock waits
+are bounded; a failed lifecycle request must be retried, not treated as completed.
+Repeated deactivate/reactivate requests for the resulting state are safe to retry.
+The lease pool permits up to ten additional platform connections per API replica;
+include those connections when sizing PostgreSQL capacity.
+
+Both web apps refresh workspace choices on focus and tenant-unavailable responses.
+Users keep their global session and can select another active apartment. Data
+already delivered to a browser cannot be recalled. Existing private photo read
+links can remain usable for their remaining lifetime (at most 60 seconds), and
+staging upload capabilities for at most five minutes; validation/attachment still
+requires active tenant authorization. Deactivation issues no new tenant capabilities.
+
+For isolated local database tests, set `MYAPARTMENT_TEST_DATABASE_PORT=55435`
+when the default test port is occupied. `scripts/test-database.sh` forwards
+Vitest filters through `pnpm run test`.
+
 ## Tenant deletion
 
 The authenticated operator lifecycle route marks the organization `deleting`

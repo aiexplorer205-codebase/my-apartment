@@ -1,7 +1,15 @@
-export type ApiErrorBody = { message?: string; code?: string }
+export type ApiErrorBody = { message?: string; code?: string; error?: string }
 
 export class ApiRequestError extends Error {
-  constructor(readonly status: number, message: string) { super(message); this.name = 'ApiRequestError' }
+  constructor(readonly status: number, message: string, readonly code?: string) { super(message); this.name = 'ApiRequestError' }
+}
+
+function requestError(status: number, payload: ApiErrorBody) {
+  const code = payload.error ?? payload.code
+  if (code === 'tenant_unavailable' && typeof globalThis.dispatchEvent === 'function') {
+    globalThis.dispatchEvent(new globalThis.Event('myapartment:tenant-unavailable'))
+  }
+  return new ApiRequestError(status, payload.message ?? `Request failed (${status})`, code)
 }
 
 function validatePath(path:string){
@@ -16,13 +24,13 @@ export async function apiFetch<T>(path: string, init: globalThis.RequestInit = {
   validatePath(path)
   const response = await globalThis.fetch(`/api/backend${path}`, { ...init, cache: 'no-store' })
   const payload = await response.json() as T & ApiErrorBody
-  if (!response.ok) throw new ApiRequestError(response.status, payload.message ?? `Request failed (${response.status})`)
+  if (!response.ok) throw requestError(response.status, payload)
   return payload
 }
 
 export async function apiFetchBlob(path:string,init:globalThis.RequestInit={}):Promise<globalThis.Blob>{
   validatePath(path)
   const response=await globalThis.fetch(`/api/backend${path}`,{...init,cache:'no-store'})
-  if(!response.ok){const payload=await response.json() as ApiErrorBody;throw new Error(payload.message??`Request failed (${response.status})`)}
+  if(!response.ok){const payload=await response.json() as ApiErrorBody;throw requestError(response.status, payload)}
   return response.blob()
 }

@@ -9,7 +9,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('platform audit 
   let control: Pool, owner: Pool
   beforeAll(async () => {
     const password = execFileSync('docker', ['exec', 'myapartment-schema-check-postgres-1', 'printenv', 'POSTGRES_PASSWORD'], { encoding: 'utf8' }).trim()
-    const url = new URL('postgresql://postgres@127.0.0.1:55434/postgres'); url.password = password
+    const url = new URL(`postgresql://postgres@127.0.0.1:${process.env.MYAPARTMENT_TEST_DATABASE_PORT ?? '55434'}/postgres`); url.password = password
     control = new Pool({ connectionString: url.toString() })
     await control.query(`CREATE DATABASE ${database}`)
     url.pathname = `/${database}`

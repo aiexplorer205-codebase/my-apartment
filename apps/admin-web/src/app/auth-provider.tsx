@@ -25,7 +25,12 @@ export function useAuth0() {
 }
 
 function SessionContext({ children }: { children: ReactNode }) {
-  const { data, isPending: isLoading } = adminAuth.useSession()
+  const { data, isPending } = adminAuth.useSession()
+  // Signed-out refetches also set isPending. Only the initial check should
+  // replace the page; later checks must preserve an in-progress OTP form.
+  const [sessionChecked, setSessionChecked] = useState(false)
+  useEffect(() => { if (!isPending) setSessionChecked(true) }, [isPending])
+  const isLoading = isPending && !sessionChecked
   const user = data?.user ? { ...data.user, sub: `betterauth-admin|${data.user.id}` } : undefined
   const [activeTenantId, setActiveTenantIdState] = useState<string | null>(null)
 

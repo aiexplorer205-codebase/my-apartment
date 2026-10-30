@@ -1,7 +1,9 @@
 import { Pool } from 'pg'
+import { ApiFault } from './api-fault.js'
 
 const tenantPools = new Map<string, Pool>()
 let platformPool: Pool | undefined
+let lifecycleAccessPool: Pool | undefined
 
 const reportPoolError = (service: string) => (error: Error) => {
   console.error(JSON.stringify({
@@ -30,6 +32,35 @@ export const getPlatformPool = (): Pool => {
     platformPool.on('error', reportPoolError('platform'))
   }
   return platformPool
+}
+
+/** Hold the platform lifecycle row for the entire authorized HTTP operation.
+ * Separate capacity avoids exhausting the platform query pool while leases are held.
+ * Status updates wait for existing operations; queued operations recheck after them.
+ */
+export const acquireTenantLifecycleAccess = async (tenantId: string): Promise<() => Promise<void>> => {
+  if (!lifecycleAccessPool) {
+    const connectionString = process.env.POSTGRES_PLATFORM_URL
+    if (!connectionString) throw new Error('POSTGRES_PLATFORM_URL is required')
+    lifecycleAccessPool = new Pool({ connectionString, max: 10, connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 30000, options: '-c search_path=block9_platform,public',
+      application_name: 'myapartment-api-lifecycle-access' })
+    lifecycleAccessPool.on('error', reportPoolError('lifecycle-access'))
+  }
+  const client = await lifecycleAccessPool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query("SET LOCAL lock_timeout = '10s'")
+    const result = await client.query<{ status: string }>('SELECT status FROM tenant_records WHERE tenant_id=$1 FOR SHARE', [tenantId])
+    if (result.rows[0]?.status !== 'active') throw new ApiFault(403, 'tenant_unavailable', 'This apartment is unavailable. Select another active apartment.')
+    return async () => {
+      try { await client.query('ROLLBACK'); client.release() }
+      catch { client.release(true) }
+    }
+  } catch (error) {
+    try { await client.query('ROLLBACK'); client.release() } catch { client.release(true) }
+    throw error
+  }
 }
 
 /** Minimal database interface shared by repositories and privileged test fixtures. */
@@ -120,7 +151,8 @@ export const deleteTenantData = async (tenantId: string): Promise<void> => {
 }
 
 export const closeDatabasePools = async (): Promise<void> => {
-  await Promise.all([platformPool?.end(), applicationPool?.end()])
+  await Promise.all([platformPool?.end(), applicationPool?.end(), lifecycleAccessPool?.end()])
+  lifecycleAccessPool = undefined
   platformPool = undefined
   applicationPool = undefined
 }

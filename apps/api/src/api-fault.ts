@@ -1,4 +1,4 @@
-export type ApiFaultCode = 'rate_limited' | 'gone' | 'unauthorized' | 'forbidden' | 'not_found' | 'configuration_error' | 'dependency_unavailable' | 'tenant_selection_required' | 'data_integrity_error' | 'invalid_request' | 'block_limit_reached' | 'flat_limit_reached'
+export type ApiFaultCode = 'rate_limited' | 'gone' | 'unauthorized' | 'forbidden' | 'not_found' | 'configuration_error' | 'dependency_unavailable' | 'tenant_selection_required' | 'tenant_unavailable' | 'data_integrity_error' | 'invalid_request' | 'block_limit_reached' | 'flat_limit_reached'
 
 export class ApiFault extends Error {
   constructor(readonly status: number, readonly code: ApiFaultCode, message: string) {

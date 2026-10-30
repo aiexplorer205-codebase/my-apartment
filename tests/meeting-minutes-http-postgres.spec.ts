@@ -23,7 +23,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Minutes of Meetin
   beforeAll(async()=>{
     for(const name of ['POSTGRES_TENANT_URL','POSTGRES_PLATFORM_URL','POSTGRES_MAINTENANCE_URL','AUTH0_ISSUER','AUTH0_AUDIENCE'])previous[name]=process.env[name]
     const password=execFileSync('docker',['compose','-p','myapartment-schema-check','exec','-T','postgres','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
-    const url=new URL('postgresql://postgres@127.0.0.1:55434/postgres');url.password=password
+    const url=new URL(`postgresql://postgres@127.0.0.1:${process.env.MYAPARTMENT_TEST_DATABASE_PORT ?? '55434'}/postgres`);url.password=password
     control=new Pool({connectionString:url.toString()})
     await control.query(`CREATE DATABASE "${platformName}" TEMPLATE template0`)
     url.pathname=`/${platformName}`;process.env.POSTGRES_PLATFORM_URL=url.toString();platform=new Pool({connectionString:url.toString(),options:'-c search_path=block9_platform,public'})

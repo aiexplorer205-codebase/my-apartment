@@ -12,7 +12,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('unused property
   beforeAll(async () => {
     previous = process.env.POSTGRES_TENANT_URL
     const password = execFileSync('docker', ['exec', 'myapartment-schema-check-postgres-1', 'printenv', 'POSTGRES_PASSWORD'], { encoding: 'utf8' }).trim()
-    const url = new URL('postgresql://postgres@127.0.0.1:55434/postgres'); url.password = password
+    const url = new URL(`postgresql://postgres@127.0.0.1:${process.env.MYAPARTMENT_TEST_DATABASE_PORT ?? '55434'}/postgres`); url.password = password
     process.env.POSTGRES_TENANT_URL = url.toString()
     control = getTenantPool('postgres')
     await control.query(`CREATE DATABASE "${database}" TEMPLATE template0`)

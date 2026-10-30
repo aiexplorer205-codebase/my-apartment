@@ -8,6 +8,9 @@ export const createResidentInvitationToken = (tenantId: string): { token: string
 export const hashResidentInvitationToken = (token: string): string =>
   createHash('sha256').update(token).digest('hex')
 
+export const createResidentInvitationUrl = (baseUrl: string, token: string, type: 'email' | 'qr'): string =>
+  `${baseUrl.replace(/\/$/, '')}/resident-invite?type=${type}&token=${encodeURIComponent(token)}`
+
 const escapeHtml = (value: string): string =>
   value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
 

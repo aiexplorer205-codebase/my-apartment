@@ -34,9 +34,9 @@ import type { HealthResponse, ApiErrorResponse, OpenApiBootstrap } from '@block9
 import { AuthorizationError, ValidationError } from '@block9/shared'
 import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from './billing-calculations.js'
 import { createAdminInvitationToken, hashAdminInvitationToken, sendAdminInvitationEmail } from './admin-invitations.js'
-import { createResidentInvitationToken, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
+import { createResidentInvitationToken, createResidentInvitationUrl, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
 import { provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
-import { checkDatabaseReadiness, deleteTenantData, getPlatformPool, getTenantPool } from './persistence.js'
+import { acquireTenantLifecycleAccess, checkDatabaseReadiness, deleteTenantData, getPlatformPool, getTenantPool } from './persistence.js'
 
 interface AuthenticatedSubject {
   provider: 'auth0' | 'better-auth' | 'better-auth-admin'
@@ -115,11 +115,16 @@ const authenticate = async (request: IncomingMessage): Promise<AuthenticatedSubj
   }
 }
 
+const tenantLifecycleReleases = new WeakMap<IncomingMessage, () => Promise<void>>()
+const holdTenantLifecycleAccess = async (request: IncomingMessage, tenantId: string) => {
+  if (!tenantLifecycleReleases.has(request)) tenantLifecycleReleases.set(request, await acquireTenantLifecycleAccess(tenantId))
+}
+
 const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: TenantAccess['role']): Promise<TenantAccess> => {
   const identity = await authenticate(request)
   const requestedTenantId = request.headers['x-tenant-id']
-  if (requestedTenantId !== undefined && typeof requestedTenantId !== 'string') {
-    throw new ApiFault(400, 'invalid_request', 'Only one tenant selection may be provided')
+  if (requestedTenantId !== undefined && !z.uuid().safeParse(requestedTenantId).success) {
+    throw new ApiFault(400, 'invalid_request', 'A single valid tenant selection is required')
   }
   let organizationTenantId: string | null = null
   if (identity.organizationId) {
@@ -156,7 +161,7 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
             ) AS has_accepted_admin_invitation
      FROM tenant_memberships tm
      JOIN tenant_records tr ON tr.tenant_id = tm.tenant_id
-     WHERE tm.subject = $1 AND tm.status = 'active'
+     WHERE tm.subject = $1 AND tm.status = 'active' AND tr.status = 'active'
        AND ($2::text IS NULL OR tr.tenant_id = $2)
      ORDER BY tm.created_at ASC`,
     [identity.subject, organizationTenantId],
@@ -169,7 +174,7 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
     : result.rows[0]
 
   if (!membership || membership.tenant_status !== 'active') {
-    throw new ApiFault(403, 'forbidden', 'No active tenant membership is available for this account')
+    throw new ApiFault(403, 'tenant_unavailable', 'No active tenant membership is available for this account')
   }
   if (typeof requestedTenantId === 'string' && !membership) {
     throw new ApiFault(403, 'forbidden', 'The selected tenant is not an active membership')
@@ -177,6 +182,7 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
   if (membership.role !== 'resident' && membership.role !== 'admin') {
     throw new ApiFault(403, 'forbidden', 'This account does not have tenant access')
   }
+  await holdTenantLifecycleAccess(request, membership.tenant_id)
   const residentProfileResult = await getTenantPool(membership.tenant_id).query<{ has_active_profile: boolean }>(
     `SELECT EXISTS (
        SELECT 1
@@ -372,7 +378,8 @@ const lookupAdminInvitation = async (request: IncomingMessage) => {
      FROM tenant_records
      WHERE admin_invite_token_hash = $1
        AND admin_invite_expires_at > NOW()
-       AND admin_invite_accepted_at IS NULL`,
+       AND admin_invite_accepted_at IS NULL
+       AND status IN ('onboarding', 'active')`,
     [hashAdminInvitationToken(token)],
   )
   const invitation = result.rows[0]
@@ -402,6 +409,7 @@ const acceptAdminInvitation = async (request: IncomingMessage, requestId: string
          WHERE admin_invite_token_hash = $1
            AND admin_invite_expires_at > NOW()
            AND admin_invite_accepted_at IS NULL
+       AND status IN ('onboarding', 'active')
          FOR UPDATE`,
         [hashAdminInvitationToken(token)],
       )
@@ -1636,7 +1644,7 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
       residentName: input.fullName,
       organizationName: access.tenantName,
       unitLabel,
-      invitationUrl: `${baseUrl}/resident-invite?token=${encodeURIComponent(token)}`,
+      invitationUrl: createResidentInvitationUrl(baseUrl, token, 'email'),
     })
   } catch {
     console.error(JSON.stringify({ level: 'error', event: 'resident_invitation_email_failed', requestId, tenantId: access.tenantId, invitationId }))
@@ -1800,9 +1808,10 @@ const getInvitationTenant = async (tenantId: string) => {
   return tenant
 }
 
-const lookupResidentInvitation = async (rawInput: unknown) => {
+const lookupResidentInvitation = async (request: IncomingMessage, rawInput: unknown) => {
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) throw new ApiFault(400, 'invalid_request', 'A resident invitation token is required')
   const { tenantId, tokenHash } = parseResidentInvitationToken((rawInput as Record<string, unknown>).token)
+  await holdTenantLifecycleAccess(request, tenantId)
   const tenant = await getInvitationTenant(tenantId)
   const result = await getTenantPool(tenantId).query<{ email: string; full_name: string; building_name: string; number: string; start_date: string }>(
     `SELECT i.email::text, i.full_name, i.start_date::text, u.building_name, u.number
@@ -1839,6 +1848,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
     throw new ApiFault(403, 'forbidden', 'Sign in with the invited email address and verify it through Email OTP')
   }
 
+  await holdTenantLifecycleAccess(request, tenantId)
   const tenant = await getInvitationTenant(tenantId)
   const pool = getTenantPool(tenantId)
   const client = await pool.connect()
@@ -3005,10 +3015,9 @@ const getPlatformAudit = async (request: IncomingMessage) => {
 
 const changeOrganizationLifecycle = async (request: IncomingMessage, tenantId: string, requestId: string) => {
   const operator = await requireOperator(request)
-  const input = await readJsonBody(request)
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiFault(400, 'invalid_request', 'A lifecycle action is required')
-  const action = (input as Record<string, unknown>).action
-  if (action !== 'deactivate' && action !== 'reactivate' && action !== 'delete') throw new ApiFault(400, 'invalid_request', 'The lifecycle action is invalid')
+  const parsed = z.object({ action: z.enum(['deactivate', 'reactivate', 'delete']) }).strict().safeParse(await readJsonBody(request))
+  if (!parsed.success || !z.uuid().safeParse(tenantId).success) throw new ApiFault(400, 'invalid_request', 'A valid tenant and lifecycle action are required')
+  const { action } = parsed.data
   const pool = getPlatformPool()
   const result = await pool.query<{
     tenant_id: string; database_name: string | null; admin_email: string | null; admin_auth0_user_id: string | null; admin_auth0_user_created: boolean; status: string
@@ -3019,15 +3028,29 @@ const changeOrganizationLifecycle = async (request: IncomingMessage, tenantId: s
   const organization = result.rows[0]
   if (!organization) throw new ApiFault(404, 'not_found', 'Organization was not found')
   if (action === 'deactivate' || action === 'reactivate') {
-    if (organization.status === 'deleting') throw new ApiFault(409, 'invalid_request', 'Organization deletion is already in progress')
     const fromStatus = action === 'deactivate' ? 'active' : 'inactive'
     const toStatus = action === 'deactivate' ? 'inactive' : 'active'
-    if (organization.status !== fromStatus) throw new ApiFault(409, 'invalid_request', `Only ${fromStatus} organizations can be ${action}d`)
-    await pool.query('UPDATE tenant_records SET status = $2, updated_at = NOW() WHERE tenant_id = $1', [tenantId, toStatus])
-    await pool.query(
-      `INSERT INTO platform_audit (actor_subject, action, target, reason, request_id) VALUES ($1, $2, $3, $4, $5)`,
-      [operator.subject, `organization.${action}`, tenantId, `operator-requested-${action}`, requestId],
-    )
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query("SET LOCAL lock_timeout = '10s'")
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1 || ':lifecycle',0))", [tenantId])
+      const locked = await client.query<{ status: string }>('SELECT status FROM tenant_records WHERE tenant_id=$1 FOR UPDATE', [tenantId])
+      const status = locked.rows[0]?.status
+      if (!status) throw new ApiFault(404, 'not_found', 'Organization was not found')
+      if (status !== fromStatus && status !== toStatus) throw new ApiFault(409, 'invalid_request', `Only ${fromStatus} organizations can be ${action}d`)
+      if (status !== toStatus) {
+        await client.query('UPDATE tenant_records SET status=$2, updated_at=NOW() WHERE tenant_id=$1', [tenantId, toStatus])
+        await client.query(
+          'INSERT INTO platform_audit (actor_subject, action, target, reason, request_id) VALUES ($1,$2,$3,$4,$5)',
+          [operator.subject, `organization.${action}`, tenantId, `operator-requested-${action}`, requestId],
+        )
+      }
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally { client.release() }
     return { tenantId, status: toStatus }
   }
 
@@ -3335,7 +3358,7 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         return
       }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/public/resident-invitations/lookup') {
-        respond(response, 200, await lookupResidentInvitation(await readJsonBody(request)), requestId)
+        respond(response, 200, await lookupResidentInvitation(request, await readJsonBody(request)), requestId)
         return
       }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/public/resident-invitations/accept') {
@@ -3750,6 +3773,10 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
             ...(tenantSchemaRequest && !tenantSchemaUnavailable && !tenantDatabaseMissing ? { diagnosticCode: causeCode } : {}),
           }
       respond(response, status, body, requestId)
+    } finally {
+      const release = tenantLifecycleReleases.get(request)
+      tenantLifecycleReleases.delete(request)
+      if (release) await release()
     }
   })
 

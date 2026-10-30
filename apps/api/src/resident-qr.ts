@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { ApiFault } from './api-fault.js'
 import { getPlatformPool, getTenantPool } from './persistence.js'
-import { createResidentInvitationToken } from './resident-invitations.js'
+import { createResidentInvitationToken, createResidentInvitationUrl } from './resident-invitations.js'
 
 export async function issueResidentQr(input: { tenantId: string; subject: string; fullName: string; email?: string; userId?: string; invitationId?: string; token?: string; tokenHash?: string }) {
   const generated = createResidentInvitationToken(input.tenantId)
@@ -21,7 +21,7 @@ export async function issueResidentQr(input: { tenantId: string; subject: string
     [input.tenantId, input.invitationId ?? null, userId, input.fullName, input.email ?? '', input.invitationId ? 'invitation' : 'reset', tokenHash, input.subject])
     await client.query('COMMIT')
     const base = (process.env.RESIDENT_WEB_PUBLIC_URL ?? 'http://localhost:3098').replace(/\/$/, '')
-    return { ...result.rows[0], invitationUrl: `${base}/resident-invite?qr=${encodeURIComponent(token)}` }
+    return { ...result.rows[0], invitationUrl: createResidentInvitationUrl(base, token, 'qr') }
   } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
 }
 

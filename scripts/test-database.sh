@@ -8,4 +8,4 @@ compose=(docker compose -p myapartment-schema-check -f docker/compose.test.yaml)
 # inside application tests. curl retries are bounded and this is test-only.
 curl --silent --fail --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:59000/ > /dev/null || true
 trap '"${compose[@]}" down --volumes' EXIT
-MYAPARTMENT_DATABASE_TESTS=1 pnpm test "$@"
+MYAPARTMENT_DATABASE_TESTS=1 pnpm run test "$@"

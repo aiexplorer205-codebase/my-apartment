@@ -13,16 +13,18 @@ export function BetterAuthLogin({ initialEmail = '', lockEmail = false, onVerifi
   async function sendCode() {
     const result = await adminAuth.emailOtp.sendVerificationOtp({ email: email.trim().toLowerCase(), type: 'sign-in' })
     if (result.error) throw new Error(result.error.message ?? 'Could not send the code')
-    setSent(true); setResendAt(Date.now() + 60_000)
+    setCode(''); setSent(true); setResendAt(Date.now() + 60_000)
   }
   async function submit(event: FormEvent<globalThis.HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError('')
+    event.preventDefault()
+    if (busy) return
+    setBusy(true); setError('')
     try {
       if (!sent) await sendCode()
       else {
         const result = await adminAuth.signIn.emailOtp({ email: email.trim().toLowerCase(), otp: code })
         if (result.error) throw new Error(result.error.message ?? 'Could not verify this code')
-        globalThis.sessionStorage.setItem('admin-email-otp-at', String(Date.now()))
+        try { globalThis.sessionStorage.setItem('admin-email-otp-at', String(Date.now())) } catch { /* Storage is optional; the server verifies freshness. */ }
         complete()
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Sign-in failed. Try again.') }
@@ -39,9 +41,14 @@ export function BetterAuthLogin({ initialEmail = '', lockEmail = false, onVerifi
   }
   return <form className="auth-form" onSubmit={(event) => void submit(event)}>
     <label>Email address<input type="email" autoComplete="username webauthn" required maxLength={254} value={email} readOnly={lockEmail} disabled={busy || sent} onChange={(event) => setEmail(event.target.value)} /></label>
-    {sent && <><p role="status">Enter the six digit code sent to {email}. It expires in five minutes.</p><label>Verification code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} /></label></>}
+    {sent && <><p role="status">Enter the six digit code sent to {email}. Codes expire five minutes after they are sent. If it has expired, request a new code.</p><label>Verification code<input type="text" inputMode="numeric" autoComplete="one-time-code" autoFocus disabled={busy} pattern="[0-9]{6}" required maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} /></label></>}
     {error && <p role="alert" className="error-text">{error}</p>}
-    <button className="primary wide" disabled={busy} type="submit">{busy ? 'Please wait…' : sent ? 'Verify email and continue' : 'Send verification code'}</button>
+    <button className="primary wide" disabled={busy} type="submit">{busy ? 'Please wait…' : sent ? (emailOnly && onVerified ? 'Verify email and accept invitation' : 'Verify email and continue') : 'Send verification code'}</button>
+    {!sent && <button className="secondary wide" disabled={busy || !email.trim()} type="button" onClick={(event) => {
+      const form = event.currentTarget.form
+      if (!form?.reportValidity()) return
+      setError(''); setCode(''); setSent(true)
+    }}>Already have a code? Enter it</button>}
     {sent && <button className="secondary wide" disabled={busy} type="button" onClick={() => {
       if (Date.now() < resendAt) { setError('Wait one minute before requesting another code.'); return }
       setBusy(true); setError(''); void sendCode().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Could not resend code')).finally(() => setBusy(false))

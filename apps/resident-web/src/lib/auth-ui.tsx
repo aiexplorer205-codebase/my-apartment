@@ -52,6 +52,15 @@ function LoginChoices({ children }: { children: ReactNode }) {
 export function TenantWorkspacePicker() {
   const { activeTenantId, setActiveTenantId } = useResidentAuth()
   const { data, loading, error, reload } = useApiQuery<TenantMembership[]>('/v1/tenant/memberships', { tenantScoped: false })
+  useEffect(() => {
+    const refresh = () => reload()
+    globalThis.addEventListener('myapartment:tenant-unavailable', refresh)
+    globalThis.addEventListener('focus', refresh)
+    return () => {
+      globalThis.removeEventListener('myapartment:tenant-unavailable', refresh)
+      globalThis.removeEventListener('focus', refresh)
+    }
+  }, [reload])
   const requiredRole = 'resident'
   const memberships = requiredRole ? data?.filter((membership) => membership.role === requiredRole) : data
 

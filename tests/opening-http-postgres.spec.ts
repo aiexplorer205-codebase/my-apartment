@@ -7,8 +7,9 @@ import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { readFileSync, readdirSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { createAdminInvitationToken } from '../apps/api/src/admin-invitations.ts'
 import { startApiServer } from '../apps/api/src/index.ts'
-import { closeDatabasePools, getPlatformPool, getTenantPool } from '../apps/api/src/persistence.ts'
+import { acquireTenantLifecycleAccess, closeDatabasePools, getPlatformPool, getTenantPool } from '../apps/api/src/persistence.ts'
 
 vi.mock('../apps/api/src/image-storage',async(importOriginal)=>{
   const actual=await importOriginal<typeof import('../apps/api/src/image-storage')>()
@@ -32,7 +33,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
   beforeAll(async()=>{
     for(const name of ['POSTGRES_TENANT_URL','POSTGRES_PLATFORM_URL','POSTGRES_MAINTENANCE_URL','AUTH0_ISSUER','AUTH0_AUDIENCE'])previous[name]=process.env[name]
     const password=execFileSync('docker',['compose','-p','myapartment-schema-check','exec','-T','postgres','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
-    const url=new URL('postgresql://postgres@127.0.0.1:55434/postgres');url.password=password
+    const url=new URL(`postgresql://postgres@127.0.0.1:${process.env.MYAPARTMENT_TEST_DATABASE_PORT ?? '55434'}/postgres`);url.password=password
     control=new Pool({connectionString:url.toString()})
     await control.query(`CREATE DATABASE "${platformName}" TEMPLATE template0`)
     url.pathname=`/${platformName}`;process.env.POSTGRES_PLATFORM_URL=url.toString();platform=new Pool({connectionString:url.toString(),options:'-c search_path=block9_platform,public'})
@@ -55,7 +56,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     issuer=origin(issuerServer)+'/'
     process.env.AUTH0_ISSUER=issuer;process.env.AUTH0_AUDIENCE='urn:myapartment:opening-test'
     api=startApiServer(0);await listen(api);base=origin(api)
-  },20000)
+  },60000)
   afterAll(async()=>{
     for(const server of [api,issuerServer])if(server)await new Promise<void>((resolve,reject)=>{server.closeAllConnections();server.close((error)=>error?reject(error):resolve())})
     await closeDatabasePools()
@@ -135,6 +136,67 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
       for(const[key,value]of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value}
     }
   })
+  it('deactivates only the selected apartment, drains authorized operations, and preserves shared users', async () => {
+    const a = await tenant(), b = await tenant()
+    const adminId = randomUUID(), adminSubject = `betterauth-admin|${adminId}`
+    await platform.query("INSERT INTO tenant_memberships(subject,tenant_id,role) VALUES($1,$2,'admin'),($1,$3,'admin'),($4,$3,'resident')", [adminSubject,a.id,b.id,a.resident])
+    await platform.query("INSERT INTO platform_audit(actor_subject,action,target,reason,request_id) VALUES($1,'organization.admin_invitation.accept',$2,'test',$4),($1,'organization.admin_invitation.accept',$3,'test',$4)", [adminSubject,a.id,b.id,randomUUID()])
+    await b.pool.query('UPDATE residents SET auth_subject=$1', [a.resident])
+    const saved = { operator: process.env.OPERATOR_IDS, auth: process.env.ADMIN_AUTH_INTERNAL_URL }
+    process.env.OPERATOR_IDS = 'operator|deactivation-test'
+    process.env.ADMIN_AUTH_INTERNAL_URL = 'http://admin-auth.test'
+    const originalFetch = globalThis.fetch
+    const stub = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input).startsWith('http://admin-auth.test/')) return Response.json({ user: { id: adminId, email: 'http-admin@example.test', emailVerified: true }, session: { expiresAt: new Date(Date.now()+60000).toISOString() } })
+      return originalFetch(input, init)
+    })
+    const adminRequest = async (tenantId?: string, path='/v1/tenant/memberships', body?: object) => {
+      const response = await fetch(base+path, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer admin-session.${Buffer.from('test.cookie').toString('base64url')}`, ...(tenantId ? {'X-Tenant-Id':tenantId} : {}), ...(body ? {'Content-Type':'application/json'} : {}) }, ...(body ? {body:JSON.stringify(body)} : {}) })
+      return {status:response.status,body:await response.json()}
+    }
+    let release: (() => Promise<void>) | undefined
+    try {
+      expect((await request(a.resident,a.id,`/v1/platform/organizations/${a.id}/lifecycle`,{action:'deactivate'})).status).toBe(403)
+      expect((await request('operator|deactivation-test',a.id,`/v1/platform/organizations/${a.id}/lifecycle`,{action:'deactivate',unexpected:true})).status).toBe(400)
+      release = await acquireTenantLifecycleAccess(a.id)
+      const deactivating = request('operator|deactivation-test', a.id, `/v1/platform/organizations/${a.id}/lifecycle`, {action:'deactivate'})
+      await vi.waitFor(async () => {
+        const waiting = await platform.query("SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT status FROM tenant_records%FOR UPDATE%'")
+        expect(waiting.rowCount).toBeGreaterThan(0)
+      }, { timeout: 5000 })
+      expect((await request(a.resident,b.id,'/v1/tenant/home')).status).toBe(200)
+      await release(); release = undefined
+      expect((await deactivating).status).toBe(200)
+      expect((await request(a.resident,a.id,'/v1/tenant/home')).status).toBe(403)
+      expect((await request(a.resident,b.id,'/v1/tenant/home')).status).toBe(200)
+      expect((await fetch(base+'/v1/tenant/home',{headers:{Authorization:`Bearer ${token(a.resident)}`}})).status).toBe(200)
+      expect((await request(a.resident,a.id,'/v1/public/resident-invitations/lookup',{token:`${a.id}.${createAdminInvitationToken().token}`})).status).toBe(403)
+      expect((await adminRequest(a.id,'/v1/admin/buildings')).status).toBe(403)
+      expect((await adminRequest(b.id,'/v1/admin/buildings')).status).toBe(200)
+      // With no tenant header, the inactive membership must not cause ambiguity.
+      expect((await adminRequest(undefined,'/v1/admin/buildings')).status).toBe(200)
+      const memberships = await adminRequest()
+      expect(memberships.body.map((m: {tenantId:string}) => m.tenantId)).toEqual([b.id])
+      expect((await request(a.resident,a.id,'/v1/tenant/memberships')).body.map((m: {tenantId:string}) => m.tenantId)).toEqual([b.id])
+      // A still-valid invitation cannot override operator suspension.
+      const invite = createAdminInvitationToken()
+      await platform.query("UPDATE tenant_records SET admin_email=$2,admin_invite_token_hash=$3,admin_invite_expires_at=NOW()+INTERVAL '1 day',admin_invite_accepted_at=NULL WHERE tenant_id=$1", [a.id,'http-admin@example.test',invite.tokenHash])
+      expect((await adminRequest(undefined,'/v1/public/admin-invitations/accept',{token:invite.token})).status).toBe(400)
+      expect((await platform.query('SELECT status FROM tenant_records WHERE tenant_id=$1',[a.id])).rows[0].status).toBe('inactive')
+      expect((await request('operator|deactivation-test',a.id,`/v1/platform/organizations/${a.id}/lifecycle`,{action:'deactivate'})).status).toBe(200)
+      expect((await request('operator|deactivation-test',a.id,`/v1/platform/organizations/${a.id}/lifecycle`,{action:'reactivate'})).status).toBe(200)
+      expect((await request(a.resident,a.id,'/v1/tenant/home')).status).toBe(200)
+      expect((await adminRequest(a.id,'/v1/admin/buildings')).status).toBe(200)
+      expect((await platform.query('SELECT 1 FROM tenant_memberships WHERE subject=$1',[adminSubject])).rowCount).toBe(2)
+      const audit = await platform.query("SELECT action FROM platform_audit WHERE target=$1 AND action IN ('organization.deactivate','organization.reactivate') ORDER BY created_at",[a.id])
+      expect(audit.rows.map((row:{action:string})=>row.action)).toEqual(['organization.deactivate','organization.reactivate'])
+    } finally {
+      if (release) await release()
+      stub.mockRestore()
+      for (const [key,value] of [['OPERATOR_IDS',saved.operator],['ADMIN_AUTH_INTERNAL_URL',saved.auth]] as const) { if (value===undefined) delete process.env[key]; else process.env[key]=value }
+    }
+  }, 20000)
+
   it('publishes the same billing period independently for two communities',async()=>{
     const first=await tenant(),second=await tenant()
     for(const [f,maintenance]of [[first,100],[second,250]] as const){

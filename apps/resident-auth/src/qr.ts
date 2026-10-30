@@ -34,6 +34,9 @@ export async function qrRegistrationOptions(pool: Pool, token: unknown, config: 
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1 || ':lifecycle',0))", [grant.tenant_id])
+    const tenant = await client.query("SELECT 1 FROM tenant_records WHERE tenant_id=$1 AND status='active'", [grant.tenant_id])
+    if (!tenant.rowCount) throw new QrError(403, 'This apartment is unavailable.')
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [grant.user_id])
     const locked = await client.query(`SELECT id FROM resident_auth_qr
       WHERE id=$1 AND status='pending' AND expires_at>NOW() FOR UPDATE`, [grant.id])
@@ -87,6 +90,9 @@ export async function completeQrRegistration(pool: Pool, token: unknown, respons
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1 || ':lifecycle',0))", [grant.tenant_id])
+    const tenant = await client.query("SELECT 1 FROM tenant_records WHERE tenant_id=$1 AND status='active'", [grant.tenant_id])
+    if (!tenant.rowCount) throw new QrError(403, 'This apartment is unavailable.')
     // Issuing, cancelling and consuming a grant serialize on the same account.
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [grant.user_id])
     const locked = await client.query(`SELECT q.id FROM resident_auth_qr q JOIN tenant_records t ON t.tenant_id=q.tenant_id

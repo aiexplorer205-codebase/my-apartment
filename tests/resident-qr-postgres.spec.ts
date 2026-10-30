@@ -52,6 +52,16 @@ describe.skipIf(!enabled)('resident QR transactions with PostgreSQL and WebAuthn
     await pool.query(`INSERT INTO resident_auth_session(id,token,"userId","expiresAt") VALUES('old-session','old-token',$1,NOW()+INTERVAL '8 hours')`, [userId])
   })
   afterAll(async () => { await pool?.end() })
+  it('blocks new QR options and completion after apartment deactivation', async () => {
+    const grant = await issue('invitation')
+    const options = await qrRegistrationOptions(pool, grant.token, config)
+    await pool.query("UPDATE tenant_records SET status='inactive' WHERE tenant_id=$1", [tenantId])
+    try {
+      await expect(qrRegistrationOptions(pool, grant.token, config)).rejects.toThrow()
+      await expect(completeQrRegistration(pool, grant.token, attestation(options.challenge), config)).rejects.toThrow()
+      expect((await pool.query('SELECT 1 FROM resident_auth_passkey WHERE "userId"=$1', [grant.userId])).rowCount).toBe(0)
+    } finally { await pool.query("UPDATE tenant_records SET status='active' WHERE tenant_id=$1", [tenantId]) }
+  })
   it('allows signup without email, using real origin-bound, user-verified WebAuthn registration', async () => {
     const grant = await issue('invitation')
     const options = await qrRegistrationOptions(pool, grant.token, config)

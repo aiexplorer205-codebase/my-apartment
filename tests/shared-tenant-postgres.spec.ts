@@ -18,7 +18,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
   const pa=()=>getTenantPool(a),pb=()=>getTenantPool(b)
   beforeAll(async()=>{
     const password=execFileSync('docker',['exec','myapartment-schema-check-postgres-1','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
-    const url=new URL('postgresql://postgres@127.0.0.1:55434/postgres');url.password=password
+    const url=new URL(`postgresql://postgres@127.0.0.1:${process.env.MYAPARTMENT_TEST_DATABASE_PORT ?? '55434'}/postgres`);url.password=password
     control=new Pool({connectionString:url.toString()})
     await control.query(`CREATE DATABASE ${database}`)
     ownerUrl=new URL(url);ownerUrl.pathname=`/${database}`
@@ -38,7 +38,7 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
       await pool.query("INSERT INTO invoices(invoice_number,resident_id,billing_period,due_date,status,total_minor) VALUES('INV-001',$1,'2026-01-01','2026-01-20','open',1000)",[resident])
       await pool.query("INSERT INTO billing_rules(id,updated_by) VALUES(1,'admin')")
     }
-  },30000)
+  },120000)
   afterAll(async()=>{
     await closeDatabasePools()
     await Promise.all([owner?.end(),raw?.end(),life?.end()])

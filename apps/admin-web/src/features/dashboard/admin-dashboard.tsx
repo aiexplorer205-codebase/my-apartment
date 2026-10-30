@@ -574,6 +574,8 @@ function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [sentInvitation, setSentInvitation] = useState<{ fullName: string; email: string; unit: string; expiresAt: string; invitationUrl?: string } | null>(null)
+  const [invitationQrCodes, setInvitationQrCodes] = useState<Array<{ unitId: string; fullName: string; url: string }>>([])
+  const [currentTime, setCurrentTime] = useState(() => Date.now())
   const [inviteForm, setInviteForm] = useState({ fullName: '', email: '', phone: '', blockId: '', unitId: '', startDate: todayString, occupancyType: 'owner' as 'owner' | 'tenant' })
   const [transitionResident, setTransitionResident] = useState<AdminResident | null>(null)
   const [transitionForm, setTransitionForm] = useState({ fullName: '', email: '', phone: '', occupancyType: 'owner' as 'owner' | 'tenant', moveOutDate: todayString, startDate: tomorrowString, finalMeterReading: '' })
@@ -592,6 +594,16 @@ function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void
   const buildings = useApiQuery<{ allowedBlocks: number; buildings: BuildingOption[] }>('/v1/admin/buildings')
   const invitations = useApiQuery<PendingResidentInvitation[]>('/v1/admin/resident-invitations')
   const billing = useApiQuery<{ rules: { template: BillingTemplate } }>('/v1/admin/billing')
+  useEffect(() => {
+    const nextExpiry = (invitations.data ?? [])
+      .filter((invitation) => invitation.displayStatus === 'pending')
+      .map((invitation) => Date.parse(invitation.expiresAt))
+      .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > currentTime)
+      .sort((left, right) => left - right)[0]
+    if (nextExpiry === undefined) return
+    const timeout = window.setTimeout(() => setCurrentTime(Date.now()), nextExpiry - currentTime + 1)
+    return () => window.clearTimeout(timeout)
+  }, [currentTime, invitations.data])
   const multipleBlocks = (buildings.data?.allowedBlocks ?? 0) > 1
   const soleBlock = buildings.data?.buildings.length === 1 ? buildings.data.buildings[0] : undefined
   const selectedBlockId = soleBlock?.id ?? (buildings.data?.buildings.some((block) => block.id === chosenBlockId) ? chosenBlockId : null)
@@ -648,7 +660,16 @@ function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void
         occupancyType: invitation.occupancyType,
         startDate: invitation.startDate,
       })
-      if (result.invitationUrl) setResetQr({ name: invitation.fullName, url: result.invitationUrl, invitation: true })
+      const invitationUrl = result.invitationUrl
+      if (invitationUrl) {
+        setResetQr({ name: invitation.fullName, url: invitationUrl, invitation: true })
+        if (invitation.delivery === 'qr') {
+          setInvitationQrCodes((current) => [
+            ...current.filter((qr) => qr.unitId !== invitation.unitId || qr.fullName !== invitation.fullName),
+            { unitId: invitation.unitId, fullName: invitation.fullName, url: invitationUrl },
+          ])
+        }
+      }
       setInvitationActionMessage(invitation.delivery === 'qr' ? 'A new invitation QR was generated.' : `Invitation resent to ${invitation.email}.`)
       invitations.reload()
     } catch (cause) {
@@ -663,6 +684,7 @@ function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void
     setInvitationActionId(invitation.id)
     try {
       await post<{ status: string }>(`/v1/admin/resident-invitations/${encodeURIComponent(invitation.id)}/revoke`)
+      setInvitationQrCodes((current) => current.filter((qr) => qr.unitId !== invitation.unitId || qr.fullName !== invitation.fullName))
       invitations.reload()
     } catch (cause) {
       setInvitationActionError(cause instanceof Error ? cause.message : 'Could not cancel this invitation. Refresh and try again.')
@@ -678,6 +700,13 @@ function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void
       const invitationRequest = { ...(qrMode ? { delivery: 'qr' } : {}), fullName: inviteForm.fullName, email: inviteForm.email, phone: inviteForm.phone, unitId: inviteForm.unitId, occupancyType: inviteForm.occupancyType, ...(!quickAddResident ? { startDate: inviteForm.startDate } : {}) }
       const result = await post<{ fullName: string; email: string; unit: string; expiresAt: string; invitationUrl?: string }>('/v1/admin/resident-invitations', invitationRequest)
       setSentInvitation({ ...result, unit: multipleBlocks ? result.unit : units.data?.find((unit) => unit.id === inviteForm.unitId)?.number ?? result.unit })
+      const invitationUrl = result.invitationUrl
+      if (qrMode && invitationUrl) {
+        setInvitationQrCodes((current) => [
+          ...current.filter((qr) => qr.unitId !== inviteForm.unitId || qr.fullName !== result.fullName),
+          { unitId: inviteForm.unitId, fullName: result.fullName, url: invitationUrl },
+        ])
+      }
       reload()
       invitations.reload()
     } catch (cause) {
@@ -778,7 +807,7 @@ function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void
       const flatResidents = (data ?? []).filter((resident) => resident.unitId === flat.id)
       const flatInvitations = (invitations.data ?? []).filter((invitation) => invitation.unitId === flat.id && invitation.displayStatus !== 'revoked')
       const canAddResident = flatResidents.every((resident) => resident.status !== 'active' && resident.status !== 'scheduled')
-        && !flatInvitations.some((invitation) => invitation.displayStatus === 'pending')
+        && flatInvitations.length === 0
         && availableUnits.some((unit) => unit.id === flat.id)
       return <tr key={flat.id}>
         <td><strong>{flat.number}</strong></td>
@@ -793,7 +822,19 @@ function AdminResidents({ onStructureChanged }: { onStructureChanged: () => void
         <td><span className={`status-pill ${flat.paymentStatus === 'overdue' ? 'warning' : flat.paymentStatus === 'paid' ? 'success' : ''}`} data-status={flat.paymentStatus}>{flat.paymentStatus.replaceAll('_', ' ')}</span></td>
         <td><div className="flat-resident-actions">
           {flatResidents.map((resident) => resident.status === 'active' ? (resident.moveOutDate && pendingInvitationUnitIds.has(resident.unitId) ? <small key={resident.id}>Invitation pending</small> : <button type="button" className="secondary" key={resident.id} onClick={() => startNewResidentTransition(resident)}>{resident.moveOutDate ? 'Continue new resident' : '＋ New resident'}</button>) : resident.outstandingMinor > 0 && <button type="button" className="secondary" key={resident.id} disabled={settlingResidentId === resident.id} onClick={() => settleFormerDues(resident)}>{settlingResidentId === resident.id ? 'Recording…' : 'Record receipt'}</button>)}
-          {flatInvitations.map((invitation) => <span className="invitation-row-actions" key={invitation.id}>{invitation.canManage && invitation.displayStatus !== 'revoked' && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => void resendInvitation(invitation)}>{invitationActionId === invitation.id ? 'Please wait…' : invitation.delivery === 'qr' ? 'Generate new QR' : invitation.displayStatus === 'expired' ? 'Send again' : 'Resend'}</button>}{invitation.canManage && invitation.displayStatus === 'pending' && <button className="secondary danger-button" type="button" disabled={invitationActionId === invitation.id} onClick={() => void revokeInvitation(invitation)}>{invitationActionId === invitation.id ? 'Working…' : 'Cancel'}</button>}</span>)}
+          {flatInvitations.map((invitation) => {
+            const expiresAt = Date.parse(invitation.expiresAt)
+            const expired = invitation.displayStatus === 'expired' || !Number.isFinite(expiresAt) || expiresAt <= currentTime
+            const qr = invitationQrCodes.find((item) => item.unitId === invitation.unitId && item.fullName === invitation.fullName)
+            const pending = invitation.displayStatus === 'pending' && !expired
+            return <span className="invitation-row-actions" key={invitation.id}>
+              {invitation.canManage && invitation.delivery === 'qr' && pending && qr && <button className="secondary" type="button" onClick={() => setResetQr({ name: invitation.fullName, url: qr.url, invitation: true })}>Show QR</button>}
+              {invitation.canManage && invitation.delivery === 'qr' && pending && !qr && <small>QR is available only in the session where it was generated.</small>}
+              {invitation.canManage && invitation.delivery === 'qr' && expired && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => void resendInvitation(invitation)}>{invitationActionId === invitation.id ? 'Please wait…' : 'Generate QR'}</button>}
+              {invitation.canManage && invitation.delivery === 'email' && (pending || expired) && <button className="secondary" type="button" disabled={invitationActionId === invitation.id} onClick={() => void resendInvitation(invitation)}>{invitationActionId === invitation.id ? 'Please wait…' : expired ? 'Send again' : 'Resend'}</button>}
+              {invitation.canManage && pending && <button className="secondary danger-button" type="button" disabled={invitationActionId === invitation.id} onClick={() => void revokeInvitation(invitation)}>{invitationActionId === invitation.id ? 'Working…' : 'Cancel'}</button>}
+            </span>
+          })}
           {canAddResident && <><button type="button" className="secondary" onClick={() => startInvite(flat)}>＋ Add resident</button><button type="button" className="secondary" onClick={() => startInvite(flat, true)}>Generate QR</button></>}
           {flatResidents.filter((resident) => resident.status === 'active' && resident.hasPasskeyAuth).map((resident) => <button type="button" className="secondary" key={`qr-${resident.id}`} disabled={resetQrBusy !== null} onClick={() => void generateResetQr(resident)}>{resetQrBusy === resident.id ? 'Generating…' : 'Generate passkey reset QR'}</button>)}
         </div></td>

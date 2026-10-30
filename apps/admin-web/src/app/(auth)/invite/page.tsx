@@ -1,11 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { AdminPasskeyPrompt } from '../../../lib/admin-passkey-prompt'
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth0 } from '../../auth-provider'
-import { EmbeddedLogin } from '../../../lib/auth-ui'
+import { BetterAuthLogin } from '../../../lib/better-auth-login'
 import { getAppConfig } from '@block9/app-platform'
 
 const apiUrl = '/api/backend/v1/public/admin-invitations/accept'
@@ -32,6 +31,7 @@ function InvitationLoading() {
 
 function AcceptAdminInvitationContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const { isAuthenticated, isLoading, user, logout } = useAuth0()
   const token = searchParams.get('token')
   const attempted = useRef(false)
@@ -94,7 +94,10 @@ function AcceptAdminInvitationContent() {
         })
         const payload = await response.json() as { message?: string }
         if (!response.ok) throw new Error(payload.message ?? `Invitation acceptance failed (${response.status})`)
-        if (!cancelled) setAccepted(true)
+        if (!cancelled) {
+          setAccepted(true)
+          router.replace('/dashboard')
+        }
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : 'Could not accept the administrator invitation')
@@ -106,21 +109,16 @@ function AcceptAdminInvitationContent() {
     }
     void accept()
     return () => { cancelled = true }
-  }, [confirmed, invitedEmail, isAuthenticated, signedInEmail, token])
+  }, [confirmed, invitedEmail, isAuthenticated, router, signedInEmail, token])
 
   return (
     <main className="auth-shell">
       <section className="auth-card invitation-card">
         <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></div>
-        {isLoading || loadingInvitation || accepting ? (
-          <p role="status">{accepting ? 'Verifying your email and accepting the invitation…' : loadingInvitation ? 'Loading invitation details…' : 'Checking your session…'}</p>
+        {isLoading || loadingInvitation || accepting || (confirmed > 0 && !accepted && !error) ? (
+          <p role="status">{accepting || confirmed > 0 ? 'Verifying your email and accepting the invitation…' : loadingInvitation ? 'Loading invitation details…' : 'Checking your session…'}</p>
         ) : accepted ? (
-          <>
-            <div className="eyebrow">INVITATION ACCEPTED</div>
-            <h1>Administrator access is ready</h1>
-            <p>Your verified email is now linked to this organization. Continue to the administrator portal.</p>
-            <AdminPasskeyPrompt><Link className="primary wide" href="/dashboard">Open admin portal</Link></AdminPasskeyPrompt>
-          </>
+          <p role="status">Opening the administrator portal…</p>
         ) : !token ? (
           <>
             <div className="eyebrow">INVALID INVITATION</div>
@@ -150,7 +148,7 @@ function AcceptAdminInvitationContent() {
             <h1>Accept your invitation</h1>
             <p>Continue with Email OTP. This invitation can only be accepted by the invited email address.</p>
             {error && <p role="alert">{error}</p>}
-            <EmbeddedLogin experienceName="Tenant Admin" initialEmail={invitedEmail ?? ''} lockEmail emailOnly />
+            <BetterAuthLogin initialEmail={invitedEmail ?? ''} lockEmail emailOnly onVerified={() => setConfirmed(value => value + 1)} />
           </>
         )}
       </section>

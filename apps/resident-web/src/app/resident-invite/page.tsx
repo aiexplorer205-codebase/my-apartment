@@ -8,6 +8,7 @@ import { useSearchParams } from 'next/navigation'
 import { useResidentAuth } from '../auth-provider'
 import { EmbeddedLogin } from '../../lib/auth-ui'
 import { getAppConfig } from '@block9/app-platform'
+import { resolveResidentInvitationRoute } from '../../lib/resident-invitation-route'
 
 const invitationApi = '/api/backend/v1/public/resident-invitations'
 type Invitation = { email: string; fullName: string; organizationName: string; unit: string; startDate: string }
@@ -20,10 +21,9 @@ function InvitationContent() {
   const params = useSearchParams()
   const now = new Date()
   const todayDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  const tokenParam = params.get('token')
-  const looksLikeQrToken = Boolean(tokenParam && /^[A-Za-z0-9_-]{1,200}\.[A-Za-z0-9_-]{43}$/.test(tokenParam))
-  const token = looksLikeQrToken ? null : tokenParam
-  const qr = params.get('qr') ?? params.get('qrToken') ?? (looksLikeQrToken ? tokenParam : null)
+  const route = resolveResidentInvitationRoute(params)
+  const token = route.kind === 'email' ? route.token : null
+  const qr = route.kind === 'qr' ? route.token : null
   const { isAuthenticated, user, logout, provider } = useResidentAuth()
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [lookupError, setLookupError] = useState<string | null>(null)

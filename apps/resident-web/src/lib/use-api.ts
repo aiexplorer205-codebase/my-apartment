@@ -1,7 +1,7 @@
 'use client'
 
 import { useResidentAuth } from '../app/auth-provider'
-import { apiFetch } from '@block9/api-client'
+import { apiFetch, ApiRequestError } from '@block9/api-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 
@@ -39,7 +39,10 @@ export function useApiQuery<T extends object>(path: string, options: { tenantSco
           setData(payload)
         }
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Request failed')
+        if (!cancelled) {
+          if (cause instanceof ApiRequestError && cause.status === 403) { hasData.current = false; setData(null) }
+          setError(cause instanceof Error ? cause.message : 'Request failed')
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
