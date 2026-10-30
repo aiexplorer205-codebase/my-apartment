@@ -112,6 +112,33 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Minutes of Meetin
     const unchangedPulse=await fetch(base+'/v1/tenant/pulse',{headers:{Authorization:`Bearer ${token(f.resident)}`,'X-Tenant-Id':f.id,'If-None-Match':pulseEtag!}})
     expect(unchangedPulse.status).toBe(304)
     expect((await fetch(base+'/v1/tenant/pulse')).status).toBe(401)
+    const secondResident=`resident|${randomUUID()}`
+    const secondResidentId=randomUUID(),secondUnitId=randomUUID(),noticeId=randomUUID()
+    await f.pool.query(`INSERT INTO units(id,tenant_id,number,status) VALUES($1,$2,'A-102','occupied')`,[secondUnitId,f.id])
+    await f.pool.query(`INSERT INTO residents(id,tenant_id,auth_subject,unit_id,full_name,email,status,start_date)
+      VALUES($1,$2,$3,$4,'Second resident','second-resident@example.test','active','2020-01-01')`,
+    [secondResidentId,f.id,secondResident,secondUnitId])
+    await platform.query(`INSERT INTO tenant_memberships(subject,tenant_id,role) VALUES($1,$2,'resident')`,[secondResident,f.id])
+    await f.pool.query(`INSERT INTO notices(id,tenant_id,title,body,status,published_at,starts_at)
+      VALUES($1,$2,'Unread notice','For pulse isolation test','published',NOW(),NOW())`,[noticeId,f.id])
+    const firstResidentPulse=await fetch(base+'/v1/tenant/pulse',{headers:{Authorization:`Bearer ${token(f.resident)}`,'X-Tenant-Id':f.id}})
+    const firstResidentEtag=firstResidentPulse.headers.get('etag')
+    const firstResidentData=await firstResidentPulse.json()
+    expect(firstResidentData.counts.unreadUpdates).toBeGreaterThan(0)
+    const secondPulse=await fetch(base+'/v1/tenant/pulse',{headers:{Authorization:`Bearer ${token(secondResident)}`,'X-Tenant-Id':f.id}})
+    const secondPulseEtag=secondPulse.headers.get('etag')
+    expect(secondPulse.status).toBe(200)
+    expect(secondPulseEtag).toBeTruthy()
+    expect((await request(f.resident,f.id,`/v1/tenant/notices/${noticeId}/read`,{})).status).toBe(200)
+    const firstResidentChanged=await fetch(base+'/v1/tenant/pulse',{
+      headers:{Authorization:`Bearer ${token(f.resident)}`,'X-Tenant-Id':f.id,'If-None-Match':firstResidentEtag!},
+    })
+    expect(firstResidentChanged.status).toBe(200)
+    expect((await firstResidentChanged.json()).counts.unreadUpdates).toBe(firstResidentData.counts.unreadUpdates-1)
+    const secondPulseUnchanged=await fetch(base+'/v1/tenant/pulse',{
+      headers:{Authorization:`Bearer ${token(secondResident)}`,'X-Tenant-Id':f.id,'If-None-Match':secondPulseEtag!},
+    })
+    expect(secondPulseUnchanged.status).toBe(304)
     const pulseCrossTenant=await request(f.resident,other.id,'/v1/tenant/pulse')
     expect(pulseCrossTenant.status).toBe(403)
     expect((await request(f.resident,other.id,'/v1/tenant/meeting-minutes/latest')).status).toBe(403)

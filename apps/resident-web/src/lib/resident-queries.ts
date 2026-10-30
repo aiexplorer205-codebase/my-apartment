@@ -11,10 +11,8 @@ export type ResidentPulse = {
     polls: number
     updates: number
     home: number
-    complaints: number
     minutes: number
     profile: number
-    payments: number
   }
   counts: { unreadUpdates: number; openPolls: number }
   resetPending: { createdAt: string; expiresAt: string } | null
@@ -95,10 +93,10 @@ export function useResidentPulse() {
     queryClient.setQueryData(observedPulseKey, { versions: pulse.versions, counts: pulse.counts })
     if (!previous) return
     const changedResources = new Set<keyof ResidentPulse['versions']>()
-    for (const resource of ['notices', 'polls', 'updates', 'home', 'complaints', 'minutes', 'profile', 'payments'] as const) {
+    for (const resource of ['notices', 'polls', 'updates', 'home', 'minutes', 'profile'] as const) {
       if (pulse.versions[resource] !== previous.versions[resource]) {
         changedResources.add(resource)
-        if (resource === 'complaints' || resource === 'minutes') {
+        if (resource === 'minutes') {
           globalThis.dispatchEvent(new globalThis.CustomEvent('myapartment:resident-resource-changed', { detail: { resource } }))
         }
       }

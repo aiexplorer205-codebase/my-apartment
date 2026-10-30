@@ -30,31 +30,46 @@ elapsed; there is no fixed polling timer.
 
 Current resident-visible data and its signal scope:
 
-- **Per-community data and signal:** notices; polls and poll options; published
-  meeting minutes and attendee snapshots. Their corresponding `notices`, `polls`,
-  and `minutes` versions invalidate the resident lists. Notice reads and poll
-  participation are resident-specific state, but update/home counters are
-  community-wide and the API still scopes the full response to the authenticated
-  resident.
-- **Per-resident records with a per-community signal:** complaints, complaint
-  messages/comments, events and photos use `complaints`; profile and unit details
-  use `profile`; invoices, invoice items, payments, payment reports, adjustments,
-  credits, credit uses, account entries and opening balances use `home` and
-  `payments`. API list/detail reads remain scoped to the selected community and
-  resident. The broad signal can cause an unrelated resident's screen to refresh,
-  but never broadens the returned data.
+- **Per-community signals:** `notices` writes bump `notices`, `updates`, and
+  `home`; `polls` and `poll_options` writes bump `polls`, `updates`, and `home`;
+  `meeting_minutes` and `meeting_minutes_attendees` writes bump `minutes` and
+  `home`; `organizations`, `units`, and `apartment_buildings` writes bump
+  `profile` and `home`. These are community-visible records and are included in
+  the pulse ETag for every resident in that community.
+- **Per-resident data with no community-wide signal:** `notice_reads`,
+  `poll_participation`, and `poll_ballots` are individual resident state. Per-user
+  unread/open-poll counts are included in that resident's pulse, so they change
+  only that resident's ETag; these tables have no version trigger. `complaints`,
+  `complaint_messages`, `complaint_events`, and `complaint_photos` are scoped to
+  the complaint's resident; `residents` profile fields, `invoices`,
+  `invoice_items`, `payments`, `payment_reports`, `billing_adjustments`,
+  `resident_credits`, `resident_credit_uses`, `opening_credit_allocations`, and
+  `resident_opening_balances` are also resident-scoped. These have no shared
+  version trigger. The resident's own UI updates after its mutations, while
+  active queries refresh on focus/reconnect when stale or when reopened.
+- **Community ledger without a resident pulse signal:** `account_entries` is a
+  community-level ledger, not a resident list. Entries linked to a particular
+  resident report are reflected through that resident's payment/report records;
+  unrelated ledger entries must not change resident pulse ETags.
+- **Poll votes:** participation and ballots do not increment a community-wide
+  version per vote. The voter's open-poll count changes their own pulse, and the
+  voting client invalidates its poll/update queries. Other residents refresh
+  aggregate results when their active query becomes stale and refetches (such
+  as on focus) or when they reopen the poll. This avoids shared-counter write
+  contention during busy polls.
 - **Per-resident authentication state:** a pending passkey-reset QR is looked up
   by the signed-in Better Auth user in the auth service and returned only in that
   session's pulse. The client never supplies the user ID.
 - **Not implemented:** money-transparency feeds and resident scheduler data have
   no current tables, endpoints, or change signals.
 
-Every new resident-visible entity must be registered here, add its per-community
-or per-resident data scope and refresh path, bump the matching pulse version in
-the same transaction as every insert/update/delete (including status or soft
-delete changes), and extend the trigger-registry and behavior tests. Bulk SQL
-statements use statement-level transition-table triggers and bump once per
-distinct tenant/entity in that statement.
+Every new resident-visible entity must be registered here as per-community or
+per-resident, define how its changes reach the appropriate client, and extend
+the trigger-registry and behavior tests. Only per-community writes bump a shared
+pulse version. Per-resident writes must use a resident-keyed signal or no pulse
+signal; they must never bump a community-wide counter. Bulk SQL statements with
+community signals use statement-level transition-table triggers and bump once
+per distinct tenant/entity in that statement.
 
 The Better Auth five-minute cookie cache is for the resident client session UI;
 API authorization calls Better Auth with cookie caching disabled. The API also
@@ -85,7 +100,7 @@ or broadcast invalidation.
 | `infrastructure/ports` | Ports |
 | `infrastructure/adapters` | Auth0, Postgres, Redis, Resend |
 
-Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`015`) and `migrations/myapartment_tenant_db` (`001`–`040`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
+Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`015`) and `migrations/myapartment_tenant_db` (`001`–`041`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
 
 Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,validation}.json`. Keep key parity. Validate with `pnpm platform:validate`.
 

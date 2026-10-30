@@ -1192,10 +1192,8 @@ type ResidentPulse = {
     polls: number
     updates: number
     home: number
-    complaints: number
     minutes: number
     profile: number
-    payments: number
   }
   counts: { unreadUpdates: number; openPolls: number }
   resetPending: { createdAt: string; expiresAt: string } | null
@@ -1233,7 +1231,7 @@ const getResidentPulse = async (request: IncomingMessage, access: TenantAccess):
   ])
   const versions: ResidentPulse['versions'] = {
     notices: 0, polls: 0, updates: 0, home: 0,
-    complaints: 0, minutes: 0, profile: 0, payments: 0,
+    minutes: 0, profile: 0,
   }
   for (const row of versionRows.rows) versions[row.entity] = Number(row.version)
   pulseDbTimings.set(request, performance.now() - databaseStartedAt)

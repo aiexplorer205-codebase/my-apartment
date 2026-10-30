@@ -75,10 +75,12 @@ Firebase and Filebase variables in `.env.example` are unused by current flows.
 
 Fresh initialization creates `myapartment_platform_db` (`block9_platform`) and
 `myapartment_app_db` (`block9_tenant`), applying every ordered SQL migration through
-tenant `040` and platform `015`. Migration `040_resident_change_signals.sql`
-replaces row-level notice/poll version triggers with statement-level triggers and
-adds resident-visible change signals for current complaint, minutes, profile and
-financial data. It creates separate platform, tenant-runtime, and lifecycle logins.
+tenant `041` and platform `015`. Migration `040_resident_change_signals.sql`
+converts version triggers to statement-level triggers and adds signals for
+resident-visible records. Migration `041_resident_signal_scopes.sql` keeps
+community-wide signals only for community-scoped data and removes version bumps
+for resident-specific state. It creates separate platform, tenant-runtime, and
+lifecycle logins.
 There is no database-per-tenant template or cloning step.
 
 Use the URLs and password variables in `.env.example`. Existing `.env` files

@@ -88,40 +88,29 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
     expect((await pa().query('SELECT entity FROM resident_change_versions WHERE tenant_id=$1',[b])).rows).toEqual([])
   })
   it('registers statement-level change signals for every resident-visible write table',async()=>{
-    const registry:Record<string,string[]> = {
+    const communitySignals:Record<string,string[]> = {
       notices:['notices','updates','home'],
       polls:['polls','updates','home'],
       poll_options:['polls','updates','home'],
-      notice_reads:['updates','home'],
-      poll_participation:['updates','home'],
-      complaints:['complaints','home'],
-      complaint_messages:['complaints','home'],
-      complaint_events:['complaints','home'],
-      complaint_photos:['complaints','home'],
       meeting_minutes:['minutes','home'],
       meeting_minutes_attendees:['minutes','home'],
-      residents:['profile','home'],
       organizations:['profile','home'],
       units:['profile','home'],
       apartment_buildings:['profile','home'],
-      invoices:['home','payments'],
-      invoice_items:['home','payments'],
-      payments:['home','payments'],
-      payment_reports:['home','payments'],
-      billing_adjustments:['home','payments'],
-      resident_credits:['home','payments'],
-      resident_credit_uses:['home','payments'],
-      account_entries:['home','payments'],
-      opening_credit_allocations:['home','payments'],
-      resident_opening_balances:['home','payments'],
     }
+    const perResidentWrites=[
+      'notice_reads','poll_participation','poll_ballots','complaints','complaint_messages','complaint_events','complaint_photos',
+      'residents','invoices','invoice_items','payments','payment_reports','billing_adjustments','resident_credits',
+      'resident_credit_uses','opening_credit_allocations','resident_opening_balances',
+    ]
+    const communityLedgerWithoutResidentSignal=['account_entries']
     const triggers=await owner.query<{table_name:string;trigger_definition:string;trigger_type:number;function_name:string}>(
       `SELECT c.relname AS table_name,pg_get_triggerdef(t.oid) AS trigger_definition,t.tgtype AS trigger_type,p.proname AS function_name
        FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
        JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_proc p ON p.oid=t.tgfoid
-       WHERE n.nspname='block9_tenant' AND NOT t.tgisinternal`,
+       WHERE n.nspname='block9_tenant' AND NOT t.tgisinternal AND t.tgname ~ '^resident_.*_versions_(insert|update|delete)$'`,
     )
-    for(const [table,entities]of Object.entries(registry)){
+    for(const [table,entities]of Object.entries(communitySignals)){
       const actual=triggers.rows.filter((trigger)=>trigger.table_name===table)
       expect(actual,`${table} must have insert/update/delete signals`).toHaveLength(3)
       expect(new Set(actual.map((trigger)=>trigger.trigger_type&28))).toEqual(new Set([4,8,16]))
@@ -129,10 +118,19 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
       expect(actual.every((trigger)=>trigger.function_name==='bump_resident_versions_from_transition')).toBe(true)
       expect(actual.every((trigger)=>entities.every((entity)=>trigger.trigger_definition.includes(entity)))).toBe(true)
     }
+    for(const table of perResidentWrites){
+      expect(triggers.rows.filter((trigger)=>trigger.table_name===table),`${table} must not bump community-wide versions`).toHaveLength(0)
+    }
+    for(const table of communityLedgerWithoutResidentSignal){
+      expect(triggers.rows.filter((trigger)=>trigger.table_name===table),`${table} is not resident-visible and must not bump resident versions`).toHaveLength(0)
+    }
   })
-  it('bumps resident versions for every current visible write family once per SQL statement',async()=>{
+  it('bumps only community-scoped resident versions once per SQL statement',async()=>{
     const noticeId=randomUUID(),pollId=randomUUID(),complaintId=randomUUID(),meetingId=randomUUID(),requestKey=randomUUID()
     const invoice=(await pa().query('SELECT id FROM invoices LIMIT 1')).rows[0].id
+    const before=Object.fromEntries((await pa().query(
+      'SELECT entity,version::int AS version FROM resident_change_versions WHERE tenant_id=$1',[a],
+    )).rows.map(({entity,version})=>[entity,version])) as Record<string,number>
     await pa().query(`INSERT INTO notices(id,tenant_id,title,body,status,published_at)
       VALUES($1,$2,'Version notice','Visible notice','published',NOW())`,[noticeId,a])
     await pa().query(`INSERT INTO notice_reads(tenant_id,resident_id,notice_id) VALUES($1,$2,$3)`,[a,residentA,noticeId])
@@ -161,14 +159,14 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
     const versions=Object.fromEntries((await pa().query(
       'SELECT entity,version::int AS version FROM resident_change_versions WHERE tenant_id=$1',[a],
     )).rows.map(({entity,version})=>[entity,version])) as Record<string,number>
-    expect(versions.notices).toBeGreaterThan(0)
-    expect(versions.polls).toBe(2)
-    expect(versions.updates).toBeGreaterThan(0)
-    expect(versions.complaints).toBeGreaterThan(0)
-    expect(versions.minutes).toBeGreaterThan(0)
-    expect(versions.profile).toBeGreaterThan(0)
-    expect(versions.payments).toBeGreaterThan(0)
-    expect(versions.home).toBeGreaterThan(0)
+    expect(versions.notices).toBe((before.notices??0)+1)
+    expect(versions.polls).toBe((before.polls??0)+2)
+    expect(versions.updates).toBe((before.updates??0)+2)
+    expect(versions.minutes).toBe((before.minutes??0)+2)
+    expect(versions.home).toBe((before.home??0)+5)
+    expect(versions.profile).toBe(before.profile??0)
+    expect(versions.complaints).toBeUndefined()
+    expect(versions.payments).toBeUndefined()
   })
   it('keeps tenant context isolated through concurrent reuse, rollback and abandoned transactions',async()=>{
     await Promise.all(Array.from({length:40},async(_,index)=>{
