@@ -4,7 +4,7 @@ import { adminAuth } from './better-auth-client'
 import { BetterAuthLogin } from './better-auth-login'
 import { useTranslation } from '@block9/app-platform'
 
-export function AdminPasskeyPrompt({ children, settings = false }: { children?: ReactNode; settings?: boolean }) {
+export function AdminPasskeyPrompt({ children }: { children?: ReactNode }) {
   const { t } = useTranslation('common')
   const { data } = adminAuth.useSession()
   const [show, setShow] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('')
@@ -15,12 +15,12 @@ export function AdminPasskeyPrompt({ children, settings = false }: { children?: 
     setFresh(verifiedAt > 0 && Date.now() - verifiedAt < 300000)
     let active = true
     const key = `admin-passkey-prompt:${data.session.id}`
-    if (!settings && globalThis.sessionStorage.getItem(key)) return
+    if (globalThis.sessionStorage.getItem(key)) return
     void adminAuth.passkey.listUserPasskeys().then(result => {
-      if (active && !result.error && (settings || result.data?.length === 0)) setShow(true)
+      if (active && !result.error && result.data?.length === 0) setShow(true)
     })
     return () => { active = false }
-  }, [data, settings])
+  }, [data])
   function skip() {
     if (data) globalThis.sessionStorage.setItem(`admin-passkey-prompt:${data.session.id}`, 'done')
     setShow(false)

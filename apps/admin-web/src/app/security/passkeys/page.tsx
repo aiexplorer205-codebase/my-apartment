@@ -1,4 +1,3 @@
 'use client'
-import Link from 'next/link'
-import { AdminPasskeyPrompt } from '../../../lib/admin-passkey-prompt'
-export default function PasskeysPage() { return <AdminPasskeyPrompt settings><Link href="/dashboard">Return to admin portal</Link></AdminPasskeyPrompt> }
+import { AdminPasskeySettings } from '../../../lib/admin-passkey-settings'
+export default function PasskeysPage() { return <AdminPasskeySettings /> }
