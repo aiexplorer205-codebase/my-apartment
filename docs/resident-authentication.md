@@ -1,6 +1,6 @@
 # Resident authentication providers
 
-Residents can use self-hosted Better Auth or Auth0. Admin and operator applications always use Auth0.
+Residents can use self-hosted Better Auth or Auth0. Admin uses a separate Better Auth service; operator uses Auth0. See [admin authentication](admin-authentication.md).
 `RESIDENT_AUTH_PROVIDER=better-auth|auth0` is a **server-side deployment flag**, set consistently on API and resident web.
 Compose and `.env.example` select Better Auth. Without the variable, standalone processes retain Auth0.
 An unknown value fails closed. There is no automatic provider fallback, identity linking or migration.

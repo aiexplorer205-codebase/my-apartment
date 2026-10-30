@@ -1,3 +1,5 @@
+import { z } from 'zod'
+import { authenticateAdminSession } from './admin-auth.js'
 import { issueResidentQr, issueResidentResetQr } from './resident-qr.js'
 import { authenticateResidentSession, identityMayUseRole, residentAuthProvider } from './resident-auth.js'
 import { reserveTenantStorageDeletion, deleteTenantPhotoStorage } from './photo-maintenance.js'
@@ -33,11 +35,11 @@ import { AuthorizationError, ValidationError } from '@block9/shared'
 import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from './billing-calculations.js'
 import { createAdminInvitationToken, hashAdminInvitationToken, sendAdminInvitationEmail } from './admin-invitations.js'
 import { createResidentInvitationToken, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
-import { deleteOrganizationPasswordlessUser, provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
+import { provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
 import { checkDatabaseReadiness, deleteTenantData, getPlatformPool, getTenantPool } from './persistence.js'
 
 interface AuthenticatedSubject {
-  provider: 'auth0' | 'better-auth'
+  provider: 'auth0' | 'better-auth' | 'better-auth-admin'
   clientId?: string
   verifiedEmail?: string
   subject: string
@@ -79,9 +81,10 @@ const authenticate = async (request: IncomingMessage): Promise<AuthenticatedSubj
   const authorization = request.headers.authorization
   const token = authorization?.startsWith('Bearer ') ? authorization.slice(7).trim() : ''
   if (!token) {
-    throw new ApiFault(401, 'unauthorized', 'A valid Auth0 access token is required')
+    throw new ApiFault(401, 'unauthorized', 'Authentication is required')
   }
 
+  if (token.startsWith('admin-session.')) return authenticateAdminSession(token)
   if (token.startsWith('resident-session.')) return authenticateResidentSession(token)
 
   const issuer = expectedIssuer()
@@ -381,35 +384,13 @@ const lookupAdminInvitation = async (request: IncomingMessage) => {
 
 const acceptAdminInvitation = async (request: IncomingMessage, requestId: string) => {
     const identity = await authenticate(request)
-    if (identity.provider !== 'auth0') throw new ApiFault(403, 'forbidden', 'Administrator sign-in requires Auth0')
-    const input = await readJsonBody(request)
-    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof (input as Record<string, unknown>).token !== 'string') {
-      throw new ApiFault(400, 'invalid_request', 'A valid administrator invitation token is required')
-    }
-    const token = (input as { token: string }).token
-    if (!/^[A-Za-z0-9_-]{40,50}$/.test(token)) {
-      throw new ApiFault(400, 'invalid_request', 'The administrator invitation token is invalid')
-    }
+    if (identity.provider !== 'better-auth-admin') throw new ApiFault(403, 'forbidden', 'Administrator sign-in is required')
+    const parsed = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{40,50}$/) }).strict().safeParse(await readJsonBody(request))
+    if (!parsed.success) throw new ApiFault(400, 'invalid_request', 'A valid administrator invitation token is required')
+    const { token } = parsed.data
 
-    const domain = process.env.AUTH0_DOMAIN?.trim()
-    if (!domain || domain.includes('/') || domain.includes('example.auth0.com')) {
-      throw new ApiFault(503, 'configuration_error', 'Auth0 domain is not configured')
-    }
-    let profileResponse: Awaited<ReturnType<typeof globalThis.fetch>>
-    try {
-      profileResponse = await globalThis.fetch(`https://${domain}/userinfo`, {
-        headers: { Authorization: `Bearer ${identity.accessToken}` },
-      })
-    } catch {
-      throw new ApiFault(503, 'dependency_unavailable', 'Could not verify the Auth0 email address')
-    }
-    if (!profileResponse.ok) {
-      throw new ApiFault(401, 'unauthorized', 'The Auth0 session must include the email profile scope')
-    }
-    const profile = await profileResponse.json() as { sub?: unknown; email?: unknown; email_verified?: unknown }
-    if (profile.sub !== identity.subject || typeof profile.email !== 'string' || profile.email_verified !== true) {
-      throw new ApiFault(403, 'forbidden', 'Sign in with the invited email address and verify it through the email one-time passcode')
-    }
+    if (!identity.verifiedEmail) throw new ApiFault(403, 'forbidden', 'Verify the invited email with OTP')
+    const profile = { email: identity.verifiedEmail }
 
     const pool = getPlatformPool()
     const client = await pool.connect()
@@ -3053,14 +3034,9 @@ const changeOrganizationLifecycle = async (request: IncomingMessage, tenantId: s
   // Mark first so all tenant access is denied before deleting external resources.
   await pool.query(`UPDATE tenant_records SET status = 'deleting', updated_at = NOW() WHERE tenant_id = $1`, [tenantId])
   try {
-    const sharedEmail = await pool.query<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM tenant_records WHERE tenant_id <> $1 AND lower(admin_email) = lower($2))
-          OR EXISTS (SELECT 1 FROM tenant_memberships WHERE tenant_id <> $1 AND subject = $3) AS exists`,
-      [tenantId, organization.admin_email, organization.admin_auth0_user_id],
-    )
-    const auth0AdminRemoved = !organization.admin_email || sharedEmail.rows[0]?.exists
-      ? false
-      : await deleteOrganizationPasswordlessUser(organization.admin_email, organization.admin_auth0_user_id)
+    // Better Auth identities are global and may belong to other organizations.
+    // Removing this tenant's membership revokes access without deleting credentials.
+    const auth0AdminRemoved = false
     await reserveTenantStorageDeletion(tenantId)
     await deleteTenantData(tenantId)
     await pool.query('UPDATE storage_deletions SET database_purged_at=now() WHERE tenant_id=$1',[tenantId])
@@ -3147,23 +3123,6 @@ const completeOrganizationOnboarding = async (record: OnboardingRecord) => {
   } catch (error) {
     const detail = await recordProvisioningFailure(record.tenant_id, 'tenant_workspace', error)
     throw new ApiFault(503, 'dependency_unavailable', `The organization is recorded, but its tenant workspace could not be provisioned: ${detail}`)
-  }
-
-  try {
-    const auth0User = await provisionPasswordlessUser(record.admin_email)
-    await platformPool.query(
-      `UPDATE tenant_records SET admin_auth0_user_id = $2, admin_auth0_user_created = $3, updated_at = NOW() WHERE tenant_id = $1`,
-      [record.tenant_id, auth0User.userId, auth0User.createdByApp],
-    )
-    await platformPool.query(
-      `UPDATE provisioning_state
-       SET phase = 'auth0_user', status = 'completed', last_error = NULL, updated_at = NOW()
-       WHERE tenant_id = $1`,
-      [record.tenant_id],
-    )
-  } catch (error) {
-    const detail = await recordProvisioningFailure(record.tenant_id, 'auth0_user', error)
-    throw new ApiFault(503, 'dependency_unavailable', `The tenant workspace was created, but its Auth0 passwordless user could not be provisioned: ${detail}`)
   }
 
   const { token, tokenHash } = createAdminInvitationToken()
@@ -3358,15 +3317,10 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
         throw new ApiFault(410, 'configuration_error', 'Authentication is managed by the configured Auth0 Universal Login application')
       }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/public/passwordless/start') {
-        const bodyValue = await readJsonBody(request)
-        const body = typeof bodyValue === 'object' && bodyValue !== null && !Array.isArray(bodyValue)
-          ? bodyValue as Record<string, unknown>
-          : {}
-        const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
-        const application = body.application
-        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || (application !== 'admin' && application !== 'resident')) {
-          throw new ApiFault(400, 'invalid_request', 'Enter a valid email address and application')
-        }
+        const parsed = z.object({ email: z.string().trim().toLowerCase().pipe(z.email().max(254)), application: z.enum(['admin', 'resident']) }).safeParse(await readJsonBody(request))
+        if (!parsed.success) throw new ApiFault(400, 'invalid_request', 'Enter a valid email address and application')
+        const { email, application } = parsed.data
+        if (application === 'admin') throw new ApiFault(410, 'invalid_request', 'Use admin email verification')
         if (application === 'resident' && residentAuthProvider() !== 'auth0') throw new ApiFault(410, 'invalid_request', 'Use resident email verification')
         await sendPasswordlessOtpToRegisteredUser(email, application)
         respond(response, 200, { message: 'If this email is registered, a sign-in code has been sent.' }, requestId)

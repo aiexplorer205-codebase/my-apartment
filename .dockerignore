@@ -19,3 +19,6 @@ terraform
 .DS_Store
 figma-prototype
 docs/design
+# Local task caches are not container source.
+.turbo
+**/.turbo

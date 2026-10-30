@@ -13,10 +13,12 @@ describe('resident provider boundaries', () => {
     vi.stubEnv('RESIDENT_AUTH_PROVIDER', 'betterauth-typo')
     expect(() => residentAuthProvider()).toThrow('Invalid resident authentication provider')
   })
-  it('keeps admin on Auth0 and accepts only the selected resident provider', () => {
+  it('isolates admin Better Auth and accepts only the selected resident provider', () => {
     vi.stubEnv('RESIDENT_AUTH_PROVIDER', 'better-auth')
     expect(identityMayUseRole('better-auth', 'admin')).toBe(false)
-    expect(identityMayUseRole('auth0', 'admin')).toBe(true)
+    expect(identityMayUseRole('auth0', 'admin')).toBe(false)
+    expect(identityMayUseRole('better-auth-admin', 'admin')).toBe(true)
+    expect(identityMayUseRole('better-auth-admin', 'resident')).toBe(false)
     expect(identityMayUseRole('auth0', 'resident')).toBe(false)
     expect(identityMayUseRole('better-auth', 'resident')).toBe(true)
     vi.stubEnv('RESIDENT_AUTH_PROVIDER', 'auth0')

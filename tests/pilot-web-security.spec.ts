@@ -1,3 +1,4 @@
+import { NextRequest } from '../apps/admin-web/node_modules/next/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const session = vi.hoisted(() => ({ getAccessToken: vi.fn().mockResolvedValue({ token: 'test-token' }) }))
@@ -10,8 +11,8 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks() 
 for (const [name, route] of [['admin', admin], ['operator', operator]] as const) {
   describe(`${name} proxy security`, () => {
     const context = () => ({ params: Promise.resolve({ path: ['v1', 'admin', 'example'] }) })
-    const request = (origin?: string, body = '{}') => new Request('http://internal/api/backend/v1/admin/example', {
-      method: 'POST', headers: { ...(origin ? { origin } : {}), 'content-type': 'application/json', host: 'evil.example' }, body,
+    const request = (origin?: string, body = '{}') => new NextRequest('http://internal/api/backend/v1/admin/example', {
+      method: 'POST', headers: { ...(origin ? { origin } : {}), 'content-type': 'application/json', cookie: 'myapartment-admin.session_token=signed.cookie', host: 'evil.example' }, body,
     }) as Parameters<typeof route.POST>[0]
     it.each([undefined, 'https://evil.example', 'https://sibling.example.test'])('rejects untrusted Origin %s before reading auth', async (origin) => {
       vi.stubEnv('APP_BASE_URL', 'https://app.example.test')

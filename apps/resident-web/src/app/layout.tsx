@@ -5,7 +5,8 @@ import { residentAuthProvider } from '../lib/resident-auth-config'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
 import { I18nProvider, getAppConfig } from '@block9/app-platform'
-import { AppMessagesProvider, PwaControls } from '@block9/ui'
+import { AppMessagesProvider } from '@block9/ui'
+import { AuthenticatedPwaControls } from '../lib/authenticated-pwa-controls'
 
 const config = getAppConfig()
 
@@ -23,7 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <I18nProvider namespaces={['common', 'resident', 'validation']}>
           <AuthProvider provider={residentAuthProvider()}>
             <AppMessagesProvider>
-              <PwaControls appName={config.application.productName} />
+              <AuthenticatedPwaControls appName={config.application.productName} />
               <ResidentQrBanner />
               {children}
             </AppMessagesProvider>

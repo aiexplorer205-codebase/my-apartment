@@ -3,6 +3,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
+      ADMIN_AUTH_DATABASE_PASSWORD: ${ADMIN_AUTH_DATABASE_PASSWORD:-local-admin-auth-password}
       AUTH_DATABASE_PASSWORD: ${AUTH_DATABASE_PASSWORD:-local-auth-password}
       PLATFORM_DATABASE_PASSWORD: ${PLATFORM_DATABASE_PASSWORD:-local-platform-password}
       APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:-local-app-password}
@@ -60,6 +61,7 @@ services:
       AUTH0_ADMIN_CLIENT_ID: ${AUTH0_ADMIN_CLIENT_ID:-}
       AUTH0_ADMIN_CLIENT_SECRET: ${AUTH0_ADMIN_CLIENT_SECRET:-}
       RESIDENT_AUTH_PROVIDER: ${RESIDENT_AUTH_PROVIDER:-better-auth}
+      ADMIN_AUTH_INTERNAL_URL: ${ADMIN_AUTH_INTERNAL_URL:-http://admin-auth:4121}
       RESIDENT_AUTH_INTERNAL_URL: ${RESIDENT_AUTH_INTERNAL_URL:-http://resident-auth:4120}
       AUTH0_RESIDENT_CLIENT_ID: ${AUTH0_RESIDENT_CLIENT_ID:-}
       AUTH0_RESIDENT_CLIENT_SECRET: ${AUTH0_RESIDENT_CLIENT_SECRET:-}
@@ -155,6 +157,31 @@ services:
       retries: 12
       start_period: 20s
 
+  admin-auth:
+    build:
+      context: .
+      dockerfile: docker/admin-auth.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4121
+      POSTGRES_AUTH_URL: ${POSTGRES_ADMIN_AUTH_URL:-postgresql://myapartment_admin_auth:${ADMIN_AUTH_DATABASE_PASSWORD:-local-admin-auth-password}@postgres:5432/myapartment_platform_db}
+      ADMIN_AUTH_SECRET: ${ADMIN_AUTH_SECRET:-}
+      ADMIN_WEB_PUBLIC_URL: ${ADMIN_WEB_PUBLIC_URL:-http://localhost:3100}
+      ADMIN_PASSKEY_RP_ID: ${ADMIN_PASSKEY_RP_ID:-localhost}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-no-reply@block9.co.in}
+      AUTH_DATABASE_POOL_SIZE: ${AUTH_DATABASE_POOL_SIZE:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4121/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
   resident-web:
     build:
       context: .
@@ -200,6 +227,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      ADMIN_AUTH_INTERNAL_URL: ${ADMIN_AUTH_INTERNAL_URL:-http://admin-auth:4121}
       API_INTERNAL_URL: http://api:4001
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-example.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.myapartment.local}

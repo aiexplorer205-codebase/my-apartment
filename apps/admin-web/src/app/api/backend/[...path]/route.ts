@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { auth0 } from '../../../../lib/auth0'
+import { adminSessionBearer } from '../../../../lib/admin-auth-config'
 
 const API_BASE_URL = (process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4101').replace(/\/$/, '')
 const PUBLIC_PREFIX = '/v1/public/'
@@ -21,8 +21,9 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   }
 
   try {
-    const { token } = await auth0.getAccessToken()
-    headers.set('authorization', `Bearer ${token}`)
+    const cookie = request.cookies.get('__Secure-myapartment-admin.session_token') ?? request.cookies.get('myapartment-admin.session_token')
+    if (!cookie) throw new Error('Missing admin session')
+    headers.set('authorization', `Bearer ${adminSessionBearer(cookie.value)}`)
   } catch {
     if (!apiPath.startsWith(PUBLIC_PREFIX)) {
       return NextResponse.json({ message: 'Authentication required' }, { status: 401, headers: { 'cache-control': 'no-store' } })

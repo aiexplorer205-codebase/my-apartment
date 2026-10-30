@@ -156,7 +156,7 @@ function Overview() {
         return
       }
       if (action === 'delete' && !payload.auth0AdminRemoved) {
-        pushMessage(`${organization.name} (${organization.apartmentCode}) and its apartment database were deleted. Its Auth0 user was retained because the email is shared with another apartment or no dedicated passwordless account was found.`, 'info')
+        pushMessage(`${organization.name} (${organization.apartmentCode}) and its apartment data were deleted. Administrator sign-in credentials were retained; access to this organization has been removed.`, 'info')
       }
       reload()
     } catch (cause) {

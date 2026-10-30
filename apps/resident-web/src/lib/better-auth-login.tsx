@@ -2,8 +2,8 @@
 import { useState, type FormEvent } from 'react'
 import { residentAuth } from './better-auth-client'
 
-export function BetterAuthLogin({ initialEmail = '', lockEmail = false, onVerified }: {
-  initialEmail?: string; lockEmail?: boolean; onVerified?: () => void
+export function BetterAuthLogin({ initialEmail = '', lockEmail = false, onVerified, emailOnly = false }: {
+  initialEmail?: string; lockEmail?: boolean; onVerified?: () => void; emailOnly?: boolean
 }) {
   const [email, setEmail] = useState(initialEmail)
   const [code, setCode] = useState(''), [sent, setSent] = useState(false)
@@ -46,7 +46,7 @@ export function BetterAuthLogin({ initialEmail = '', lockEmail = false, onVerifi
       setBusy(true); setError(''); void sendCode().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Could not resend code')).finally(() => setBusy(false))
     }}>Resend code</button>}
     {sent && !lockEmail && <button type="button" className="secondary" disabled={busy} onClick={() => { setSent(false); setCode(''); setError('') }}>Change email</button>}
-    {!onVerified && <button className="secondary wide" disabled={busy} type="button" onClick={() => void signInWithPasskey()}>Sign in with a passkey</button>}
-    {!onVerified && <p>New residents verify their email here, then accept their flat invitation. You can add a passkey afterwards.</p>}
+    {!onVerified && !emailOnly && <button className="secondary wide" disabled={busy} type="button" onClick={() => void signInWithPasskey()}>Sign in with a passkey</button>}
+    {!onVerified && !emailOnly && <p>New residents verify their email here, then accept their flat invitation. You can add a passkey afterwards.</p>}
   </form>
 }

@@ -1,8 +1,7 @@
 'use client'
 
-import { Auth0Provider, useUser } from '@auth0/nextjs-auth0/client'
+import { adminAuth } from '../lib/better-auth-client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { adminInvitationReturnToKey, isAdminInvitationReturnTo } from '../lib/admin-invitation-routing'
 
 type AuthUser = { email?: string; name?: string; sub?: string }
 type LoginOptions = { authorizationParams?: { login_hint?: string; connection?: string; prompt?: string; scope?: string }; appState?: { returnTo?: string } }
@@ -26,7 +25,8 @@ export function useAuth0() {
 }
 
 function SessionContext({ children }: { children: ReactNode }) {
-  const { user, isLoading } = useUser()
+  const { data, isPending: isLoading } = adminAuth.useSession()
+  const user = data?.user ? { ...data.user, sub: `betterauth-admin|${data.user.id}` } : undefined
   const [activeTenantId, setActiveTenantIdState] = useState<string | null>(null)
 
   useEffect(() => {
@@ -47,17 +47,14 @@ function SessionContext({ children }: { children: ReactNode }) {
   }, [user?.sub])
 
   const loginWithRedirect = useCallback(async (options?: LoginOptions) => {
-    const returnTo = options?.appState?.returnTo
-    if (isAdminInvitationReturnTo(returnTo)) globalThis.sessionStorage.setItem(adminInvitationReturnToKey, returnTo)
-    const params = new globalThis.URLSearchParams({ returnTo: returnTo?.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/' })
-    const authorization = options?.authorizationParams
-    for (const [key, value] of Object.entries(authorization ?? {})) if (value) params.set(key, value)
-    globalThis.location.assign(`/auth/login?${params.toString()}`)
+    const target = options?.appState?.returnTo ?? '/'
+    globalThis.location.assign(target.startsWith('/') && !target.startsWith('//') ? target : '/')
   }, [])
 
   const logout = useCallback((options?: { logoutParams?: { returnTo?: string } }) => {
     const returnTo = options?.logoutParams?.returnTo ?? globalThis.location.origin
-    globalThis.location.assign(`/auth/logout?returnTo=${encodeURIComponent(returnTo)}`)
+    const target = new URL(returnTo, globalThis.location.origin)
+    void adminAuth.signOut().then(result => { if (!result.error) globalThis.location.assign(target.origin === globalThis.location.origin ? target.href : '/') })
   }, [])
 
 
@@ -76,5 +73,5 @@ function SessionContext({ children }: { children: ReactNode }) {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  return <Auth0Provider><SessionContext>{children}</SessionContext></Auth0Provider>
+  return <SessionContext>{children}</SessionContext>
 }

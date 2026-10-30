@@ -6,8 +6,8 @@ export function residentAuthProvider(): 'auth0' | 'better-auth' {
   return provider
 }
 
-export function identityMayUseRole(provider: 'auth0' | 'better-auth', role: 'resident' | 'admin'): boolean {
-  return role === 'admin' ? provider === 'auth0' : provider === residentAuthProvider()
+export function identityMayUseRole(provider: 'auth0' | 'better-auth' | 'better-auth-admin', role: 'resident' | 'admin'): boolean {
+  return role === 'admin' ? provider === 'better-auth-admin' : provider === residentAuthProvider()
 }
 
 export async function authenticateResidentSession(token: string) {

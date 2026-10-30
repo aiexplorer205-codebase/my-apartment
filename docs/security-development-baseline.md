@@ -95,8 +95,8 @@ be operator-authorized, narrowly scoped and audited.
    CSRF protection. Trust forwarded headers only from an ingress that overwrites them.
 5. Production uses HTTPS, HttpOnly/Secure/Lax session cookies and bounded
    lifetimes. Credential replacement/re-link requires fresh identity proof,
-   session invalidation and audit. Never weaken admin/operator Auth0 or invent
-   an additional OTP issuer; resident Better Auth follows its documented provider boundary.
+   session invalidation and audit. Admin and resident use isolated Better Auth services; operator remains on Auth0.
+   Preserve their documented provider/session boundaries and never invent an OTP issuer.
 6. Establish shared CSP (including frame-ancestors), nosniff and Referrer-Policy
    across applications and errors. Introduce CSP with tested script/connect/image
    allowlists; do not solve failures with unrestricted sources. Enable HSTS at

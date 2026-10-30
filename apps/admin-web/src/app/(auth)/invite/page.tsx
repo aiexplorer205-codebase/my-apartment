@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { AdminPasskeyPrompt } from '../../../lib/admin-passkey-prompt'
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth0 } from '../../auth-provider'
@@ -34,6 +35,7 @@ function AcceptAdminInvitationContent() {
   const { isAuthenticated, isLoading, user, logout } = useAuth0()
   const token = searchParams.get('token')
   const attempted = useRef(false)
+  const [confirmed, setConfirmed] = useState(0)
   const [invitedEmail, setInvitedEmail] = useState<string | null>(null)
   const [loadingInvitation, setLoadingInvitation] = useState(Boolean(token))
   const [accepting, setAccepting] = useState(false)
@@ -74,7 +76,7 @@ function AcceptAdminInvitationContent() {
   }, [token])
 
   useEffect(() => {
-    if (!isAuthenticated || !token || !invitedEmail || attempted.current) return
+    if (!confirmed || !isAuthenticated || !token || !invitedEmail || attempted.current) return
     if (signedInEmail && signedInEmail.toLowerCase() !== invitedEmail.toLowerCase()) {
       setError(`This invitation is for ${invitedEmail}. Sign in with that email address to accept it.`)
       return
@@ -104,20 +106,20 @@ function AcceptAdminInvitationContent() {
     }
     void accept()
     return () => { cancelled = true }
-  }, [invitedEmail, isAuthenticated, signedInEmail, token])
+  }, [confirmed, invitedEmail, isAuthenticated, signedInEmail, token])
 
   return (
     <main className="auth-shell">
       <section className="auth-card invitation-card">
         <div className="brand-row"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></div>
         {isLoading || loadingInvitation || accepting ? (
-          <p role="status">{accepting ? 'Verifying your email and accepting the invitation…' : loadingInvitation ? 'Loading invitation details…' : 'Checking your Auth0 session…'}</p>
+          <p role="status">{accepting ? 'Verifying your email and accepting the invitation…' : loadingInvitation ? 'Loading invitation details…' : 'Checking your session…'}</p>
         ) : accepted ? (
           <>
             <div className="eyebrow">INVITATION ACCEPTED</div>
             <h1>Administrator access is ready</h1>
             <p>Your verified email is now linked to this organization. Continue to the administrator portal.</p>
-            <Link className="primary wide" href="/dashboard">Open admin portal</Link>
+            <AdminPasskeyPrompt><Link className="primary wide" href="/dashboard">Open admin portal</Link></AdminPasskeyPrompt>
           </>
         ) : !token ? (
           <>
@@ -138,6 +140,7 @@ function AcceptAdminInvitationContent() {
             <div className="eyebrow">VERIFYING ADMIN INVITATION</div>
             <h1>Signed in as {user?.email ?? 'an account'}</h1>
             <p>{error ?? `This invitation is for ${invitedEmail}. The invitation can only be accepted by that verified email address.`}</p>
+            <button className="primary wide" type="button" onClick={() => setConfirmed(value => value + 1)}>Accept invitation</button>
             <label className="invite-email-field"><span>Invited email</span><input type="email" value={invitedEmail ?? ''} readOnly aria-readonly="true" /></label>
             <button className="secondary" type="button" onClick={() => logout({ logoutParams: { returnTo: globalThis.location.href } })}>Sign out</button>
           </>
@@ -147,7 +150,7 @@ function AcceptAdminInvitationContent() {
             <h1>Accept your invitation</h1>
             <p>Continue with Email OTP. This invitation can only be accepted by the invited email address.</p>
             {error && <p role="alert">{error}</p>}
-            <EmbeddedLogin experienceName="Tenant Admin" initialEmail={invitedEmail ?? ''} lockEmail />
+            <EmbeddedLogin experienceName="Tenant Admin" initialEmail={invitedEmail ?? ''} lockEmail emailOnly />
           </>
         )}
       </section>

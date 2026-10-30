@@ -2,16 +2,17 @@
 
 import { BetterAuthLogin } from './better-auth-login'
 import { useResidentAuth } from '../app/auth-provider'
+import { LoginPresentation } from './login-presentation'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import type { ReactNode } from 'react'
 import { useApiQuery } from './use-api'
 import type { TenantMembership } from '@block9/auth-types'
-import { getAppConfig, getFormattedCopyright } from '@block9/app-platform'
+import { useLocale, useTranslation } from '@block9/app-platform'
 
 
 export function AuthBoundary({ children }: { children: ReactNode }) {
-  const { isLoading, isAuthenticated, provider } = useResidentAuth()
+  const { isLoading, isAuthenticated } = useResidentAuth()
   const pathname = usePathname()
   const experienceName = pathname.startsWith('/dashboard') ? 'Tenant Admin' : 'Resident'
 
@@ -20,28 +21,32 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
   }
   if (!isAuthenticated) {
     return (
-      <main className="auth-shell app-sign-in">
-        <header className="auth-brand"><span className="brand-mark">{getAppConfig().application.monogram}</span><span>{getAppConfig().application.productName}</span></header>
-        <div className="auth-layout app-sign-in-layout">
-          <section className="auth-story">
-            <span className="context-kicker">ONE HOME. ONE CLEAR VIEW.</span>
-            <div className="auth-story-title">Apartment living,<br />thoughtfully managed.</div>
-            <p>Maintenance payments, resident communication, and apartment operations in one secure workspace.</p>
-            <div className="auth-trust"><span><AppShieldIcon /></span><div><b>Private by design</b><small>Every organization is isolated with role based access.</small></div></div>
-          </section>
-          <section className="auth-card app-sign-in-card" aria-labelledby="signin-title">
-            <div className="auth-heading"><span className="auth-mobile-mark">{getAppConfig().application.monogram}</span><b id="signin-title">Welcome back</b><p>Sign in to your {experienceName} workspace.</p></div>
-            <EmbeddedLogin experienceName={experienceName} />
-            <p className="auth-security"><AppShieldIcon /> Secure access · {provider === 'better-auth' ? 'Email OTP or passkey' : 'Email verification'}</p>
-          </section>
-        </div>
-        <footer className="auth-footer"><span>{getFormattedCopyright()}</span><span>Privacy · Terms · Help</span></footer>
-      </main>
+      <LoginPresentation><LoginChoices><EmbeddedLogin experienceName={experienceName} /></LoginChoices></LoginPresentation>
     )
   }
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/resident')) return <>{children}</>
   return <>{children}</>
+}
+
+function LoginChoices({ children }: { children: ReactNode }) {
+  const { provider, loginWithRedirect } = useResidentAuth()
+  const { locale } = useLocale()
+  const { t } = useTranslation('common')
+  const [emailSelected, setEmailSelected] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function passkey() {
+    setBusy(true); setError('')
+    try { if (provider === 'better-auth') { const { residentAuth } = await import('./better-auth-client'); const result = await residentAuth.signIn.passkey(); if (result.error) throw new Error(result.error.message ?? 'Passkey sign-in failed'); globalThis.location.reload() } else { await loginWithRedirect() } } catch (cause) { setError(cause instanceof Error ? cause.message : 'Sign-in was cancelled. Try again or use email.') } finally { setBusy(false) }
+  }
+  return <div className="login-choices">
+    {emailSelected ? <>{children}<button className="secondary wide" type="button" onClick={() => { setEmailSelected(false); setError('') }}>{locale === 'te' ? 'లాగిన్ ఎంపికలకు తిరిగి వెళ్ళండి' : t('loginReference.back')}</button></> : <>
+      <button className="primary wide" type="button" disabled={busy} onClick={() => void passkey()}>{busy ? (locale === 'te' ? 'దయచేసి వేచి ఉండండి…' : t('loginReference.waiting')) : <><span>{t('loginReference.passkey')}</span><small lang="te">{t('loginReference.passkeyTe')}</small></>}</button>
+      <button className="secondary wide" type="button" disabled={busy} onClick={() => setEmailSelected(true)}><span>{t('loginReference.email')}</span><small lang="te">{t('loginReference.emailTe')}</small></button>
+    </>}
+    {error && <p role="alert">{error}</p>}
+  </div>
 }
 
 export function TenantWorkspacePicker() {
@@ -85,9 +90,6 @@ export function TenantWorkspacePicker() {
   )
 }
 
-function AppShieldIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>
-}
 
 type OtpParts = [string, string, string, string]
 const otpPartLengths = [1, 1, 1, 1] as const
@@ -222,5 +224,5 @@ export function LoadState({ loading, error, onRetry }: { loading: boolean; error
 
 export function EmbeddedLogin(props: { experienceName: string; initialEmail?: string; lockEmail?: boolean }) {
   const { provider } = useResidentAuth()
-  return provider === 'better-auth' ? <BetterAuthLogin {...props} /> : <Auth0Login {...props} />
+  return provider === 'better-auth' ? <BetterAuthLogin {...props} emailOnly /> : <Auth0Login {...props} />
 }
