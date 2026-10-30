@@ -76,6 +76,100 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
     await expect(pa().query("INSERT INTO residents(auth_subject,unit_id,full_name,email) VALUES('forged',$1,'Wrong','wrong@example.test')",[unitB])).rejects.toMatchObject({code:'23503'})
     expect((await pb().query('SELECT full_name FROM residents WHERE id=$1',[residentB])).rows[0].full_name).toBe('Resident')
   })
+  it('keeps resident pulse versions scoped to the authorized tenant',async()=>{
+    const before=(await pa().query('SELECT entity,version::int AS version FROM resident_change_versions WHERE tenant_id=$1',[a])).rows
+    await pa().query(`INSERT INTO notices(id,tenant_id,title,body,status,published_at)
+      VALUES($1,$2,'A notice','Tenant A only','published',NOW())`,[randomUUID(),a])
+    const after=Object.fromEntries((await pa().query('SELECT entity,version::int AS version FROM resident_change_versions WHERE tenant_id=$1',[a])).rows.map(({entity,version})=>[entity,version])) as Record<string,number>
+    const previous=Object.fromEntries(before.map(({entity,version})=>[entity,version])) as Record<string,number>
+    expect(after.notices).toBe((previous.notices??0)+1)
+    expect(after.updates).toBe((previous.updates??0)+1)
+    expect(after.home).toBe((previous.home??0)+1)
+    expect((await pa().query('SELECT entity FROM resident_change_versions WHERE tenant_id=$1',[b])).rows).toEqual([])
+  })
+  it('registers statement-level change signals for every resident-visible write table',async()=>{
+    const registry:Record<string,string[]> = {
+      notices:['notices','updates','home'],
+      polls:['polls','updates','home'],
+      poll_options:['polls','updates','home'],
+      notice_reads:['updates','home'],
+      poll_participation:['updates','home'],
+      complaints:['complaints','home'],
+      complaint_messages:['complaints','home'],
+      complaint_events:['complaints','home'],
+      complaint_photos:['complaints','home'],
+      meeting_minutes:['minutes','home'],
+      meeting_minutes_attendees:['minutes','home'],
+      residents:['profile','home'],
+      organizations:['profile','home'],
+      units:['profile','home'],
+      apartment_buildings:['profile','home'],
+      invoices:['home','payments'],
+      invoice_items:['home','payments'],
+      payments:['home','payments'],
+      payment_reports:['home','payments'],
+      billing_adjustments:['home','payments'],
+      resident_credits:['home','payments'],
+      resident_credit_uses:['home','payments'],
+      account_entries:['home','payments'],
+      opening_credit_allocations:['home','payments'],
+      resident_opening_balances:['home','payments'],
+    }
+    const triggers=await owner.query<{table_name:string;trigger_definition:string;trigger_type:number;function_name:string}>(
+      `SELECT c.relname AS table_name,pg_get_triggerdef(t.oid) AS trigger_definition,t.tgtype AS trigger_type,p.proname AS function_name
+       FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+       JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_proc p ON p.oid=t.tgfoid
+       WHERE n.nspname='block9_tenant' AND NOT t.tgisinternal`,
+    )
+    for(const [table,entities]of Object.entries(registry)){
+      const actual=triggers.rows.filter((trigger)=>trigger.table_name===table)
+      expect(actual,`${table} must have insert/update/delete signals`).toHaveLength(3)
+      expect(new Set(actual.map((trigger)=>trigger.trigger_type&28))).toEqual(new Set([4,8,16]))
+      expect(actual.every((trigger)=>(trigger.trigger_type&1)===0)).toBe(true)
+      expect(actual.every((trigger)=>trigger.function_name==='bump_resident_versions_from_transition')).toBe(true)
+      expect(actual.every((trigger)=>entities.every((entity)=>trigger.trigger_definition.includes(entity)))).toBe(true)
+    }
+  })
+  it('bumps resident versions for every current visible write family once per SQL statement',async()=>{
+    const noticeId=randomUUID(),pollId=randomUUID(),complaintId=randomUUID(),meetingId=randomUUID(),requestKey=randomUUID()
+    const invoice=(await pa().query('SELECT id FROM invoices LIMIT 1')).rows[0].id
+    await pa().query(`INSERT INTO notices(id,tenant_id,title,body,status,published_at)
+      VALUES($1,$2,'Version notice','Visible notice','published',NOW())`,[noticeId,a])
+    await pa().query(`INSERT INTO notice_reads(tenant_id,resident_id,notice_id) VALUES($1,$2,$3)`,[a,residentA,noticeId])
+    await pa().query(`INSERT INTO polls(id,tenant_id,question,starts_at,ends_at,created_by)
+      VALUES($1,$2,'Version poll',NOW()-INTERVAL '1 hour',NOW()+INTERVAL '1 hour','admin')`,[pollId,a])
+    await pa().query(`INSERT INTO poll_options(tenant_id,poll_id,label,position)
+      VALUES($1,$2,'Yes',0),($1,$2,'No',1)`,[a,pollId])
+    await pa().query(`INSERT INTO poll_participation(tenant_id,poll_id,resident_id) VALUES($1,$2,$3)`,[a,pollId,residentA])
+    await pa().query(`INSERT INTO complaints(id,tenant_id,resident_id,subject,description,category,location,request_key)
+      VALUES($1,$2,$3,'Version complaint','Resident-visible complaint body','Other','Lobby',$4)`,[complaintId,a,residentA,requestKey])
+    await pa().query(`INSERT INTO complaint_messages(tenant_id,complaint_id,actor_subject,actor_role,body,request_key)
+      VALUES($1,$2,'same-subject','resident','Resident-visible reply',$3)`,[a,complaintId,randomUUID()])
+    await pa().query(`INSERT INTO meeting_minutes(id,tenant_id,title,created_by,updated_by)
+      VALUES($1,$2,'Version minutes','admin','admin')`,[meetingId,a])
+    await pa().query(`INSERT INTO meeting_minutes_attendees(tenant_id,meeting_id,resident_id,unit_id,full_name,block_name,flat_number)
+      VALUES($1,$2,$3,$4,'Resident','Main','101')`,[a,meetingId,residentA,unitA])
+    await pa().query(`UPDATE residents SET phone='9999999999' WHERE id=$1`,[residentA])
+    await pa().query(`INSERT INTO invoice_items(tenant_id,invoice_id,category,description,amount_minor)
+      VALUES($1,$2,'water','Version item',100)`,[a,invoice])
+    const reportId=randomUUID()
+    await pa().query(`INSERT INTO payment_reports(id,tenant_id,resident_id,amount_minor,request_subject,request_key,request_fingerprint)
+      VALUES($1,$2,$3,100,'same-subject',$4,'fingerprint')`,[reportId,a,residentA,randomUUID()])
+    await pa().query(`INSERT INTO payments(tenant_id,invoice_id,report_id,amount_minor,method,status)
+      VALUES($1,$2,$3,100,'manual','pending')`,[a,invoice,reportId])
+
+    const versions=Object.fromEntries((await pa().query(
+      'SELECT entity,version::int AS version FROM resident_change_versions WHERE tenant_id=$1',[a],
+    )).rows.map(({entity,version})=>[entity,version])) as Record<string,number>
+    expect(versions.notices).toBeGreaterThan(0)
+    expect(versions.polls).toBe(2)
+    expect(versions.updates).toBeGreaterThan(0)
+    expect(versions.complaints).toBeGreaterThan(0)
+    expect(versions.minutes).toBeGreaterThan(0)
+    expect(versions.profile).toBeGreaterThan(0)
+    expect(versions.payments).toBeGreaterThan(0)
+    expect(versions.home).toBeGreaterThan(0)
+  })
   it('keeps tenant context isolated through concurrent reuse, rollback and abandoned transactions',async()=>{
     await Promise.all(Array.from({length:40},async(_,index)=>{
       const id=index%2?a:b,result=await getTenantPool(id).query("SELECT current_setting('app.tenant_id') AS tenant,tenant_id FROM residents")

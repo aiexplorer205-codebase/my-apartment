@@ -15,6 +15,17 @@ migrations/myapartment_platform_db  migrations/myapartment_tenant_db
 docker/  compose.yaml  compose.dev.yaml
 ```
 
+## Search and context exclusions
+
+For routine code search and context gathering, skip dependency, build, cache,
+coverage, and local runtime output directories such as `node_modules/`, `.next/`,
+`dist/`, `build/`, `coverage/`, `.turbo/`, `.cache/`, `.pnpm-store/`,
+`.terraform/`, and `docker-data/`. Do not read local `.env` files; use
+`.env.example` for configuration shape. Treat `ui-prototype/` as design
+reference only, not product implementation; inspect it only for UI/design tasks
+or when explicitly requested. Revisit these exclusions when the task itself
+concerns one of those paths.
+
 Local how-to: [docs/local-setup.md](docs/local-setup.md). System: [docs/architecture.md](docs/architecture.md). Gates: [docs/security-and-ops.md](docs/security-and-ops.md). HTML frames (not product truth): `ui-prototype/ui_design_prototype/myapartment-screen-designs`.
 
 Required development baseline and checklist review:

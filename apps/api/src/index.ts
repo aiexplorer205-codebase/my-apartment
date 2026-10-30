@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { authenticateAdminSession } from './admin-auth.js'
 import { issueResidentQr, issueResidentResetQr } from './resident-qr.js'
-import { authenticateResidentSession, identityMayUseRole, residentAuthProvider } from './resident-auth.js'
+import { authenticateResidentSession, evictResidentSessionCacheForUser, identityMayUseRole, residentAuthProvider } from './resident-auth.js'
 import { reserveTenantStorageDeletion, deleteTenantPhotoStorage } from './photo-maintenance.js'
 import { readMeetingMinutes, writeMeetingMinutes } from './meeting-minutes.js'
 import { apartmentSetup } from './apartment-setup.js'
@@ -23,7 +23,8 @@ import { residentUpdates } from './resident-updates.js'
 import { complaintPhoto, complaintPhotoLimits, createPhotoUpload, finalizePhotoUpload } from './complaint-photos.js'
 import { complaintRequest } from './complaints.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { createHash, randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 
 import { createRemoteJWKSet, jwtVerify } from 'jose'
@@ -52,6 +53,34 @@ interface TenantAccess {
   tenantId: string
   tenantName: string
   role: 'resident' | 'admin'
+  membershipFingerprint: string
+}
+
+const requestAuthTimings = new WeakMap<IncomingMessage, number>()
+const pulseDbTimings = new WeakMap<IncomingMessage, number>()
+const requestResponses = new WeakMap<IncomingMessage, ServerResponse>()
+const residentRequestWindows = new Map<string, { startedAt: number; count: number }>()
+const databaseTiming = new AsyncLocalStorage<{ duration: number }>()
+
+const enforceResidentRateLimit = (subject: string) => {
+  const now = Date.now()
+  let window = residentRequestWindows.get(subject)
+  if (!window || now - window.startedAt >= 60_000) {
+    window = { startedAt: now, count: 0 }
+    residentRequestWindows.set(subject, window)
+  }
+  if (residentRequestWindows.size > 10_000) {
+    for (const [key, value] of residentRequestWindows) {
+      if (now - value.startedAt >= 60_000) residentRequestWindows.delete(key)
+    }
+    while (residentRequestWindows.size > 10_000) {
+      const oldest = residentRequestWindows.keys().next().value
+      if (oldest === undefined) break
+      residentRequestWindows.delete(oldest)
+    }
+  }
+  if (window.count >= 60) throw new ApiFault(429, 'rate_limited', 'Resident request limit reached. Try again shortly.', Math.max(1, Math.ceil((60_000 - (now - window.startedAt)) / 1_000)))
+  window.count += 1
 }
 
 export const authorizedTenantRoles = (
@@ -121,7 +150,13 @@ const holdTenantLifecycleAccess = async (request: IncomingMessage, tenantId: str
 }
 
 const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: TenantAccess['role']): Promise<TenantAccess> => {
+  const authStartedAt = performance.now()
   const identity = await authenticate(request)
+  const authDuration = performance.now() - authStartedAt
+  requestAuthTimings.set(request, authDuration)
+  const response = requestResponses.get(request)
+  if (response) responseAuthTimings.set(response, authDuration)
+  if (requiredRole === 'resident') enforceResidentRateLimit(identity.subject)
   const requestedTenantId = request.headers['x-tenant-id']
   if (requestedTenantId !== undefined && !z.uuid().safeParse(requestedTenantId).success) {
     throw new ApiFault(400, 'invalid_request', 'A single valid tenant selection is required')
@@ -150,9 +185,10 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
     database_name: string | null
     tenant_status: string
     role: string
+    membership_status: string
     has_accepted_admin_invitation: boolean
   }>(
-    `SELECT tr.tenant_id, tr.org_name, tr.database_name, tr.status AS tenant_status, tm.role,
+    `SELECT tr.tenant_id, tr.org_name, tr.database_name, tr.status AS tenant_status, tm.role, tm.status AS membership_status,
             EXISTS (
               SELECT 1 FROM platform_audit pa
               WHERE pa.actor_subject = tm.subject
@@ -183,14 +219,17 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
     throw new ApiFault(403, 'forbidden', 'This account does not have tenant access')
   }
   await holdTenantLifecycleAccess(request, membership.tenant_id)
-  const residentProfileResult = await getTenantPool(membership.tenant_id).query<{ has_active_profile: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1
-       FROM residents r
-       JOIN units u ON u.id = r.unit_id
-       WHERE r.auth_subject = $1 AND r.status = 'active' AND r.start_date <= CURRENT_DATE
-         AND (r.move_out_date IS NULL OR r.move_out_date >= CURRENT_DATE) AND u.tenant_id = $2
-     ) AS has_active_profile`,
+  const residentProfileResult = await getTenantPool(membership.tenant_id).query<{
+    has_active_profile: boolean
+    resident_status: string | null
+    unit_id: string | null
+  }>(
+    `SELECT COALESCE(u.id IS NOT NULL AND r.status='active' AND r.start_date<=CURRENT_DATE
+         AND (r.move_out_date IS NULL OR r.move_out_date>=CURRENT_DATE),FALSE) AS has_active_profile,
+       r.status AS resident_status,CASE WHEN u.id IS NULL THEN NULL ELSE r.unit_id END AS unit_id
+     FROM (SELECT 1) AS account
+     LEFT JOIN residents r ON r.auth_subject=$1
+     LEFT JOIN units u ON u.id=r.unit_id AND u.tenant_id=$2`,
     [identity.subject, membership.tenant_id],
   )
   const roles = authorizedTenantRoles(
@@ -207,12 +246,21 @@ const resolveTenantAccess = async (request: IncomingMessage, requiredRole?: Tena
       ? 'This account does not have an active resident profile in the selected organization'
       : 'This account does not have an accepted administrator invitation for this organization')
   }
+  const profile = residentProfileResult.rows[0]
+  const membershipFingerprint = createHash('sha256').update(JSON.stringify([
+    `${identity.subject}:${membership.tenant_id}`,
+    membership.role,
+    membership.membership_status,
+    profile?.resident_status ?? null,
+    profile?.unit_id ?? null,
+  ])).digest('base64url')
 
   return {
     subject: identity.subject,
     tenantId: membership.tenant_id,
     tenantName: membership.org_name,
     role,
+    membershipFingerprint,
   }
 }
 
@@ -540,6 +588,9 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/tenant/home': {
       get: { tags: ['tenant'], summary: 'Resident home summary', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped resident home' }, '401': { description: 'Authentication required' }, '403': { description: 'An active resident profile is required' } } },
     },
+    '/v1/tenant/pulse': {
+      get: { tags: ['tenant'], summary: 'Resident change versions, lightweight counts and passkey reset status', description: 'Private conditional response; tenant is derived from validated membership. Supports ETag and If-None-Match.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident-scoped pulse payload' }, '304': { description: 'Pulse has not changed' }, '429': { description: 'Resident rate limit reached; Retry-After is returned' } } },
+    },
     '/v1/tenant/profile': {
       get: { tags: ['tenant'], summary: 'View the authenticated resident profile', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped resident details' }, '403': { description: 'An active resident profile is required' }, '404': { description: 'Resident profile not found' } } },
       patch: { tags: ['tenant'], summary: 'Update the authenticated resident name and phone number', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', additionalProperties: false, properties: { fullName: { type: 'string', minLength: 2, maxLength: 120 }, phone: { type: ['string', 'null'], maxLength: 24 } }, minProperties: 1 } } } }, responses: { '200': { description: 'Updated resident details' }, '400': { description: 'Invalid resident profile details' }, '403': { description: 'An active resident profile is required' }, '404': { description: 'Resident profile not found' } } },
@@ -701,16 +752,51 @@ export const createErrorResponse = (error: unknown): ApiErrorResponse => {
   return { error: 'internal_error', message: 'An unexpected error occurred' }
 }
 
-const respond = (response: ServerResponse, statusCode: number, payload: unknown, requestId: string): void => {
+const respond = (response: ServerResponse, statusCode: number, payload: unknown, requestId: string, extraHeaders: Record<string, string> = {}): void => {
   response.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Request-Id': requestId,
+    'Server-Timing': `auth;dur=${(responseAuthTimings.get(response) ?? 0).toFixed(1)}, db;dur=${(databaseTiming.getStore()?.duration ?? 0).toFixed(1)}, total;dur=${Math.max(0, performance.now() - (responseStartedAt.get(response) ?? performance.now())).toFixed(1)}`,
+    ...extraHeaders,
   })
   response.end(JSON.stringify(payload))
 }
 
-const withTenantPool = (access: TenantAccess) => getTenantPool(access.tenantId)
+const responseStartedAt = new WeakMap<ServerResponse, number>()
+const responseAuthTimings = new WeakMap<ServerResponse, number>()
+
+const withTenantPool = (access: TenantAccess) => {
+  const pool = getTenantPool(access.tenantId)
+  const recordDuration = (startedAt: number) => {
+    const timing = databaseTiming.getStore()
+    if (timing) timing.duration += performance.now() - startedAt
+  }
+  const connect = (async () => {
+    const startedAt = performance.now()
+    const client = await pool.connect()
+    recordDuration(startedAt)
+    return new Proxy(client, {
+      get(target, property) {
+        if (property === 'query') {
+          return (async (...queryArgs: Parameters<typeof client.query>) => {
+            const queryStartedAt = performance.now()
+            try { return await client.query(...queryArgs) }
+            finally { recordDuration(queryStartedAt) }
+          }) as typeof client.query
+        }
+        const value = Reflect.get(target, property)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  }) as typeof pool.connect
+  const query = (async (...args: Parameters<typeof pool.query>) => {
+    const startedAt = performance.now()
+    try { return await pool.query(...args) }
+    finally { recordDuration(startedAt) }
+  }) as typeof pool.query
+  return { connect, query }
+}
 
 const minorUnits = (value: string): number => {
   const parsed = BigInt(value)
@@ -897,7 +983,7 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
     pendingAmountMinor = currentBalance?.pendingPaymentMinor ?? 0
   }
 
-  const [payments, notices] = await Promise.all([
+  const [payments, notices, openPolls] = await Promise.all([
     residentRecentPayments(pool, access, resident.id),
     pool.query(
       `SELECT n.id, n.title, n.body, n.published_at, n.is_important, n.is_banner, n.starts_at, n.ends_at,
@@ -909,6 +995,14 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
        ORDER BY n.published_at DESC
        LIMIT 50`,
       [resident.id, access.tenantId],
+    ),
+    pool.query<{ id: string; question: string; starts_at: Date; ends_at: Date }>(
+      `SELECT p.id,p.question,p.starts_at,p.ends_at FROM polls p
+       WHERE p.tenant_id=$1 AND p.status='published' AND p.closed_at IS NULL
+         AND p.starts_at<=NOW() AND p.ends_at>NOW()
+         AND NOT EXISTS(SELECT 1 FROM poll_participation pp WHERE pp.poll_id=p.id AND pp.resident_id=$2)
+       ORDER BY p.starts_at DESC LIMIT 50`,
+      [access.tenantId, resident.id],
     ),
   ])
   const apartmentCodeResult = await getPlatformPool().query<{ apartment_code: string }>(
@@ -948,6 +1042,12 @@ const getResidentHome = async (access: TenantAccess, subject: string) => {
       isRead: notice.is_read,
       isImportant: notice.is_important,
       isBanner: notice.is_banner,
+    })),
+    openPolls: openPolls.rows.map((poll) => ({
+      id: poll.id,
+      question: poll.question,
+      startsAt: poll.starts_at,
+      endsAt: poll.ends_at,
     })),
     supportedPaymentMethods: [],
     paymentUnavailableReason: 'Online payments are disabled until a payment provider and settlement model are approved.',
@@ -1086,6 +1186,83 @@ const getResidentNotices = async (access: TenantAccess, subject: string) => {
   }))
 }
 
+type ResidentPulse = {
+  versions: {
+    notices: number
+    polls: number
+    updates: number
+    home: number
+    complaints: number
+    minutes: number
+    profile: number
+    payments: number
+  }
+  counts: { unreadUpdates: number; openPolls: number }
+  resetPending: { createdAt: string; expiresAt: string } | null
+  membershipFingerprint: string
+}
+
+const getResidentPulse = async (request: IncomingMessage, access: TenantAccess): Promise<ResidentPulse> => {
+  requireRole(access, 'resident')
+  const pool = withTenantPool(access)
+  const databaseStartedAt = performance.now()
+  const resident = (await pool.query<{ id: string }>(
+    `SELECT r.id FROM residents r JOIN units u ON u.id=r.unit_id
+     WHERE r.auth_subject=$1 AND r.status='active' AND u.tenant_id=$2 LIMIT 1`,
+    [access.subject, access.tenantId],
+  )).rows[0]
+  if (!resident) throw new ApiFault(403, 'forbidden', 'An active resident profile is required')
+
+  const [versionRows, counts] = await Promise.all([
+    pool.query<{ entity: keyof ResidentPulse['versions']; version: string }>(
+      `SELECT entity,version::text FROM resident_change_versions WHERE tenant_id=$1`,
+      [access.tenantId],
+    ),
+    pool.query<{ unread_updates: number; open_polls: number }>(
+      `SELECT
+         (SELECT count(*)::int FROM notices n
+          LEFT JOIN notice_reads nr ON nr.notice_id=n.id AND nr.resident_id=$2
+          WHERE n.tenant_id=$1 AND n.status='published' AND n.starts_at<=NOW()
+            AND (n.ends_at IS NULL OR n.ends_at>NOW()) AND nr.resident_id IS NULL) AS unread_updates,
+         (SELECT count(*)::int FROM polls p
+          LEFT JOIN poll_participation pp ON pp.poll_id=p.id AND pp.resident_id=$2
+          WHERE p.tenant_id=$1 AND p.status='published' AND p.closed_at IS NULL
+            AND p.starts_at<=NOW() AND p.ends_at>NOW() AND pp.resident_id IS NULL) AS open_polls`,
+      [access.tenantId, resident.id],
+    ),
+  ])
+  const versions: ResidentPulse['versions'] = {
+    notices: 0, polls: 0, updates: 0, home: 0,
+    complaints: 0, minutes: 0, profile: 0, payments: 0,
+  }
+  for (const row of versionRows.rows) versions[row.entity] = Number(row.version)
+  pulseDbTimings.set(request, performance.now() - databaseStartedAt)
+
+  let resetPending: ResidentPulse['resetPending'] = null
+  if (residentAuthProvider() === 'better-auth') {
+    const internalURL = process.env.RESIDENT_AUTH_INTERNAL_URL
+    if (!internalURL) throw new ApiFault(503, 'configuration_error', 'Configure RESIDENT_AUTH_INTERNAL_URL')
+    const response = await fetch(`${new URL(internalURL).origin}/api/resident-auth/security/pulse-reset`, {
+      headers: { authorization: request.headers.authorization ?? '', 'cache-control': 'no-store' },
+      redirect: 'error',
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!response.ok) throw new ApiFault(response.status >= 500 ? 503 : 401, response.status >= 500 ? 'dependency_unavailable' : 'unauthorized', 'Could not verify resident passkey reset status')
+    const parsedReset = z.object({
+      createdAt: z.iso.datetime({ offset: true }),
+      expiresAt: z.iso.datetime({ offset: true }),
+    }).nullable().safeParse(await response.json())
+    if (!parsedReset.success) throw new ApiFault(503, 'dependency_unavailable', 'Could not verify resident passkey reset status')
+    resetPending = parsedReset.data
+  }
+  return {
+    versions,
+    counts: { unreadUpdates: counts.rows[0]?.unread_updates ?? 0, openPolls: counts.rows[0]?.open_polls ?? 0 },
+    resetPending,
+    membershipFingerprint: access.membershipFingerprint,
+  }
+}
+
 const pollResults = async (pool: ReturnType<typeof withTenantPool>, pollId: string) => {
   const result = await pool.query(`SELECT o.id, o.label, o.position, COUNT(b.id)::int AS votes
     FROM poll_options o LEFT JOIN poll_ballots b ON b.poll_id = o.poll_id AND b.option_id = o.id
@@ -1109,17 +1286,43 @@ const getResidentPolls = async (access: TenantAccess, subject: string, pollId?: 
     LEFT JOIN poll_ballots anonymous_ballot ON anonymous_ballot.id = pp.ballot_id
     WHERE p.tenant_id = $2 AND ($3::uuid IS NULL OR p.id=$3) AND (LEAST(p.ends_at,COALESCE(p.closed_at,p.ends_at)) + make_interval(days => p.results_retention_days) > NOW())
     ORDER BY p.starts_at DESC LIMIT 50`, [residentId, access.tenantId, pollId??null])
-  return Promise.all(polls.rows.map(async (poll) => {
-    const options = await pool.query('SELECT id, label FROM poll_options WHERE poll_id = $1 ORDER BY position', [poll.id])
+  if (!polls.rows.length) return []
+  const states = polls.rows.map((poll) => {
     const live = poll.status === 'published' && !poll.closed_at && new Date(poll.starts_at).getTime() <= Date.now() && new Date(poll.ends_at).getTime() > Date.now()
     const ended = new Date(poll.ends_at).getTime() <= Date.now() || poll.status === 'archived'
     const resultsVisible = poll.show_results_live && live || ended && new Date(poll.results_visible_until).getTime() > Date.now()
-    const voters = resultsVisible && !poll.anonymous ? await pool.query(`SELECT r.full_name, u.number AS unit, o.label AS option FROM poll_ballots b JOIN residents r ON r.id = b.resident_id JOIN units u ON u.id = r.unit_id JOIN poll_options o ON o.id = b.option_id WHERE b.poll_id = $1 ORDER BY u.number`, [poll.id]).then((r) => r.rows) : []
-    return { id: poll.id, question: poll.question, startsAt: poll.starts_at, endsAt: poll.ends_at, closedAt: poll.closed_at, effectiveEndsAt: poll.closed_at && new Date(poll.closed_at)<new Date(poll.ends_at)?poll.closed_at:poll.ends_at, resultsVisibleUntil: poll.results_visible_until, resultsRetentionDays: poll.results_retention_days, status: poll.status, anonymous: poll.anonymous,
+    return { poll, live, ended, resultsVisible }
+  })
+  const pollIds = states.map(({ poll }) => poll.id)
+  const resultIds = states.filter(({ resultsVisible }) => resultsVisible).map(({ poll }) => poll.id)
+  const namedResultIds = states.filter(({ poll, resultsVisible }) => resultsVisible && !poll.anonymous).map(({ poll }) => poll.id)
+  const [optionRows, resultRows, voterRows] = await Promise.all([
+    pool.query(`SELECT poll_id,id,label,position FROM poll_options WHERE tenant_id=$2 AND poll_id=ANY($1::uuid[]) ORDER BY poll_id,position`, [pollIds, access.tenantId]),
+    resultIds.length
+      ? pool.query(`SELECT o.poll_id,o.id,o.label,o.position,COUNT(b.id)::int AS votes FROM poll_options o
+          LEFT JOIN poll_ballots b ON b.poll_id=o.poll_id AND b.option_id=o.id AND b.tenant_id=$2
+          WHERE o.poll_id=ANY($1::uuid[]) AND o.tenant_id=$2 GROUP BY o.poll_id,o.id,o.label,o.position ORDER BY o.poll_id,o.position`, [resultIds, access.tenantId])
+      : Promise.resolve({ rows: [] }),
+    namedResultIds.length
+      ? pool.query(`SELECT b.poll_id,r.full_name,u.number AS unit,o.label AS option FROM poll_ballots b
+          JOIN residents r ON r.id=b.resident_id AND r.tenant_id=$2
+          JOIN units u ON u.id=r.unit_id AND u.tenant_id=$2
+          JOIN poll_options o ON o.id=b.option_id AND o.poll_id=b.poll_id AND o.tenant_id=$2
+          WHERE b.poll_id=ANY($1::uuid[]) AND b.tenant_id=$2 ORDER BY b.poll_id,u.number`, [namedResultIds, access.tenantId])
+      : Promise.resolve({ rows: [] }),
+  ])
+  const optionsByPoll = new Map<string, typeof optionRows.rows>()
+  for (const option of optionRows.rows) optionsByPoll.set(option.poll_id, [...(optionsByPoll.get(option.poll_id) ?? []), option])
+  const resultsByPoll = new Map<string, Array<{ id: string; label: string; votes: number }>>()
+  for (const result of resultRows.rows) resultsByPoll.set(result.poll_id, [...(resultsByPoll.get(result.poll_id) ?? []), { id: result.id, label: result.label, votes: result.votes }])
+  const votersByPoll = new Map<string, Array<{ full_name: string; unit: string; option: string }>>()
+  for (const voter of voterRows.rows) votersByPoll.set(voter.poll_id, [...(votersByPoll.get(voter.poll_id) ?? []), { full_name: voter.full_name, unit: voter.unit, option: voter.option }])
+  return states.map(({ poll, live, ended, resultsVisible }) => ({
+      id: poll.id, question: poll.question, startsAt: poll.starts_at, endsAt: poll.ends_at, closedAt: poll.closed_at, effectiveEndsAt: poll.closed_at && new Date(poll.closed_at)<new Date(poll.ends_at)?poll.closed_at:poll.ends_at, resultsVisibleUntil: poll.results_visible_until, resultsRetentionDays: poll.results_retention_days, status: poll.status, anonymous: poll.anonymous,
       showResultsLive: poll.show_results_live, hasVoted: poll.has_voted, myOptionId: poll.my_option_id ?? null,
-      canChangeVote: poll.can_change_vote, isLive: live, options: options.rows,
-      results: resultsVisible ? await pollResults(pool, poll.id) : null, voters }
-  }))
+      canChangeVote: poll.can_change_vote, isLive: live, options: optionsByPoll.get(poll.id) ?? [],
+      results: resultsVisible ? resultsByPoll.get(poll.id) ?? [] : null, voters: votersByPoll.get(poll.id) ?? [],
+    }))
 }
 
 const voteInPoll = async (access: TenantAccess, subject: string, pollId: string, input: unknown) => {
@@ -3312,7 +3515,11 @@ const applyCors = (request: IncomingMessage, response: ServerResponse): void => 
 }
 
 export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
-  const server = createServer(async (request, response) => {
+  const server = createServer((request, response) => {
+    const timing = { duration: 0 }
+    return databaseTiming.run(timing, async () => {
+    responseStartedAt.set(response, performance.now())
+    requestResponses.set(request, response)
     const requestId = createRequestId()
     applyCors(request, response)
     if (request.method === 'OPTIONS') {
@@ -3323,7 +3530,21 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
 
     const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1')
     try {
-      if (request.method === 'GET' && requestUrl.pathname === '/v1/health') {
+    if (request.method === 'POST' && requestUrl.pathname === '/internal/resident-session-cache/evict') {
+      const configuredSecret = process.env.RESIDENT_AUTH_CACHE_INVALIDATION_SECRET ?? ''
+      const providedSecret = request.headers['x-resident-cache-invalidation-secret']
+      const expected = Buffer.from(configuredSecret)
+      const provided = Buffer.from(typeof providedSecret === 'string' ? providedSecret : '')
+      if (!configuredSecret || expected.length !== provided.length || !timingSafeEqual(expected, provided)) {
+        throw new ApiFault(403, 'forbidden', 'Internal cache invalidation is not authorized')
+      }
+      const body = z.object({ userId: z.string().min(1).max(200) }).strict().safeParse(await readJsonBody(request, 4096))
+      if (!body.success) throw new ApiFault(400, 'invalid_request', 'A valid resident user id is required')
+      evictResidentSessionCacheForUser(body.data.userId)
+      response.writeHead(204, { 'Cache-Control': 'no-store', 'X-Request-Id': requestId }).end()
+      return
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/v1/health') {
         respond(response, 200, createHealthResponse(), requestId)
         return
       }
@@ -3381,6 +3602,30 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/home') {
         const access = await resolveTenantAccess(request, 'resident')
         respond(response, 200, await getResidentHome(access, access.subject), requestId)
+        return
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/pulse') {
+        const access = await resolveTenantAccess(request, 'resident')
+        const pulseStartedAt = performance.now()
+        const pulse = await getResidentPulse(request, access)
+        const serialized = JSON.stringify(pulse)
+        const etag = `"${createHash('sha256').update(serialized).digest('base64url')}"`
+        const headers = {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'private, no-cache',
+          'CDN-Cache-Control': 'no-store',
+          'Cloudflare-CDN-Cache-Control': 'no-store',
+          Vary: 'Cookie',
+          ETag: etag,
+          'X-Request-Id': requestId,
+          'Server-Timing': `auth;dur=${(requestAuthTimings.get(request) ?? 0).toFixed(1)}, db;dur=${(pulseDbTimings.get(request) ?? 0).toFixed(1)}, reset-status;dur=${(performance.now() - pulseStartedAt - (pulseDbTimings.get(request) ?? 0)).toFixed(1)}, total;dur=${(performance.now() - (responseStartedAt.get(response) ?? pulseStartedAt)).toFixed(1)}`,
+        }
+        const conditional = request.headers['if-none-match']?.split(',').some((value) => value.trim() === etag || value.trim() === `W/${etag}` || value.trim() === '*')
+        if (conditional) {
+          response.writeHead(304, headers).end()
+          return
+        }
+        response.writeHead(200, headers).end(serialized)
         return
       }
       if (requestUrl.pathname === '/v1/tenant/profile' && (request.method === 'GET' || request.method === 'PATCH')) {
@@ -3772,12 +4017,13 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
             requestId,
             ...(tenantSchemaRequest && !tenantSchemaUnavailable && !tenantDatabaseMissing ? { diagnosticCode: causeCode } : {}),
           }
-      respond(response, status, body, requestId)
+      respond(response, status, body, requestId, status === 429 ? { 'Retry-After': String(apiFault?.retryAfterSeconds ?? 60) } : {})
     } finally {
       const release = tenantLifecycleReleases.get(request)
       tenantLifecycleReleases.delete(request)
       if (release) await release()
     }
+  })
   })
 
   server.listen(port, '0.0.0.0', () => {

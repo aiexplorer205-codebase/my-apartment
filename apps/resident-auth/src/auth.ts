@@ -1,10 +1,11 @@
 import { betterAuth } from 'better-auth'
 import { emailOTP } from 'better-auth/plugins'
 import { passkey } from '@better-auth/passkey'
-import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
+import { APIError, createAuthMiddleware, getAuthoritativeSessionFromCtx } from 'better-auth/api'
 import { Pool } from 'pg'
 import { PostgresDialect } from 'kysely'
 import { authConfiguration, required } from './config.js'
+import { evictResidentApiSessions } from './api-session-cache.js'
 
 export const configuration = authConfiguration()
 export const pool = new Pool({
@@ -43,7 +44,7 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 8,
     updateAge: 0,
     disableSessionRefresh: true,
-    cookieCache: { enabled: false },
+    cookieCache: { enabled: true, maxAge: 300 },
     additionalFields: { emailOtpVerifiedAt: { type: 'date', required: false, input: false } },
   },
   advanced: {
@@ -84,7 +85,7 @@ export const auth = betterAuth({
       }
       if (ctx.path === '/passkey/delete-passkey') throw new APIError('FORBIDDEN', { message: 'Register a replacement passkey after verifying your email, or ask your administrator for a new QR' })
       if (['/passkey/generate-register-options', '/passkey/verify-registration'].includes(ctx.path)) {
-        const session = await getSessionFromCtx(ctx)
+        const session = await getAuthoritativeSessionFromCtx(ctx)
         const verifiedAt = session?.session.emailOtpVerifiedAt
         const verifiedAtMs = verifiedAt ? new Date(verifiedAt as string).getTime() : 0
         if (!session?.user.emailVerified || !verifiedAtMs || Date.now() - verifiedAtMs > 300_000 || verifiedAtMs > Date.now()) {
@@ -100,6 +101,7 @@ export const auth = betterAuth({
       if (ctx.path === '/passkey/verify-authentication' && ctx.context.newSession) {
         const created = ctx.context.newSession.session
         const client = await pool.connect()
+        let committed = false
         try {
           await client.query('BEGIN')
           await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [created.userId])
@@ -107,17 +109,21 @@ export const auth = betterAuth({
           if (!credential.rowCount) {
             await client.query('DELETE FROM resident_auth_session WHERE token=$1', [created.token])
             await client.query('COMMIT')
+            committed = true
+            await evictResidentApiSessions(created.userId)
             throw new APIError('UNAUTHORIZED', { message: 'This passkey was replaced. Sign in with your new passkey.' })
           }
           await client.query('COMMIT')
-        } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
+          committed = true
+        } catch (error) { if (!committed) await client.query('ROLLBACK'); throw error } finally { client.release() }
       }
       if (ctx.path === '/passkey/verify-registration') {
-        const session = await getSessionFromCtx(ctx)
+        const session = await getAuthoritativeSessionFromCtx(ctx)
         const credentialID = typeof ctx.body?.response?.id === 'string' ? ctx.body.response.id : ''
         const startedAt = (ctx.context as { passkeyRegistrationStartedAt?: number }).passkeyRegistrationStartedAt
         if (!session || !credentialID || !startedAt) throw new APIError('UNAUTHORIZED', { message: 'Sign in again and verify your email before changing passkeys' })
         const client = await pool.connect()
+        let committed = false
         try {
           await client.query('BEGIN')
           await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [session.user.id])
@@ -138,7 +144,9 @@ export const auth = betterAuth({
           await client.query('DELETE FROM resident_auth_session WHERE "userId"=$1 AND token<>$2', [session.user.id, session.session.token])
           await client.query("INSERT INTO resident_auth_audit(user_id,action) VALUES($1,'passkey.otp_replaced')", [session.user.id])
           await client.query('COMMIT')
-        } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
+          committed = true
+          await evictResidentApiSessions(session.user.id)
+        } catch (error) { if (!committed) await client.query('ROLLBACK'); throw error } finally { client.release() }
       }
       if (ctx.path === '/sign-in/email-otp' && ctx.context.newSession) {
         await ctx.context.internalAdapter.updateSession(ctx.context.newSession.session.token, { emailOtpVerifiedAt: new Date() })

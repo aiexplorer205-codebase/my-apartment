@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { getAppConfig, LanguageSwitcher } from '@block9/app-platform'
 import { useResidentAuth } from '../../app/auth-provider'
 import { LoadState, TenantWorkspacePicker } from '../../lib/auth-ui'
-import { useApiPatch } from '../../lib/use-api'
+import { useApiPatch } from '../../lib/use-api-mutations'
 
 export type ResidentProfile = {fullName:string;email:string;phone:string|null;unit:string;unitNumber:string;buildingName:string;organizationName:string;apartmentCode:string;timezone:string}
 export function ResidentProfileWorkspace({data,loading,error,onRetry,onSaved}:{data:ResidentProfile|null;loading:boolean;error:string|null;onRetry:()=>void;onSaved:()=>void}) {

@@ -3,6 +3,7 @@
 import { residentAuth } from '../lib/better-auth-client'
 import { Auth0Provider, useUser } from '@auth0/nextjs-auth0/client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 
 type AuthUser = { email?: string; emailVerified?: boolean; name?: string; sub?: string }
@@ -28,24 +29,27 @@ export function useResidentAuth() {
 }
 
 function SessionContext({ children, user, isLoading, provider }: { children: ReactNode; user?: AuthUser; isLoading: boolean; provider: 'auth0' | 'better-auth' }) {
+  const queryClient = useQueryClient()
   const [activeTenantId, setActiveTenantIdState] = useState<string | null>(null)
 
   useEffect(() => {
+    queryClient.clear()
     if (!user?.sub) {
       setActiveTenantIdState(null)
       return
     }
     setActiveTenantIdState(globalThis.localStorage.getItem(`${tenantSelectionKey}${encodeURIComponent(user.sub)}`))
-  }, [user?.sub])
+  }, [queryClient, user?.sub])
 
   const setActiveTenantId = useCallback((tenantId: string | null) => {
+    if (tenantId !== activeTenantId) queryClient.clear()
     if (user?.sub) {
       const key = `${tenantSelectionKey}${encodeURIComponent(user.sub)}`
       if (tenantId) globalThis.localStorage.setItem(key, tenantId)
       else globalThis.localStorage.removeItem(key)
     }
     setActiveTenantIdState(tenantId)
-  }, [user?.sub])
+  }, [activeTenantId, queryClient, user?.sub])
 
   const loginWithRedirect = useCallback(async (options?: LoginOptions) => {
     if (provider === 'better-auth') { globalThis.location.assign('/'); return }
@@ -58,13 +62,14 @@ function SessionContext({ children, user, isLoading, provider }: { children: Rea
 
   const logout = useCallback((options?: { logoutParams?: { returnTo?: string } }) => {
     const returnTo = options?.logoutParams?.returnTo ?? globalThis.location.origin
+    queryClient.clear()
     if (provider === 'better-auth') {
       const target = new URL(returnTo, globalThis.location.origin)
       void residentAuth.signOut().then((result) => { if (!result.error) globalThis.location.assign(target.origin === globalThis.location.origin ? target.href : '/') })
       return
     }
     globalThis.location.assign(`/auth/logout?returnTo=${encodeURIComponent(returnTo)}`)
-  }, [provider])
+  }, [provider, queryClient])
 
   const value = useMemo<AuthContextValue>(() => ({
     provider,
@@ -86,8 +91,11 @@ function Auth0Session({ children }: { children: ReactNode }) {
 }
 function BetterAuthSession({ children }: { children: ReactNode }) {
   const { data, isPending } = residentAuth.useSession()
+  const [sessionChecked, setSessionChecked] = useState(false)
+  useEffect(() => { if (!isPending) setSessionChecked(true) }, [isPending])
+  const isLoading = isPending && !sessionChecked
   const user = useMemo(() => data?.user ? { email: data.user.email.endsWith('@passkey.invalid') ? undefined : data.user.email, emailVerified: data.user.emailVerified, name: data.user.name, sub: `betterauth|${data.user.id}` } : undefined, [data?.user])
-  return <SessionContext provider="better-auth" user={user} isLoading={isPending}>{children}</SessionContext>
+  return <SessionContext provider="better-auth" user={user} isLoading={isLoading}>{children}</SessionContext>
 }
 export function AuthProvider({ children, provider }: { children: ReactNode; provider: 'auth0' | 'better-auth' }) {
   return provider === 'better-auth' ? <BetterAuthSession>{children}</BetterAuthSession> : <Auth0Provider><Auth0Session>{children}</Auth0Session></Auth0Provider>

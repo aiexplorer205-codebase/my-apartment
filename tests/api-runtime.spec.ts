@@ -105,6 +105,10 @@ describe('MVP API runtime', () => {
     expect(operator.status).toBe(401)
     expect(await operator.json()).toMatchObject({ error: 'unauthorized' })
 
+    const pulse = await globalThis.fetch(`${baseUrl}/v1/tenant/pulse`)
+    expect(pulse.status).toBe(401)
+    expect(await pulse.json()).toMatchObject({ error: 'unauthorized' })
+
     const acceptInvitation = await globalThis.fetch(`${baseUrl}/v1/public/admin-invitations/accept`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

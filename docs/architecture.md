@@ -15,7 +15,56 @@ TypeScript pnpm/Turbo monorepo. Three Next.js apps, one Node HTTP API, a worker 
 | Worker | `apps/worker` | Health and Redis readiness only; no job processors |
 | Proxy | `infrastructure/proxy/nginx.conf` | Optional local hostname routing |
 
-Web apps keep server-side Auth0 sessions and proxy API calls through `/api/backend`. Browser code never holds Management API or database credentials.
+Web apps keep server-side authentication sessions and proxy API calls through `/api/backend`. The resident PWA uses TanStack Query for tenant-and-user-scoped client caching; its conditional `/api/resident/pulse` endpoint carries small change versions and passkey reset status. Authenticated pulse responses are private, ETag-validated and never edge-cacheable. Browser code never holds Management API or database credentials.
+
+The API applies a 60-requests/minute resident limit keyed by the authenticated user subject and returns `429` with `Retry-After`; the resident query retry policy honors that delay. For Cloudflare deployments, manually add cache-bypass rules for `/api/resident/*`, `/api/backend/v1/tenant/*`, and `/api/resident-auth/*`; add edge rate limits for those resident-facing paths (the edge rule is an additional perimeter guard, not the user-keyed application limit); and enable Brotli compression. Application responses set private/no-store headers where appropriate, but zone rules and compression are deployment settings and are not provisioned or verified by this repository.
+
+### Resident change signals
+
+The pulse contains per-community counters stored as `(tenant_id, entity)` rows.
+Statement-level PostgreSQL triggers bump them in the same transaction as source
+writes. The client fetches full lists only when their screen is enabled, and
+invalidates the relevant TanStack Query key after a pulse version changes. A
+focus/reconnect refetch only fetches the pulse when its 60-second `staleTime` has
+elapsed; there is no fixed polling timer.
+
+Current resident-visible data and its signal scope:
+
+- **Per-community data and signal:** notices; polls and poll options; published
+  meeting minutes and attendee snapshots. Their corresponding `notices`, `polls`,
+  and `minutes` versions invalidate the resident lists. Notice reads and poll
+  participation are resident-specific state, but update/home counters are
+  community-wide and the API still scopes the full response to the authenticated
+  resident.
+- **Per-resident records with a per-community signal:** complaints, complaint
+  messages/comments, events and photos use `complaints`; profile and unit details
+  use `profile`; invoices, invoice items, payments, payment reports, adjustments,
+  credits, credit uses, account entries and opening balances use `home` and
+  `payments`. API list/detail reads remain scoped to the selected community and
+  resident. The broad signal can cause an unrelated resident's screen to refresh,
+  but never broadens the returned data.
+- **Per-resident authentication state:** a pending passkey-reset QR is looked up
+  by the signed-in Better Auth user in the auth service and returned only in that
+  session's pulse. The client never supplies the user ID.
+- **Not implemented:** money-transparency feeds and resident scheduler data have
+  no current tables, endpoints, or change signals.
+
+Every new resident-visible entity must be registered here, add its per-community
+or per-resident data scope and refresh path, bump the matching pulse version in
+the same transaction as every insert/update/delete (including status or soft
+delete changes), and extend the trigger-registry and behavior tests. Bulk SQL
+statements use statement-level transition-table triggers and bump once per
+distinct tenant/entity in that statement.
+
+The Better Auth five-minute cookie cache is for the resident client session UI;
+API authorization calls Better Auth with cookie caching disabled. The API also
+has a five-minute per-process cache keyed by a hash of the session bearer, indexed
+by user ID for eviction on logout/revocation/passkey replacement. Sensitive auth
+operations bypass it and validate against the session database. If the internal
+eviction callback is unavailable, an ordinary API read may accept a revoked
+session for at most five minutes; sensitive operations still fail closed. This
+bound assumes the current single API process; multiple replicas require shared
+or broadcast invalidation.
 
 **Not implemented (do not assume):** NestJS, Prisma as the schema source, Flutter resident client, BullMQ processors, live checkout, FCM/Filebase in product flows.
 
@@ -36,7 +85,7 @@ Web apps keep server-side Auth0 sessions and proxy API calls through `/api/backe
 | `infrastructure/ports` | Ports |
 | `infrastructure/adapters` | Auth0, Postgres, Redis, Resend |
 
-Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`012`) and `migrations/myapartment_tenant_db` (`001`–`038`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
+Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`015`) and `migrations/myapartment_tenant_db` (`001`–`040`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
 
 Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,validation}.json`. Keep key parity. Validate with `pnpm platform:validate`.
 

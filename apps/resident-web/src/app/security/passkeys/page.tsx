@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import { useResidentAuth } from '../../auth-provider'
 import { residentAuth } from '../../../lib/better-auth-client'
 import { BetterAuthLogin } from '../../../lib/better-auth-login'
@@ -21,6 +22,7 @@ function isAlreadyRegisteredPasskey(cause: unknown): boolean {
 
 export default function PasskeysPage() {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const { provider, user, isLoading, isAuthenticated } = useResidentAuth()
   const [passkeys, setPasskeys] = useState<SavedPasskey[]>([])
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [emailOtpVerified, setEmailOtpVerified] = useState(false), [duplicatePasskey, setDuplicatePasskey] = useState(false)
@@ -66,6 +68,7 @@ export default function PasskeysPage() {
   async function useExistingPasskey() {
     setBusy(true); setMessage('')
     try {
+      queryClient.clear()
       const result = await residentAuth.signOut()
       if (result.error) throw new Error(result.error.message ?? 'Could not sign out')
       globalThis.location.assign('/')

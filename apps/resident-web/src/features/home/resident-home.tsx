@@ -8,7 +8,9 @@ import { PaymentHistory, type PaymentHistoryState } from '../payments/payment-hi
 import { ComplaintWorkspace } from '../complaints/complaints'
 import { useCallback, useEffect, useRef, useState, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react'
 import { AuthBoundary, LoadState, TenantWorkspacePicker } from '../../lib/auth-ui'
-import { useApiPost, useApiQuery } from '../../lib/use-api'
+import { useApiPost } from '../../lib/use-api-mutations'
+import { useResidentPulse, useResidentQuery, residentKeys } from '../../lib/resident-queries'
+import { useQueryClient } from '@tanstack/react-query'
 import { useResidentAuth } from '../../app/auth-provider'
 import { getAppConfig, useTranslation, LanguageSwitcher } from '@block9/app-platform'
 import { PwaInstallPage, useAppMessages } from '@block9/ui'
@@ -67,13 +69,12 @@ type ResidentHome = {
   breakdown: Record<string, number>
   recentPayments: Payment[]
   announcements: Notice[]
+  openPolls: Array<{ id: string; question: string; startsAt: string; endsAt: string }>
   paymentUnavailableReason: string
   profile: { fullName: string; email: string; phone: string | null; unit: string }
   brand: { name: string; apartmentCode: string; locale: string; timezone: string }
 }
 
-type ResidentNotice = Omit<Notice, 'publishedAt'> & { createdAt: string; channel: string; startsAt: string; endsAt: string | null }
-type ResidentPoll = { id:string; question:string; startsAt:string; endsAt:string; resultsVisibleUntil:string; resultsRetentionDays:number; status:string; anonymous:boolean; showResultsLive:boolean; hasVoted:boolean; myOptionId:string|null; canChangeVote:boolean; isLive:boolean; options:Array<{id:string;label:string}>; results:Array<{id:string;label:string;votes:number}>|null; voters:Array<{full_name:string;unit:string;option:string}> }
 type ActiveTab = 'install' | 'meetingMinutes' | 'complaints' | 'home' | 'payments' | 'history' | 'notices' | 'profile'
 
 const residentNavigation: Array<{ tab: ActiveTab; label: string; navKey: string; icon: 'home' | 'wallet' | 'history' | 'bell' | 'user' }> = [
@@ -134,61 +135,32 @@ function ResidentContent() {
   const [updatesState,setUpdatesState]=useState<UpdatesState>({page:1,search:'',status:'All',kind:'All',record:null})
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const pullDistanceRef = useRef(0)
-  const refreshStartedAtRef = useRef(0)
-  const home = useApiQuery<ResidentHome>('/v1/tenant/home', { retainDataOnReload: true })
-  const profile = useApiQuery<ResidentProfile>('/v1/tenant/profile')
-  const updatesSummary=useApiQuery<{summary:{unreadLiveAnnouncements:number}}>('/v1/tenant/updates?summary=true',{retainDataOnReload:true})
-  const notices = useApiQuery<ResidentNotice[]>('/v1/tenant/notices')
-  const polls = useApiQuery<ResidentPoll[]>('/v1/tenant/polls', { retainDataOnReload: true })
-  const refreshUpdates=useCallback(()=>{notices.reload();home.reload();updatesSummary.reload()},[notices.reload,home.reload,updatesSummary.reload])
+  const { activeTenantId, user } = useResidentAuth()
+  const queryClient = useQueryClient()
+  const pulse = useResidentPulse()
+  const home = useResidentQuery<ResidentHome>('/v1/tenant/home', { enabled: activeTab === 'home' || activeTab === 'payments' })
+  const profile = useResidentQuery<ResidentProfile>('/v1/tenant/profile', { enabled: activeTab === 'profile' })
+  const refreshUpdates=useCallback(()=>{
+    pulse.reload()
+    void queryClient.invalidateQueries({queryKey:residentKeys.resourcePrefix(activeTenantId,user?.sub,'home')})
+    void queryClient.invalidateQueries({queryKey:residentKeys.resourcePrefix(activeTenantId,user?.sub,'updates')})
+  },[activeTenantId,pulse.reload,queryClient,user?.sub])
   const post = useApiPost()
-  useEffect(() => {
-    const refreshBilling = () => {
-      if (document.visibilityState === 'visible') refreshUpdates()
-    }
-    window.addEventListener('focus', refreshBilling)
-    document.addEventListener('visibilitychange', refreshBilling)
-    return () => {
-      window.removeEventListener('focus', refreshBilling)
-      document.removeEventListener('visibilitychange', refreshBilling)
-    }
-  }, [refreshUpdates])
-  useEffect(() => {
-    if (activeTab === 'notices') polls.reload()
-  }, [activeTab, polls.reload])
-  useEffect(() => {
-    const refreshPolls = () => {
-      if (document.visibilityState === 'visible') polls.reload()
-    }
-    const timer = window.setInterval(refreshPolls, 30_000)
-    window.addEventListener('focus', refreshPolls)
-    document.addEventListener('visibilitychange', refreshPolls)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('focus', refreshPolls)
-      document.removeEventListener('visibilitychange', refreshPolls)
-    }
-  }, [polls.reload])
+  const bannerAnnouncements = (home.data?.announcements ?? []).filter((item) => item.isBanner && !dismissedAnnouncementIds.includes(item.id))
+  const bannerPolls = home.data?.openPolls ?? []
   const isTotalSelected = selectedInvoiceId === 'total'
   const selectedInvoice = isTotalSelected ? undefined : home.data?.invoiceBalances.find(({ invoiceId, availableToReportMinor }) => invoiceId === selectedInvoiceId && availableToReportMinor > 0)
     ?? home.data?.invoiceBalances.find(({ availableToReportMinor }) => availableToReportMinor > 0)
   const totalAvailableToReportMinor = home.data?.invoiceBalances.reduce((total, balance) => total + balance.availableToReportMinor, 0) ?? 0
   const selectedAvailableMinor = isTotalSelected ? totalAvailableToReportMinor : selectedInvoice?.availableToReportMinor ?? 0
   const activeNavigation = activeTab === 'history' ? {label:'Payment history',navKey:'history'} : residentNavigation.find(({ tab }) => tab === activeTab) ?? residentNavigation[0]
-  const unreadNoticeCount = updatesSummary.data?.summary.unreadLiveAnnouncements ?? 0
-  const bannerAnnouncements = (notices.data ?? []).filter((item) => item.isBanner && !dismissedAnnouncementIds.includes(item.id))
-  const bannerPolls = polls.data?.filter((poll) => poll.isLive && !poll.hasVoted) ?? []
+  const unreadNoticeCount = pulse.data?.counts.unreadUpdates ?? 0
   const firstName = home.data?.profile.fullName.trim().split(/\s+/)[0] || t('resident:greeting.defaultName', 'there')
   const localHour = new Date().getHours()
   const greeting = localHour < 12 ? t('resident:greeting.morning', 'Good morning') : localHour < 17 ? t('resident:greeting.afternoon', 'Good afternoon') : t('resident:greeting.evening', 'Good evening')
   const dueInDays = home.data?.dueDate
     ? Math.ceil((new Date(`${home.data.dueDate}T00:00:00`).getTime() - new Date(new Date().toDateString()).getTime()) / 86_400_000)
     : null
-
-  useEffect(() => {
-    const interval = globalThis.setInterval(()=>{notices.reload();updatesSummary.reload()}, 60_000)
-    return () => globalThis.clearInterval(interval)
-  }, [notices.reload,updatesSummary.reload])
 
   const handleTouchStart = (event: ReactTouchEvent<HTMLElement>) => {
     if (globalThis.innerWidth > 640 || globalThis.scrollY > 0 || refreshing || event.touches.length !== 1) return
@@ -213,12 +185,10 @@ function ResidentContent() {
     touchStartRef.current = null
     const shouldRefresh = globalThis.innerWidth <= 640 && pullDistanceRef.current >= 58 && !refreshing
     if (shouldRefresh) {
-      refreshStartedAtRef.current = Date.now()
       setRefreshing(true)
       setPullDistance(58)
       home.reload()
-      notices.reload()
-      profile.reload()
+      pulse.reload()
     } else if (!refreshing) {
       pullDistanceRef.current = 0
       setPullDistance(0)
@@ -232,19 +202,14 @@ function ResidentContent() {
   }
 
   useEffect(() => {
-    if (!refreshing) return
-    const interval = globalThis.setInterval(() => {
-      const requestsFinished = !home.loading && !notices.loading && !profile.loading
-      if (Date.now() - refreshStartedAtRef.current >= 450 && requestsFinished) {
-        setRefreshing(false)
-        pullDistanceRef.current = 0
-        setPullDistance(0)
-      }
-    }, 100)
-    return () => globalThis.clearInterval(interval)
-  }, [home.loading, notices.loading, profile.loading, refreshing])
-
-
+    if (!refreshing || home.loading) return
+    const timeout = globalThis.setTimeout(() => {
+      setRefreshing(false)
+      pullDistanceRef.current = 0
+      setPullDistance(0)
+    }, 450)
+    return () => globalThis.clearTimeout(timeout)
+  }, [home.loading, refreshing])
 
   useEffect(() => {
     if (selectedInvoiceId || !selectedInvoice) return
@@ -275,6 +240,8 @@ function ResidentContent() {
       setReportReview(false)
       paymentRequestKey.current = ''
       setSelectedInvoiceId(null)
+      void queryClient.invalidateQueries({ queryKey: residentKeys.resourcePrefix(activeTenantId, user?.sub, 'payments') })
+      pulse.reload()
       home.reload()
     } catch (cause) {
       pushMessage(`${cause instanceof Error ? cause.message : 'Could not record the offline payment'}. Check Payment history before retrying an interrupted save.`, 'error')
@@ -330,7 +297,7 @@ function ResidentContent() {
           {(refreshing || pullDistance > 0) && <><span className="resident-pull-spinner" />{refreshing ? t('common:messages.refreshing', 'Refreshing…') : pullDistance >= 58 ? t('common:messages.releaseToRefresh', 'Release to refresh') : t('common:messages.pullToRefresh', 'Pull to refresh')}</>}
         </div>
         {bannerAnnouncements.length > 0 && <aside className="resident-announcement-banners" aria-label="Banner announcements">{bannerAnnouncements.map((announcement) => <div className="resident-announcement-banner" key={announcement.id}><button type="button" className="resident-announcement-banner-copy" onClick={() => { setActiveTab('notices'); setUpdatesState((value)=>({...value,record:{kind:'announcement',id:announcement.id}})) }}><span className="resident-announcement-banner-label">{announcement.isImportant ? 'Important announcement' : 'Announcement'}</span><strong>{announcement.isImportant && !/^important:\s*/i.test(announcement.title) ? `IMPORTANT: ${announcement.title}` : announcement.title}</strong><span>{announcement.body}</span></button><button className="resident-announcement-banner-close" type="button" aria-label="Dismiss announcement" onClick={() => dismissAnnouncement(announcement.id)}>×</button></div>)}</aside>}
-        {bannerPolls.length > 0 && <aside className="resident-announcement-banners" aria-label="Open polls">{bannerPolls.map((poll)=><button className="resident-poll-banner" key={poll.id} type="button" onClick={()=>{setActiveTab('notices');setUpdatesState((value)=>({...value,record:{kind:'poll',id:poll.id}}))}}><span>Community poll · Ends {new Date(poll.endsAt).toLocaleDateString('en-IN')}</span><strong>{poll.question}</strong><small>Tap to cast your vote →</small></button>)}</aside>}
+        {activeTab === 'home' && bannerPolls.length > 0 && <aside className="resident-announcement-banners" aria-label="Open polls">{bannerPolls.map((poll)=><button className="resident-poll-banner" key={poll.id} type="button" onClick={()=>{setActiveTab('notices');setUpdatesState((value)=>({...value,record:{kind:'poll',id:poll.id}}))}}><span>Community poll · Ends {new Date(poll.endsAt).toLocaleDateString('en-IN')}</span><strong>{poll.question}</strong><small>Tap to cast your vote →</small></button>)}</aside>}
         {activeTab === 'home' && home.data && <header className="resident-mobile-home-header">
           <div><h1>{greeting}, {firstName}</h1><p>{home.data.brand.name} · {home.data.profile.unit.split('·').at(-1)?.trim() ?? home.data.profile.unit}</p><small className="resident-apartment-code">Apartment ID: {home.data.brand.apartmentCode}</small></div>
           <div className="resident-mobile-header-actions">
@@ -517,7 +484,7 @@ function ResidentContent() {
 
         {activeTab === 'install' && <PwaInstallPage onBack={() => setActiveTab('home')} />}
 
-        {activeTab === 'profile' && <ResidentProfileWorkspace data={profile.data} loading={profile.loading} error={profile.error} onRetry={profile.reload} onSaved={() => {profile.reload();home.reload()}} />}
+        {activeTab === 'profile' && <ResidentProfileWorkspace data={profile.data} loading={profile.loading} error={profile.error} onRetry={profile.reload} onSaved={() => {profile.reload();home.reload();pulse.reload()}} />}
 
         </div>
       </section>

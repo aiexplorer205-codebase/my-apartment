@@ -12,18 +12,18 @@ Switching providers creates independent identities and requires fresh resident o
 Browser requests stay on the resident origin. The service owns Better Auth, email OTP, passkeys and session tables.
 Six digit OTPs expire after five minutes, allow five attempts, and are stored hashed. Resend delivers codes.
 Database-backed IP rate limits and an atomic per-address resend cooldown are shared across instances.
-Read-only `/get-session` checks are exempt from the authentication attempt limiter because every resident API request validates its session through that endpoint. Sign-in, OTP and QR limits remain enabled.
+Read-only `/get-session` checks are exempt from the authentication attempt limiter. The resident client fetches its session on initial load and does not periodically refetch or refetch on focus. Better Auth's signed cookie cache is enabled for five minutes; the API also keeps a bounded in-process validation cache to avoid an auth-service call for every API request. Sign-in, OTP and QR limits remain enabled.
 Successful OTP can create an identity, but grants **no tenant access**. The original seven-day, single-use
 invitation still requires matching verified email and explicit acceptance. Flat/block labels are not authorization.
 
 The resident web backend forwards only the signed session cookie in a namespaced bearer envelope.
-The API validates it against the auth service on each request, checks verified email and expiry, namespaces
+The API validates it against the auth service on a cache miss, checks verified email and expiry, namespaces
 the subject as `betterauth|id`, then resolves platform membership and the tenant-bound database as before.
 No browser-supplied identity or tenant claim is trusted. Better Auth identities cannot use admin or operator routes.
 Auth0 identities cannot use resident routes when Better Auth is selected. Suspended tenants remain denied.
 Do not configure operator IDs or tenant memberships to bypass these checks.
 
-Sessions have a fixed eight-hour lifetime, no sliding refresh and no cookie cache. Sign-out invalidates server state.
+Sessions have a fixed eight-hour lifetime and no sliding refresh. Sign-out invalidates server state; cached session validation can remain usable for at most the configured five-minute cache lifetime.
 Passkeys are optional; email OTP remains available. QR signup may omit email or collect an optional email address.
 If an email is entered, the resident verifies it with Email OTP before registering the passkey; without email,
 passkey registration is the first step. Residents with a verified email can request a

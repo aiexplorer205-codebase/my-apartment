@@ -122,7 +122,7 @@ export async function completeQrRegistration(pool: Pool, token: unknown, respons
     await client.query("UPDATE resident_auth_qr SET status='consumed', challenge=NULL, completed_at=NOW() WHERE id=$1", [grant.id])
     await client.query('INSERT INTO resident_auth_audit(user_id,action) VALUES($1,$2)', [grant.user_id, `qr.${grant.purpose}.completed`])
     await client.query('COMMIT')
-    return { registered: true, purpose: grant.purpose }
+    return { registered: true, purpose: grant.purpose, userId: grant.purpose === 'reset' ? grant.user_id : undefined }
   } catch (error) {
     await client.query('ROLLBACK')
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
@@ -132,8 +132,7 @@ export async function completeQrRegistration(pool: Pool, token: unknown, respons
   } finally { client.release() }
 }
 
-export async function cancelQr(pool: Pool, userId: string, id: string, sessionToken: string) {
-  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new QrError(400, 'Invalid QR request')
+export async function cancelQr(pool: Pool, userId: string, sessionToken: string) {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
@@ -141,10 +140,9 @@ export async function cancelQr(pool: Pool, userId: string, id: string, sessionTo
     const session = await client.query('SELECT 1 FROM resident_auth_session WHERE token=$1 AND "userId"=$2 AND "expiresAt">NOW() FOR UPDATE', [sessionToken, userId])
     if (!session.rowCount) throw new QrError(401, 'Sign in again before cancelling this QR')
     const result = await client.query(`UPDATE resident_auth_qr SET status='cancelled', challenge=NULL
-      WHERE id=$1 AND user_id=$2 AND purpose='reset' AND status='pending' AND expires_at>NOW() RETURNING id`, [id, userId])
-    if (!result.rowCount) throw new QrError(409, 'This QR is no longer pending. Refresh your session.')
-    await client.query("INSERT INTO resident_auth_audit(user_id,action) VALUES($1,'qr.reset.cancelled')", [userId])
+      WHERE user_id=$1 AND purpose='reset' AND status='pending' AND expires_at>NOW() RETURNING id`, [userId])
+    if (result.rowCount) await client.query("INSERT INTO resident_auth_audit(user_id,action) VALUES($1,'qr.reset.cancelled')", [userId])
     await client.query('COMMIT')
-    return { cancelled: true }
+    return { cancelled: (result.rowCount ?? 0) > 0, resetPending: null }
   } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
 }

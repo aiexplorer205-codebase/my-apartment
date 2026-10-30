@@ -4,6 +4,7 @@ import { ResidentQrBanner } from '../lib/resident-qr-banner'
 import { residentAuthProvider } from '../lib/resident-auth-config'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
+import { ResidentQueryProvider } from './query-provider'
 import { I18nProvider, getAppConfig } from '@block9/app-platform'
 import { AppMessagesProvider } from '@block9/ui'
 import { AuthenticatedPwaControls } from '../lib/authenticated-pwa-controls'
@@ -22,13 +23,15 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <I18nProvider namespaces={['common', 'resident', 'validation']}>
-          <AuthProvider provider={residentAuthProvider()}>
-            <AppMessagesProvider>
-              <AuthenticatedPwaControls appName={config.application.productName} />
-              <ResidentQrBanner />
-              {children}
-            </AppMessagesProvider>
-          </AuthProvider>
+          <ResidentQueryProvider>
+            <AuthProvider provider={residentAuthProvider()}>
+              <AppMessagesProvider>
+                <AuthenticatedPwaControls appName={config.application.productName} />
+                <ResidentQrBanner />
+                {children}
+              </AppMessagesProvider>
+            </AuthProvider>
+          </ResidentQueryProvider>
         </I18nProvider>
       </body>
     </html>

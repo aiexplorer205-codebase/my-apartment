@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiFetch,apiFetchBlob,ApiRequestError } from '../packages/api-client/src/index.ts'
+import { apiFetch,apiFetchBlob,apiFetchWithEtag,ApiRequestError } from '../packages/api-client/src/index.ts'
 
 afterEach(()=>vi.unstubAllGlobals())
 describe('versioned API path boundaries',()=>{
@@ -10,21 +10,23 @@ describe('versioned API path boundaries',()=>{
     expect(fetch).toHaveBeenCalledWith('/api/backend/v1/tenant/payments/history?search=receipt..2026',expect.objectContaining({cache:'no-store'}))
   })
   it('preserves HTTP status so draft forms distinguish rejected saves from interrupted saves',async()=>{
-    vi.stubGlobal('fetch',async()=>({ok:false,status:400,json:async()=>({message:'Choose attendees'})}))
+    vi.stubGlobal('fetch',async()=>({ok:false,status:400,headers:{get:()=>null},json:async()=>({message:'Choose attendees'})}))
     await expect(apiFetch('/v1/admin/meeting-minutes',{method:'POST'})).rejects.toMatchObject({status:400,message:'Choose attendees'})
     await expect(apiFetch('/v1/admin/meeting-minutes')).rejects.toBeInstanceOf(ApiRequestError)
   })
   it('requests workspace recovery only for tenant unavailability, including private downloads',async()=>{
     const dispatch=vi.fn();vi.stubGlobal('dispatchEvent',dispatch)
-    vi.stubGlobal('fetch',async()=>({ok:false,status:403,json:async()=>({error:'tenant_unavailable',message:'Apartment unavailable'})}))
+    vi.stubGlobal('fetch',async()=>({ok:false,status:403,headers:{get:()=>null},json:async()=>({error:'tenant_unavailable',message:'Apartment unavailable'})}))
     await expect(apiFetch('/v1/tenant/home')).rejects.toMatchObject({status:403,code:'tenant_unavailable'})
     await expect(apiFetchBlob('/v1/tenant/complaints/id/photos/photo')).rejects.toMatchObject({status:403,code:'tenant_unavailable'})
-    expect(dispatch).toHaveBeenCalledTimes(2)
-    expect(dispatch.mock.calls[0][0].type).toBe('myapartment:tenant-unavailable')
+    expect(dispatch.mock.calls.map((call)=>call[0].type)).toEqual([
+      'myapartment:auth-failure','myapartment:tenant-unavailable',
+      'myapartment:auth-failure','myapartment:tenant-unavailable',
+    ])
     dispatch.mockClear()
-    vi.stubGlobal('fetch',async()=>({ok:false,status:403,json:async()=>({error:'forbidden',message:'Wrong role'})}))
+    vi.stubGlobal('fetch',async()=>({ok:false,status:403,headers:{get:()=>null},json:async()=>({error:'forbidden',message:'Wrong role'})}))
     await expect(apiFetch('/v1/admin/buildings')).rejects.toThrow('Wrong role')
-    expect(dispatch).not.toHaveBeenCalled()
+    expect(dispatch.mock.calls.map((call)=>call[0].type)).toEqual(['myapartment:auth-failure'])
   })
   it('rejects external, literal and encoded traversal paths before making a request',async()=>{
     const fetch=vi.fn();vi.stubGlobal('fetch',fetch)
@@ -37,8 +39,17 @@ describe('versioned API path boundaries',()=>{
     expect(await apiFetchBlob('/v1/tenant/complaints/id/photos/photo',{headers:{'X-Tenant-Id':'test'}})).toBe(photo)
     expect(fetch).toHaveBeenCalledWith('/api/backend/v1/tenant/complaints/id/photos/photo',expect.objectContaining({cache:'no-store',headers:{'X-Tenant-Id':'test'}}))
     await expect(apiFetchBlob('/v1/%2e%2e/private')).rejects.toThrow('relative versioned')
-    vi.stubGlobal('fetch',async()=>({ok:false,status:404,json:async()=>({message:'Photo not found'})}))
+    vi.stubGlobal('fetch',async()=>({ok:false,status:404,headers:{get:()=>null},json:async()=>({message:'Photo not found'})}))
     await expect(apiFetchBlob('/v1/tenant/complaints/id/photos/photo')).rejects.toThrow('Photo not found')
+  })
+  it('manually sends pulse validators and accepts a 304 without parsing a body',async()=>{
+    const fetch=vi.fn(async()=>new Response(null,{status:304,headers:{ETag:'"pulse-etag"'}}))
+    vi.stubGlobal('fetch',fetch)
+    const result=await apiFetchWithEtag('/api/resident/pulse',{headers:{'If-None-Match':'"pulse-etag"'}})
+    expect(result).toEqual({data:undefined,etag:'"pulse-etag"',notModified:true})
+    expect(fetch).toHaveBeenCalledWith('/api/resident/pulse',expect.objectContaining({
+      cache:'no-store',headers:{'If-None-Match':'"pulse-etag"'},
+    }))
   })
 
 })

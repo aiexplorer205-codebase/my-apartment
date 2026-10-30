@@ -40,6 +40,8 @@ Set in `.env`: `AUTH0_DOMAIN`, `AUTH0_ISSUER` (trailing slash), `AUTH0_AUDIENCE`
 
 Set `OPERATOR_IDS` to the exact approved operator Auth0 `sub` values (not emails). The API fails closed if the list is empty or the subject is not listed.
 
+For the Better Auth resident flow, generate a random `RESIDENT_AUTH_CACHE_INVALIDATION_SECRET` (for example, `openssl rand -hex 32`) and set it in `.env`. Compose passes this same secret to both `api` and `resident-auth` for immediate session-cache eviction after logout, revocation and passkey replacement. Do not leave it blank.
+
 Optional: an Auth0 Post Login Action that denies operator-client logins unless `event.user.user_id` is in the same `OPERATOR_IDS` list. The operator app and API still enforce the allowlist.
 
 ## Compose
@@ -73,7 +75,10 @@ Firebase and Filebase variables in `.env.example` are unused by current flows.
 
 Fresh initialization creates `myapartment_platform_db` (`block9_platform`) and
 `myapartment_app_db` (`block9_tenant`), applying every ordered SQL migration through
-tenant `038` and platform `012`. It creates separate platform, tenant-runtime, and lifecycle logins.
+tenant `040` and platform `015`. Migration `040_resident_change_signals.sql`
+replaces row-level notice/poll version triggers with statement-level triggers and
+adds resident-visible change signals for current complaint, minutes, profile and
+financial data. It creates separate platform, tenant-runtime, and lifecycle logins.
 There is no database-per-tenant template or cloning step.
 
 Use the URLs and password variables in `.env.example`. Existing `.env` files

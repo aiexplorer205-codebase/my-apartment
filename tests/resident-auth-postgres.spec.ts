@@ -1,5 +1,5 @@
 import { Pool } from '../apps/resident-auth/node_modules/pg'
-import { authenticateResidentSession } from '../apps/api/src/resident-auth'
+import { authenticateResidentSession, evictResidentSessionCacheForUser } from '../apps/api/src/resident-auth'
 import { residentSessionBearer } from '../apps/resident-web/src/lib/resident-auth-config'
 import type { Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -11,6 +11,7 @@ const enabled = Boolean(databaseURL && new URL(databaseURL).pathname.endsWith('_
 describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
   let service: typeof import('../apps/resident-auth/src/auth')
   let otp = '', cookie = '', requestNumber = 0
+  const apiEvictions: string[] = []
   let server: Server | undefined
   const realFetch = globalThis.fetch
   beforeAll(async () => {
@@ -18,9 +19,18 @@ describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
     vi.stubEnv('RESIDENT_WEB_PUBLIC_URL', 'http://localhost:3098')
     vi.stubEnv('RESIDENT_AUTH_SECRET', 'local-integration-test-secret-with-more-than-32-characters')
     vi.stubEnv('RESIDENT_PASSKEY_RP_ID', 'localhost')
+    vi.stubEnv('API_INTERNAL_URL', 'http://api-test.local')
+    vi.stubEnv('RESIDENT_AUTH_CACHE_INVALIDATION_SECRET', 'resident-cache-test-secret')
     vi.stubEnv('RESEND_API_KEY', 'test-key'); vi.stubEnv('RESEND_FROM', 'test@example.test')
-    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, options: { body?: string }) => {
-      otp = (JSON.parse(options.body ?? '{}').text as string).match(/\b[0-9]{6}\b/)?.[0] ?? otp
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, options: { body?: string }) => {
+      if (String(url).endsWith('/internal/resident-session-cache/evict')) {
+        const userId = (JSON.parse(options.body ?? '{}') as { userId: string }).userId
+        apiEvictions.push(userId)
+        evictResidentSessionCacheForUser(userId)
+        return new Response(null, { status: 204 })
+      }
+      const emailText = (JSON.parse(options.body ?? '{}') as { text?: string }).text ?? ''
+      otp = emailText.match(/\b[0-9]{6}\b/)?.[0] ?? otp
       return new Response('{}', { status: 200 })
     }))
     const setupPool = new Pool({ connectionString: databaseURL })
@@ -154,8 +164,41 @@ describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
     expect((await service.pool.query("SELECT id FROM resident_auth_user WHERE email='delivery-failed@example.test'")).rowCount).toBe(0)
   })
   it('revokes the session immediately without a cookie cache', async () => {
-    expect((await (await request('get-session')).json()).user.email).toBe('second@example.test')
-    await service.pool.query('DELETE FROM resident_auth_session')
-    expect(await (await request('get-session')).json()).toBeNull()
+    const user = (await service.pool.query("SELECT id FROM resident_auth_user WHERE email='second@example.test'")).rows[0]
+    const currentCookie = cookie
+    const rawCookie = currentCookie.split('; ').find((value) => value.startsWith('myapartment-resident.session_token='))!.split('=').slice(1).join('=')
+    const bearer = residentSessionBearer(decodeURIComponent(rawCookie))
+    const savedFetch = globalThis.fetch
+    vi.stubGlobal('fetch', realFetch)
+    expect(await authenticateResidentSession(bearer)).toMatchObject({ subject: `betterauth|${user.id}` })
+    vi.stubGlobal('fetch', savedFetch)
+
+    const signOut = await realFetch(`http://127.0.0.1:${(server!.address() as { port: number }).port}/api/resident-auth/sign-out`, {
+      method: 'POST', headers: { origin: 'http://localhost:3098', cookie: currentCookie, 'Content-Type': 'application/json' }, body: '{}',
+    })
+    expect(signOut.status).toBe(200)
+    expect(apiEvictions).toContain(user.id)
+    vi.stubGlobal('fetch', realFetch)
+    try {
+      await expect(authenticateResidentSession(bearer)).rejects.toMatchObject({ status: 401 })
+    } finally { vi.stubGlobal('fetch', savedFetch) }
+
+    await service.pool.query('DELETE FROM resident_auth_email_limit')
+    await request('email-otp/send-verification-otp', { email: 'second@example.test', type: 'sign-in' })
+    const relinkLogin = await request('sign-in/email-otp', { email: 'second@example.test', otp })
+    const relinkCookie = relinkLogin.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ')
+    const relinkRawCookie = relinkCookie.split('; ').find((value) => value.startsWith('myapartment-resident.session_token='))!.split('=').slice(1).join('=')
+    const relinkBearer = residentSessionBearer(decodeURIComponent(relinkRawCookie))
+    const relinkSession = await service.auth.api.getSession({ headers: new Headers({ cookie: relinkCookie }), query: { disableCookieCache: true } })
+    if (!relinkSession) throw new Error('Expected an active session for the sensitive-route test')
+    vi.stubGlobal('fetch', realFetch)
+    expect(await authenticateResidentSession(relinkBearer)).toMatchObject({ subject: `betterauth|${user.id}` })
+    await service.pool.query('DELETE FROM resident_auth_session WHERE token=$1', [relinkSession.session.token])
+    const stalePasskeyRequest = await realFetch(`http://127.0.0.1:${(server!.address() as { port: number }).port}/api/resident-auth/passkey/generate-register-options`, {
+      method: 'POST', headers: { origin: 'http://localhost:3098', cookie: relinkCookie, 'Content-Type': 'application/json' }, body: '{}',
+    })
+    expect(stalePasskeyRequest.status).toBe(401)
+    expect(evictResidentSessionCacheForUser(user.id)).toBeGreaterThan(0)
+    vi.stubGlobal('fetch', savedFetch)
   })
 })

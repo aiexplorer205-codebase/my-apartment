@@ -5,7 +5,7 @@ import { residentAuthProvider, residentAuthURL, sameResidentOrigin } from '../..
 const paths = new Set(['get-session', 'sign-out', 'email-otp/send-verification-otp', 'sign-in/email-otp',
   'passkey/generate-register-options', 'passkey/verify-registration', 'passkey/generate-authenticate-options',
   'passkey/verify-authentication', 'passkey/list-user-passkeys', 'passkey/delete-passkey', 'passkey/update-passkey',
-  'list-sessions', 'revoke-session', 'revoke-other-sessions', 'security/replace-passkeys', 'security/email-otp-status', 'qr/lookup', 'qr/options', 'qr/verify', 'security/qr-pending', 'security/qr-cancel'])
+  'list-sessions', 'revoke-session', 'revoke-other-sessions', 'security/replace-passkeys', 'security/email-otp-status', 'qr/lookup', 'qr/options', 'qr/verify', 'security/qr-cancel'])
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const path = (await context.params).path.join('/')

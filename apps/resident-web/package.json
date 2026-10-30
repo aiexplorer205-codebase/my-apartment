@@ -18,13 +18,14 @@
     "@block9/contracts": "workspace:*",
     "@block9/design-tokens": "workspace:*",
     "@block9/ui": "workspace:*",
+    "@simplewebauthn/browser": "13.3.0",
+    "@tanstack/react-query": "^5",
     "better-auth": "1.7.14",
     "i18next": "^24.2.2",
     "next": "^15.5.28",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-i18next": "^15.4.1",
-    "@simplewebauthn/browser": "13.3.0"
+    "react-i18next": "^15.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.11.0",

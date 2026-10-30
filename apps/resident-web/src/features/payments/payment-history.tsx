@@ -3,7 +3,7 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import { getAppConfig } from '@block9/app-platform'
 import { LoadState } from '../../lib/auth-ui'
-import { useApiQuery } from '../../lib/use-api'
+import { useResidentQuery } from '../../lib/resident-queries'
 
 export type PaymentRecordSelection={kind:'report'|'credit'|'adjustment'|'adjustment_credit'|'refund';id:string}
 export type PaymentHistoryState={page:number;search:string;status:'all'|'pending'|'confirmed';period:string;record:PaymentRecordSelection|null}
@@ -17,8 +17,8 @@ const title=(item:RecordItem)=>item.kind==='adjustment'?'Invoice adjustment':ite
 
 export function PaymentHistory({state,setState,onBackToPayments}:{state:PaymentHistoryState;setState:Dispatch<SetStateAction<PaymentHistoryState>>;onBackToPayments:()=>void}){
   const params=new globalThis.URLSearchParams({page:String(state.page),status:state.status,...(state.search?{search:state.search}:{}),...(state.period?{period:state.period}:{})})
-  const history=useApiQuery<History>(`/v1/tenant/payments/history?${params}`)
-  const detail=useApiQuery<Detail>(state.record?`/v1/tenant/payments/records/${state.record.kind}/${state.record.id}`:'/v1/tenant/payments/history',{enabled:Boolean(state.record)})
+  const history=useResidentQuery<History>(`/v1/tenant/payments/history?${params}`)
+  const detail=useResidentQuery<Detail>(state.record?`/v1/tenant/payments/records/${state.record.kind}/${state.record.id}`:'/v1/tenant/payments/history',{enabled:Boolean(state.record)})
   const heading=useRef<globalThis.HTMLHeadingElement>(null),scroll=useRef<{window:number;panel:number}|null>(null),restore=useRef(false)
   const record=state.record&&detail.data?.id===state.record.id&&detail.data.kind===state.record.kind?detail.data:null
   useEffect(()=>{

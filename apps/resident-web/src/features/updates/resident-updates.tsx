@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { getAppConfig } from '@block9/app-platform'
 import { LoadState } from '../../lib/auth-ui'
-import { useApiPost, useApiQuery } from '../../lib/use-api'
+import { useApiPost } from '../../lib/use-api-mutations'
+import { residentKeys, useResidentPulse, useResidentQuery } from '../../lib/resident-queries'
+import { useResidentAuth } from '../../app/auth-provider'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 export type UpdatesState={page:number;search:string;status:'All'|'Live'|'Scheduled'|'Ended';kind:'All'|'announcement'|'poll';record:{kind:'announcement'|'poll';id:string}|null}
 type Update={id:string;kind:'announcement'|'poll';title:string;preview:string;description?:string;startsAt:string;endsAt:string|null;publishedAt:string;closedAt:string|null;status:string;isRead:boolean;isImportant:boolean;isBanner:boolean;anonymous:boolean;hasVoted:boolean}
@@ -11,9 +14,9 @@ type Feed={records:Update[];total:number;pageSize:number;summary:{unreadLiveAnno
 const date=(value:string)=>new Date(value).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'})
 export function ResidentUpdatesWorkspace({state,setState,onRead}:{state:UpdatesState;setState:Dispatch<SetStateAction<UpdatesState>>;onRead:()=>void}){
   const params=new globalThis.URLSearchParams({page:String(state.page),search:state.search,status:state.status,kind:state.kind})
-  const feed=useApiQuery<Feed>(`/v1/tenant/updates?${params}`,{enabled:!state.record})
+  const feed=useResidentQuery<Feed>(`/v1/tenant/updates?${params}`,{enabled:!state.record})
   const noticeId=state.record?.kind==='announcement'?state.record.id:null
-  const detail=useApiQuery<Update>(`/v1/tenant/notices/${noticeId??''}`,{enabled:Boolean(noticeId)})
+  const detail=useResidentQuery<Update>(`/v1/tenant/notices/${noticeId??''}`,{enabled:Boolean(noticeId)})
   const post=useApiPost(),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('')
   const heading=useRef<globalThis.HTMLHeadingElement>(null),attempted=useRef<string|null>(null),lock=useRef(false),position=useRef({window:0,panel:0}),restore=useRef(false)
   const notice=detail.data?.id===noticeId?detail.data:null
@@ -52,12 +55,33 @@ export function ResidentUpdatesWorkspace({state,setState,onRead}:{state:UpdatesS
 
 type Poll={id:string;question:string;startsAt:string;endsAt:string;status:string;closedAt:string|null;anonymous:boolean;hasVoted:boolean;myOptionId:string|null;canChangeVote:boolean;isLive:boolean;options:Array<{id:string;label:string}>;results:Array<{id:string;label:string;votes:number}>|null;voters:Array<{full_name:string;unit:string;option:string}>}
 function ResidentPollDetail({id,onVoted}:{id:string;onVoted:()=>void}){
-  const query=useApiQuery<Poll>(`/v1/tenant/polls/${id}`,{retainDataOnReload:true}),post=useApiPost(),[chosen,setChosen]=useState(''),[editing,setEditing]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),lock=useRef(false)
+  const query=useResidentQuery<Poll>(`/v1/tenant/polls/${id}`),post=useApiPost(),[chosen,setChosen]=useState(''),[editing,setEditing]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),lock=useRef(false)
   const poll=query.data?.id===id?query.data:null
-  useEffect(()=>{const refresh=()=>{if(document.visibilityState==='visible'&&!lock.current)query.reload()};const timer=window.setInterval(refresh,30000);window.addEventListener('focus',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('focus',refresh)}},[query.reload])
+  const {activeTenantId,user}=useResidentAuth(),queryClient=useQueryClient(),pulse=useResidentPulse()
+  const voteMutation=useMutation({
+    mutationFn:(optionId:string)=>post(`/v1/tenant/polls/${id}/vote`,{optionId}),
+    onMutate:async(optionId)=>{
+      const key=residentKeys.resource(activeTenantId,user?.sub,`/v1/tenant/polls/${id}`)
+      await queryClient.cancelQueries({queryKey:key})
+      const previous=queryClient.getQueryData<Poll>(key)
+      if(previous){
+        const oldOption=previous.options.find((option)=>option.id===previous.myOptionId)
+        const chosenOption=previous.options.find((option)=>option.id===optionId)
+        const results=previous.results ? previous.results.map((result)=>result.id===oldOption?.id?{...result,votes:Math.max(0,result.votes-1)}:result.id===chosenOption?.id?{...result,votes:result.votes+1}:result) : null
+        queryClient.setQueryData<Poll>(key,{...previous,myOptionId:optionId,hasVoted:true,results})
+      }
+      return {key,previous}
+    },
+    onError:(_cause,_optionId,context)=>{if(context?.previous)queryClient.setQueryData(context.key,context.previous)},
+    onSettled:async()=>{
+      await queryClient.invalidateQueries({queryKey:residentKeys.resourcePrefix(activeTenantId,user?.sub,'polls')})
+      await queryClient.invalidateQueries({queryKey:residentKeys.resourcePrefix(activeTenantId,user?.sub,'updates')})
+      pulse.reload()
+    },
+  })
   const vote=async()=>{
     if(!chosen||lock.current)return;lock.current=true;setBusy(true);setError('')
-    try{await post(`/v1/tenant/polls/${id}/vote`,{optionId:chosen});setEditing(false);query.reload();onVoted()}
+    try{await voteMutation.mutateAsync(chosen);setEditing(false);query.reload();onVoted()}
     catch(cause){setError(`${cause instanceof Error?cause.message:'Could not save vote'}. Refresh this poll after an interrupted save to check your recorded choice.`)}
     finally{lock.current=false;setBusy(false)}
   }

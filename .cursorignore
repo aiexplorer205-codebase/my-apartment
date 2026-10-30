@@ -1,0 +1,28 @@
+# Generated dependencies, build output, and caches
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+dist/
+**/dist/
+build/
+**/build/
+coverage/
+**/coverage/
+.turbo/
+**/.turbo/
+.cache/
+**/.cache/
+.pnpm-store/
+.terraform/
+**/.terraform/
+docker-data/
+**/docker-data/
+*.log
+*.tsbuildinfo
+
+# Local secrets and duplicate prototype exports
+.env
+.env.*
+!.env.example
+ui-prototype/figma-prototype/

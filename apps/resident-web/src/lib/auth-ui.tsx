@@ -6,7 +6,7 @@ import { LoginPresentation } from './login-presentation'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import type { ReactNode } from 'react'
-import { useApiQuery } from './use-api'
+import { useResidentQuery } from './resident-queries'
 import type { TenantMembership } from '@block9/auth-types'
 import { useLocale, useTranslation } from '@block9/app-platform'
 
@@ -51,14 +51,12 @@ function LoginChoices({ children }: { children: ReactNode }) {
 
 export function TenantWorkspacePicker() {
   const { activeTenantId, setActiveTenantId } = useResidentAuth()
-  const { data, loading, error, reload } = useApiQuery<TenantMembership[]>('/v1/tenant/memberships', { tenantScoped: false })
+  const { data, loading, error, reload } = useResidentQuery<TenantMembership[]>('/v1/tenant/memberships', { tenantScoped: false })
   useEffect(() => {
     const refresh = () => reload()
     globalThis.addEventListener('myapartment:tenant-unavailable', refresh)
-    globalThis.addEventListener('focus', refresh)
     return () => {
       globalThis.removeEventListener('myapartment:tenant-unavailable', refresh)
-      globalThis.removeEventListener('focus', refresh)
     }
   }, [reload])
   const requiredRole = 'resident'

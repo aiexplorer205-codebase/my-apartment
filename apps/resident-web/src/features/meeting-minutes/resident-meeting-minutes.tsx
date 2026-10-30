@@ -1,21 +1,21 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MeetingDetail, MeetingHistory, MeetingSummary } from '@block9/contracts'
 import { apiFetch } from '@block9/api-client'
 import { useTranslation } from '@block9/app-platform'
 import { useResidentAuth } from '../../app/auth-provider'
 import { LoadState } from '../../lib/auth-ui'
-import { useApiQuery } from '../../lib/use-api'
+import { useResidentQuery } from '../../lib/resident-queries'
 
 export function ResidentMeetingMinutes() {
   const { t } = useTranslation(['common'])
   const { activeTenantId } = useResidentAuth()
   const label=(key:string)=>t(`common:meetings.${key}`)
-  const latest=useApiQuery<{item:MeetingDetail|null}>('/v1/tenant/meeting-minutes/latest')
+  const latest=useResidentQuery<{item:MeetingDetail|null}>('/v1/tenant/meeting-minutes/latest')
   const [selected,setSelected]=useState<string|null>(null),[items,setItems]=useState<MeetingSummary[]>([])
   const [cursor,setCursor]=useState<string|null>(null),[loaded,setLoaded]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('')
-  const detail=useApiQuery<MeetingDetail>(`/v1/tenant/meeting-minutes/${selected??''}`,{enabled:Boolean(selected)})
+  const detail=useResidentQuery<MeetingDetail>(`/v1/tenant/meeting-minutes/${selected??''}`,{enabled:Boolean(selected)})
   const lock=useRef(false),generation=useRef(0),heading=useRef<globalThis.HTMLHeadingElement>(null),historyHeading=useRef<globalThis.HTMLHeadingElement>(null)
   const position=useRef({window:0,panel:0}),restore=useRef(false),focusHistory=useRef(false)
   useEffect(()=>{heading.current?.focus()},[selected])
@@ -36,7 +36,14 @@ export function ResidentMeetingMinutes() {
     }catch(cause){if(active===generation.current)setError(cause instanceof Error?cause.message:label('failed'))}
     finally{if(active===generation.current){lock.current=false;setBusy(false)}}
   }
-  const refresh=()=>{generation.current++;lock.current=false;setBusy(false);setError('');setLoaded(false);setItems([]);setCursor(null);latest.reload()}
+  const refresh=useCallback(()=>{generation.current++;lock.current=false;setBusy(false);setError('');setLoaded(false);setItems([]);setCursor(null);latest.reload()},[latest.reload])
+  useEffect(()=>{
+    const changed=(event:globalThis.Event)=>{
+      if(event instanceof globalThis.CustomEvent&&event.detail?.resource==='minutes')refresh()
+    }
+    globalThis.addEventListener('myapartment:resident-resource-changed',changed)
+    return()=>globalThis.removeEventListener('myapartment:resident-resource-changed',changed)
+  },[refresh])
   const open=(id:string)=>{position.current={window:window.scrollY,panel:document.querySelector('.resident-shell > .content-panel')?.scrollTop??0};setSelected(id);window.scrollTo({top:0});document.querySelector('.resident-shell > .content-panel')?.scrollTo({top:0})}
   const value=selected?detail.data?.id===selected?detail.data:null:latest.data?.item
   const format=(date:string|null,zone:string)=>date?new Date(date).toLocaleString('en-IN',{timeZone:zone,dateStyle:'medium',timeStyle:'short'}):''
