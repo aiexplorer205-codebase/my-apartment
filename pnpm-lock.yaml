@@ -75,9 +75,6 @@ importers:
 
   apps/admin-web:
     dependencies:
-      '@auth0/nextjs-auth0':
-        specifier: ^4.32.0
-        version: 4.32.0(next@15.5.28(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@better-auth/passkey':
         specifier: 1.7.14
         version: 1.7.14(@better-auth/core@1.7.14(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.28.17)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-auth@1.7.14(next@15.5.28(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(prisma@5.22.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.12(@types/node@22.20.5)(vite@6.4.4(@types/node@22.20.5))))(better-call@1.4.4(zod@4.6.7))(nanostores@1.5.5)
@@ -247,9 +244,6 @@ importers:
 
   apps/resident-web:
     dependencies:
-      '@auth0/nextjs-auth0':
-        specifier: ^4.32.0
-        version: 4.32.0(next@15.5.28(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@better-auth/passkey':
         specifier: 1.7.14
         version: 1.7.14(@better-auth/core@1.7.14(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.28.17)(nanostores@1.5.5))(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-auth@1.7.14(next@15.5.28(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(prisma@5.22.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.12(@types/node@22.20.5)(vite@6.4.4(@types/node@22.20.5))))(better-call@1.4.4(zod@4.6.7))(nanostores@1.5.5)

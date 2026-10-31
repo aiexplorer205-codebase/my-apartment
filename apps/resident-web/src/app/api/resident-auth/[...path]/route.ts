@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { residentAuthProvider, residentAuthURL, sameResidentOrigin } from '../../../../lib/resident-auth-config'
+import { residentAuthURL, sameResidentOrigin } from '../../../../lib/resident-auth-config'
 
 // Explicit allowlist: never expose arbitrary service endpoints through the browser proxy.
 const paths = new Set(['get-session', 'sign-out', 'email-otp/send-verification-otp', 'sign-in/email-otp',
@@ -9,7 +9,7 @@ const paths = new Set(['get-session', 'sign-out', 'email-otp/send-verification-o
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const path = (await context.params).path.join('/')
-  if (residentAuthProvider() !== 'better-auth' || !paths.has(path)) return new NextResponse(null, { status: 404 })
+  if (!paths.has(path)) return new NextResponse(null, { status: 404 })
   if (request.method !== 'GET' && !sameResidentOrigin(request)) return new NextResponse(null, { status: 403 })
   const headers = new globalThis.Headers({ 'content-type': 'application/json' })
   for (const name of ['cookie', 'origin', 'user-agent']) {

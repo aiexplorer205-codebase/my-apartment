@@ -1,6 +1,6 @@
 # AGENTS
 
-MyApartment by BLOCK9: apartment operations SaaS. Next.js login/resident/admin/operator apps, Node HTTP API, worker health stub, Postgres (platform + shared application DB with forced RLS), Redis, Auth0 OTP, Resend invitations.
+MyApartment by BLOCK9: apartment operations SaaS. Next.js login/resident/admin/operator apps, Node HTTP API, worker health stub, Postgres (platform + shared application DB with forced RLS), Redis, isolated Better Auth resident/admin services, Auth0 operator login, Resend invitations.
 
 Do not invent NestJS, Prisma migrations, Flutter, fake payments, or job processors. Prisma in root `package.json` is unused. Schema is SQL in `migrations/`.
 

@@ -1,12 +1,12 @@
 # Local setup
 
-Run MyApartment by BLOCK9 on Docker Compose with a non-production Auth0 tenant. Do not use production credentials.
+Run MyApartment by BLOCK9 on Docker Compose. Operator sign-in uses a non-production Auth0 tenant; resident and admin sign-in use their isolated Better Auth services. Do not use production credentials.
 
 ## Prerequisites
 
 - Node.js 22+, Corepack, pnpm 9.15.0
 - Docker Compose v2
-- Non-production Auth0 tenant (containers start without it; sign-in does not)
+- Non-production Auth0 tenant for the operator app (containers start without it; operator sign-in does not)
 - Resend development key and verified sender (admin and resident invitations)
 
 ```sh
@@ -19,28 +19,13 @@ cp .env.example .env
 
 ## Auth0
 
-Create **three Regular Web Applications** (Resident, Admin, Operator) in one Auth0 tenant.
+Create one Regular Web Application for the Operator app. Set `http://localhost:3101/auth/callback` as the callback, `http://localhost:3101/` as the logout URL, and `http://localhost:3101` as an Allowed Web Origin. Set Organization Usage to **No Organization**.
 
-Enable the Email connection (`email`) and the Passwordless OTP grant on Resident and Admin. Set **Organization Usage** to **No Organization**. MyApartment stores tenants and memberships in its own databases.
-
-Local allowlists per app: origin as Callback (`{origin}/auth/callback`), Logout (`{origin}/`), and Allowed Web Origins.
-
-| App | Origin | Callback |
-| --- | --- | --- |
-| Resident | `http://localhost:3098` | `http://localhost:3098/auth/callback` |
-| Admin | `http://localhost:3100` | `http://localhost:3100/auth/callback` |
-| Operator | `http://localhost:3101` | `http://localhost:3101/auth/callback` |
-
-Also create:
-
-- An Auth0 API whose identifier matches `AUTH0_AUDIENCE` (example: `https://api.myapartment.local`).
-- A Machine-to-Machine application for the Management API with `create:users`, `read:users`, and `delete:users`. Enable the Email passwordless connection for that M2M client. Keep connection signup disabled; the API creates invited users.
-
-Set in `.env`: `AUTH0_DOMAIN`, `AUTH0_ISSUER` (trailing slash), `AUTH0_AUDIENCE`, each app’s `AUTH0_*_CLIENT_ID` / `AUTH0_*_CLIENT_SECRET`, and three independent ≥32-byte session secrets (`AUTH0_RESIDENT_SECRET`, `AUTH0_ADMIN_SECRET`, `AUTH0_OPERATOR_SECRET`). Never put secrets in `NEXT_PUBLIC_*`.
+Create an Auth0 API whose identifier matches `AUTH0_AUDIENCE` (example: `https://api.myapartment.local`). Configure only `AUTH0_DOMAIN`, `AUTH0_ISSUER` (trailing slash), `AUTH0_AUDIENCE`, and the operator app's `AUTH0_OPERATOR_CLIENT_ID`, `AUTH0_OPERATOR_CLIENT_SECRET`, and `AUTH0_OPERATOR_SECRET`. Never put secrets in `NEXT_PUBLIC_*`.
 
 Set `OPERATOR_IDS` to the exact approved operator Auth0 `sub` values (not emails). The API fails closed if the list is empty or the subject is not listed.
 
-For the Better Auth resident flow, generate a random `RESIDENT_AUTH_CACHE_INVALIDATION_SECRET` (for example, `openssl rand -hex 32`) and set it in `.env`. Compose passes this same secret to both `api` and `resident-auth` for immediate session-cache eviction after logout, revocation and passkey replacement. Do not leave it blank.
+Generate a random `RESIDENT_AUTH_CACHE_INVALIDATION_SECRET` (for example, `openssl rand -hex 32`) and set it in `.env`. Compose passes this same secret to both `api` and `resident-auth` for immediate session-cache eviction after logout, revocation and passkey replacement. Do not leave it blank.
 
 Optional: an Auth0 Post Login Action that denies operator-client logins unless `event.user.user_id` is in the same `OPERATOR_IDS` list. The operator app and API still enforce the allowlist.
 
@@ -65,7 +50,7 @@ Open Resident at `http://localhost:3098` or Admin at `http://localhost:3100`
 
 A local `pnpm --filter @block9/admin-web build` does not update a running image. Rebuild the service container after Dockerfile or dependency changes.
 
-Set public origins (`RESIDENT_WEB_PUBLIC_URL`, `ADMIN_WEB_PUBLIC_URL`, `OPERATOR_WEB_PUBLIC_URL`) to the same values as Auth0 allowlists. Invitation emails use those URLs. CORS must include the authenticated app origins.
+Set public origins (`RESIDENT_WEB_PUBLIC_URL`, `ADMIN_WEB_PUBLIC_URL`, `OPERATOR_WEB_PUBLIC_URL`) to the correct app origins; only the operator origin must match Auth0 allowlists. Invitation emails use those URLs. CORS must include the authenticated app origins.
 
 Optional hosts-file routing through the proxy on port 8080 (`app.myapartment.local`, `admin.myapartment.local`, `ops.myapartment.local`, `api.myapartment.local`). Loopback ports still work.
 
@@ -75,12 +60,13 @@ Firebase and Filebase variables in `.env.example` are unused by current flows.
 
 Fresh initialization creates `myapartment_platform_db` (`block9_platform`) and
 `myapartment_app_db` (`block9_tenant`), applying every ordered SQL migration through
-tenant `041` and platform `015`. Migration `040_resident_change_signals.sql`
+tenant `042` and platform `015`. Migration `040_resident_change_signals.sql`
 converts version triggers to statement-level triggers and adds signals for
 resident-visible records. Migration `041_resident_signal_scopes.sql` keeps
 community-wide signals only for community-scoped data and removes version bumps
-for resident-specific state. It creates separate platform, tenant-runtime, and
-lifecycle logins.
+for resident-specific state. Migration `042_resident_signal_trigger_cleanup.sql`
+removes dependent-table triggers left behind by that scope change. The migrations
+create separate platform, tenant-runtime, and lifecycle logins.
 There is no database-per-tenant template or cloning step.
 
 Use the URLs and password variables in `.env.example`. Existing `.env` files
@@ -143,4 +129,4 @@ are absent. Apply platform `010` / tenant `037` and rebuild API. Browser image
 bytes bypass the web proxy. Configure lifecycle/CORS and scheduled cleanup as
 specified in [private-image-storage.md](./private-image-storage.md).
 
-Resident authentication can use a separate self-hosted Better Auth service behind the resident web proxy. Admin/operator remain on Auth0. See [resident provider configuration, database provisioning and deployment](resident-authentication.md).
+Resident authentication uses a separate self-hosted Better Auth service behind the resident web proxy. Admin uses its own Better Auth service; operator remains on Auth0. See [resident authentication, database provisioning and deployment](resident-authentication.md).

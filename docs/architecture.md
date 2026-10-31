@@ -100,7 +100,7 @@ or broadcast invalidation.
 | `infrastructure/ports` | Ports |
 | `infrastructure/adapters` | Auth0, Postgres, Redis, Resend |
 
-Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`015`) and `migrations/myapartment_tenant_db` (`001`–`041`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
+Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`015`) and `migrations/myapartment_tenant_db` (`001`–`042`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
 
 Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,validation}.json`. Keep key parity. Validate with `pnpm platform:validate`.
 
@@ -113,8 +113,9 @@ platform database remains separate from shared application data:
 - `myapartment_app_db`: shared community tables under `block9_tenant`. Every tenant-owned table has a non-null `tenant_id`, tenant-aware foreign keys, and forced PostgreSQL row-level security (RLS).
 - There is no tenant database template or database creation during onboarding. Database locator fields are internal metadata; they never authorize requests or select the tenant database.
 
-`TenantContext` is derived server-side from a validated Auth0 subject plus active
-membership and tenant status. Client hints never grant membership. Missing or
+`TenantContext` is derived server-side from a validated identity subject plus active
+membership and tenant status. Auth0 is used for operator JWTs; isolated Better Auth
+services provide admin and resident sessions. Client hints never grant membership. Missing or
 ambiguous membership fails closed. Resident/admin permissions remain application
 checks within the authorized tenant; RLS does not replace those checks.
 
@@ -133,7 +134,7 @@ tenant ownership, enables RLS on all tables, and installs lifecycle controls.
 Existing identifiers remain TEXT. UUID API identifiers and published financial
 and meeting history retain their existing behavior.
 
-Onboarding inserts organization and apartment rows and sends the existing Auth0
+Onboarding inserts organization and apartment rows and sends an administrator
 invitation. Operator deletion first blocks platform access, then invokes
 `purge_tenant` using a separate lifecycle credential. That role cannot read tenant
 tables. Purge removes only the selected tenant, including immutable history, and
@@ -149,10 +150,10 @@ Open the resident app directly at `/`, the admin app at `/` (redirects to
 `/dashboard`), or the operator app at `/login`. Each app handles its own sign-in.
 
 - API validates JWT issuer, audience, signature/JWKS, and expiry.
-- Resident and admin sign-in: Auth0 email OTP, embedded in each app.
+- Resident and admin sign-in: isolated Better Auth services with email OTP and passkeys.
 - Operator: separate Auth0 app; API require `OPERATOR_IDS` exact `sub` match.
-- Operator onboarding creates shared workspace rows, creates the admin in Auth0 via Management API, emails a seven-day single-use link (Resend). Accepting requires OTP on the invited email.
-- Resident invitations use the same pattern. SMS/WhatsApp OTP is not enabled.
+- Operator onboarding creates shared workspace rows and emails a seven-day single-use admin invitation (Resend). Accepting requires OTP on the invited email.
+- Resident invitations use the same single-use invitation pattern. SMS/WhatsApp OTP is not enabled.
 
 ## Product (shipped)
 
@@ -193,4 +194,4 @@ short-lived signed GET. Default retention is 90 days, with one-day staging and
 orphan cleanup. Platform `010` and tenant `037` are required.
 See [private-image-storage.md](./private-image-storage.md).
 
-Resident authentication can use a separate self-hosted Better Auth service behind the resident web proxy. Admin/operator remain on Auth0. See [resident provider configuration, database provisioning and deployment](resident-authentication.md).
+Resident authentication uses a separate self-hosted Better Auth service behind the resident web proxy. Auth0 is reserved for the operator app and API JWT validation. See [resident authentication, database provisioning and deployment](resident-authentication.md).

@@ -129,7 +129,6 @@ describe.skipIf(!enabled)('resident Better Auth with PostgreSQL', () => {
     await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Missing test server')
-    vi.stubEnv('RESIDENT_AUTH_PROVIDER', 'better-auth')
     vi.stubEnv('RESIDENT_AUTH_INTERNAL_URL', `http://127.0.0.1:${address.port}`)
     const savedFetch = globalThis.fetch
     const rawCookie = recoveryCookie.split('; ').find((value) => value.startsWith('myapartment-resident.session_token='))!.split('=').slice(1).join('=')

@@ -95,11 +95,11 @@ describe('MVP API runtime', () => {
     expect(otp.status).toBe(410)
     expect(await otp.json()).toMatchObject({ error: 'configuration_error' })
 
-    const legacyAdminOtp = await globalThis.fetch(`${baseUrl}/v1/public/passwordless/start`, {
+    const retiredPasswordlessRoute = await globalThis.fetch(`${baseUrl}/v1/public/passwordless/start`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'admin@example.test', application: 'admin' }),
+      body: JSON.stringify({ email: 'resident@example.test', application: 'resident' }),
     })
-    expect(legacyAdminOtp.status).toBe(410)
+    expect(retiredPasswordlessRoute.status).toBe(404)
 
     const operator = await globalThis.fetch(`${baseUrl}/v1/platform/overview`)
     expect(operator.status).toBe(401)

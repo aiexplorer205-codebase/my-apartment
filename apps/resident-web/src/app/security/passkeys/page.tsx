@@ -23,7 +23,7 @@ function isAlreadyRegisteredPasskey(cause: unknown): boolean {
 export default function PasskeysPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
-  const { provider, user, isLoading, isAuthenticated } = useResidentAuth()
+  const { user, isLoading, isAuthenticated } = useResidentAuth()
   const [passkeys, setPasskeys] = useState<SavedPasskey[]>([])
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [emailOtpVerified, setEmailOtpVerified] = useState(false), [duplicatePasskey, setDuplicatePasskey] = useState(false)
   const load = async () => {
@@ -37,7 +37,6 @@ export default function PasskeysPage() {
       router.replace('/')
       return
     }
-    if (provider !== 'better-auth') return
     void Promise.all([
       load(),
       fetch('/api/resident-auth/security/email-otp-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', cache: 'no-store' })
@@ -47,7 +46,7 @@ export default function PasskeysPage() {
           setEmailOtpVerified(result.verified)
         }),
     ]).catch((cause: unknown) => setMessage(cause instanceof Error ? cause.message : 'Could not load passkey settings'))
-  }, [provider, isAuthenticated, isLoading, router])
+  }, [isAuthenticated, isLoading, router])
   async function add() {
     setBusy(true); setMessage(''); setDuplicatePasskey(false)
     try {
@@ -79,7 +78,7 @@ export default function PasskeysPage() {
   }
   return <main className="auth-shell"><section className="auth-card section-stack"><h1>Passkeys and sign-in</h1>
     <Link href="/">Return to resident app</Link>
-    {isLoading || !isAuthenticated ? <p role="status">Checking session…</p> : provider !== 'better-auth' ? <p>Passkey management is available when resident passkey sign-in is enabled.</p> : <>
+    {isLoading || !isAuthenticated ? <p role="status">Checking session…</p> : <>
       <ul>{passkeys.map((key) => <li key={key.id}>{key.name || 'Passkey'}</li>)}</ul>
       {user?.email ? <>
         <p>Your existing passkeys remain valid until a replacement is registered.</p>

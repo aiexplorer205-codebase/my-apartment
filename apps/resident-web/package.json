@@ -10,7 +10,6 @@
     "lint": "eslint src --ext .ts,.tsx --max-warnings 0"
   },
   "dependencies": {
-    "@auth0/nextjs-auth0": "^4.32.0",
     "@better-auth/passkey": "1.7.14",
     "@block9/api-client": "workspace:*",
     "@block9/app-platform": "workspace:*",

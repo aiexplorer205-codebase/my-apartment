@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { authenticateAdminSession } from './admin-auth.js'
 import { issueResidentQr, issueResidentResetQr } from './resident-qr.js'
-import { authenticateResidentSession, evictResidentSessionCacheForUser, identityMayUseRole, residentAuthProvider } from './resident-auth.js'
+import { authenticateResidentSession, evictResidentSessionCacheForUser, identityMayUseRole } from './resident-auth.js'
 import { reserveTenantStorageDeletion, deleteTenantPhotoStorage } from './photo-maintenance.js'
 import { readMeetingMinutes, writeMeetingMinutes } from './meeting-minutes.js'
 import { apartmentSetup } from './apartment-setup.js'
@@ -36,7 +36,6 @@ import { AuthorizationError, ValidationError } from '@block9/shared'
 import { calculateAreaMaintenance, calculateInvoiceBalanceExcludingMinor, calculateMeteredWaterCharge, roundInvoiceTotalToRupee, summarizeBillingCharges } from './billing-calculations.js'
 import { createAdminInvitationToken, hashAdminInvitationToken, sendAdminInvitationEmail } from './admin-invitations.js'
 import { createResidentInvitationToken, createResidentInvitationUrl, hashResidentInvitationToken, sendResidentInvitationEmail } from './resident-invitations.js'
-import { provisionPasswordlessUser, sendPasswordlessOtpToRegisteredUser } from './auth0-management.js'
 import { acquireTenantLifecycleAccess, checkDatabaseReadiness, deleteTenantData, getPlatformPool, getTenantPool } from './persistence.js'
 
 interface AuthenticatedSubject {
@@ -726,9 +725,6 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     '/v1/public/admin-invitations/lookup': {
       post: { tags: ['platform'], summary: 'Resolve the invited email from a valid administrator invitation token', responses: { '200': { description: 'Invited email address' }, '400': { description: 'Invitation token is invalid, expired, or already accepted' } } },
     },
-    '/v1/public/passwordless/start': {
-      post: { tags: ['auth'], summary: 'Send an Email OTP only to an existing passwordless account', responses: { '200': { description: 'If the account exists, a sign-in code was sent' }, '400': { description: 'Invalid email or application' }, '503': { description: 'Identity service unavailable' } } },
-    },
     '/v1/public/resident-invitations/lookup': {
       post: { tags: ['tenant'], summary: 'Resolve a resident invitation before Email OTP sign-in', responses: { '200': { description: 'Invited email, organization, and unit' }, '400': { description: 'Invitation is invalid, expired, or already accepted' } } },
     },
@@ -1236,23 +1232,20 @@ const getResidentPulse = async (request: IncomingMessage, access: TenantAccess):
   for (const row of versionRows.rows) versions[row.entity] = Number(row.version)
   pulseDbTimings.set(request, performance.now() - databaseStartedAt)
 
-  let resetPending: ResidentPulse['resetPending'] = null
-  if (residentAuthProvider() === 'better-auth') {
-    const internalURL = process.env.RESIDENT_AUTH_INTERNAL_URL
-    if (!internalURL) throw new ApiFault(503, 'configuration_error', 'Configure RESIDENT_AUTH_INTERNAL_URL')
-    const response = await fetch(`${new URL(internalURL).origin}/api/resident-auth/security/pulse-reset`, {
-      headers: { authorization: request.headers.authorization ?? '', 'cache-control': 'no-store' },
-      redirect: 'error',
-      signal: AbortSignal.timeout(5_000),
-    })
-    if (!response.ok) throw new ApiFault(response.status >= 500 ? 503 : 401, response.status >= 500 ? 'dependency_unavailable' : 'unauthorized', 'Could not verify resident passkey reset status')
-    const parsedReset = z.object({
-      createdAt: z.iso.datetime({ offset: true }),
-      expiresAt: z.iso.datetime({ offset: true }),
-    }).nullable().safeParse(await response.json())
-    if (!parsedReset.success) throw new ApiFault(503, 'dependency_unavailable', 'Could not verify resident passkey reset status')
-    resetPending = parsedReset.data
-  }
+  const internalURL = process.env.RESIDENT_AUTH_INTERNAL_URL
+  if (!internalURL) throw new ApiFault(503, 'configuration_error', 'Configure RESIDENT_AUTH_INTERNAL_URL')
+  const response = await fetch(`${new URL(internalURL).origin}/api/resident-auth/security/pulse-reset`, {
+    headers: { authorization: request.headers.authorization ?? '', 'cache-control': 'no-store' },
+    redirect: 'error',
+    signal: AbortSignal.timeout(5_000),
+  })
+  if (!response.ok) throw new ApiFault(response.status >= 500 ? 503 : 401, response.status >= 500 ? 'dependency_unavailable' : 'unauthorized', 'Could not verify resident passkey reset status')
+  const parsedReset = z.object({
+    createdAt: z.iso.datetime({ offset: true }),
+    expiresAt: z.iso.datetime({ offset: true }),
+  }).nullable().safeParse(await response.json())
+  if (!parsedReset.success) throw new ApiFault(503, 'dependency_unavailable', 'Could not verify resident passkey reset status')
+  const resetPending = parsedReset.data
   return {
     versions,
     counts: { unreadUpdates: counts.rows[0]?.unread_updates ?? 0, openPolls: counts.rows[0]?.open_polls ?? 0 },
@@ -1744,7 +1737,6 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
   requireRole(access, 'admin')
   await requireResidentInvitationSchema(access)
   const input = parseResidentInvitationInput(rawInput)
-  if (input.delivery === 'qr' && residentAuthProvider() !== 'better-auth') throw new ApiFault(409, 'invalid_request', 'Enable resident passkey authentication before issuing QR invitations')
   const pool = withTenantPool(access)
   const client = await pool.connect()
   const { token, tokenHash } = createResidentInvitationToken(access.tenantId)
@@ -1829,13 +1821,6 @@ const createAdminResidentInvitation = async (access: TenantAccess, rawInput: unk
     throw error
   } finally {
     client.release()
-  }
-
-  try {
-    if (residentAuthProvider() === 'auth0') await provisionPasswordlessUser(input.email)
-  } catch {
-    console.error(JSON.stringify({ level: 'error', event: 'resident_invitation_auth0_provisioning_failed', requestId, tenantId: access.tenantId, invitationId }))
-    throw new ApiFault(503, 'dependency_unavailable', 'The invitation was saved, but the resident’s Email OTP identity could not be prepared. Check Auth0 user-provisioning settings and retry.')
   }
 
   const baseUrl = (process.env.RESIDENT_WEB_PUBLIC_URL ?? 'http://localhost:3098').replace(/\/$/, '')
@@ -2030,24 +2015,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
   const identity = await authenticate(request)
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) throw new ApiFault(400, 'invalid_request', 'A resident invitation token is required')
   const { tenantId, tokenHash } = parseResidentInvitationToken((rawInput as Record<string, unknown>).token)
-  if (identity.provider !== residentAuthProvider()) throw new ApiFault(403, 'forbidden', 'Use the configured resident sign-in')
-  let profile: { sub?: unknown; email?: unknown; email_verified?: unknown }
-  if (identity.provider === 'better-auth') {
-    profile = { sub: identity.subject, email: identity.verifiedEmail, email_verified: true }
-  } else {
-    if (!process.env.AUTH0_RESIDENT_CLIENT_ID || identity.clientId !== process.env.AUTH0_RESIDENT_CLIENT_ID) throw new ApiFault(403, 'forbidden', 'Use the resident application to accept this invitation')
-    const domain = process.env.AUTH0_DOMAIN?.trim()
-    if (!domain || domain.includes('/') || domain.includes('example.auth0.com')) throw new ApiFault(503, 'configuration_error', 'Auth0 domain is not configured')
-    let profileResponse: Awaited<ReturnType<typeof globalThis.fetch>>
-    try {
-      profileResponse = await globalThis.fetch(`https://${domain}/userinfo`, { headers: { Authorization: `Bearer ${identity.accessToken}` }, signal: AbortSignal.timeout(5000) })
-    } catch { throw new ApiFault(503, 'dependency_unavailable', 'Could not verify the email address') }
-    if (!profileResponse.ok) throw new ApiFault(401, 'unauthorized', 'The session must include the email profile scope')
-    profile = await profileResponse.json() as typeof profile
-  }
-  if (profile.sub !== identity.subject || (identity.provider !== 'better-auth' && (typeof profile.email !== 'string' || profile.email_verified !== true))) {
-    throw new ApiFault(403, 'forbidden', 'Sign in with the invited email address and verify it through Email OTP')
-  }
+  if (identity.provider !== 'better-auth') throw new ApiFault(403, 'forbidden', 'Use resident passkey or verified Email OTP sign-in')
 
   await holdTenantLifecycleAccess(request, tenantId)
   const tenant = await getInvitationTenant(tenantId)
@@ -2074,7 +2042,7 @@ const acceptResidentInvitation = async (request: IncomingMessage, rawInput: unkn
       const proof = await getPlatformPool().query(`SELECT 1 FROM resident_auth_qr WHERE tenant_id=$1 AND invitation_id=$2 AND token_hash=$3 AND user_id=$4 AND status='consumed'`,
         [tenantId, invitation.id, tokenHash, identity.subject.startsWith('betterauth|') ? identity.subject.slice(11) : ''])
       if (identity.provider !== 'better-auth' || !proof.rowCount) throw new ApiFault(403, 'forbidden', 'Register a passkey with this invitation QR first')
-    } else if (!invitation.email || typeof profile.email !== 'string' || invitation.email?.toLowerCase() !== profile.email.toLowerCase()) throw new ApiFault(403, 'forbidden', 'This invitation can only be accepted by the invited email address')
+    } else if (!invitation.email || !identity.verifiedEmail || invitation.email.toLowerCase() !== identity.verifiedEmail.toLowerCase()) throw new ApiFault(403, 'forbidden', 'This invitation can only be accepted by the invited email address')
     unitLabel = `${invitation.building_name} · ${invitation.number}`
     if (invitation.status === 'accepted') {
       const residentEmail = invitation.delivery === 'qr' ? identity.verifiedEmail ?? null : invitation.email
@@ -3393,9 +3361,6 @@ const completeOrganizationOnboarding = async (record: OnboardingRecord) => {
 const assertInvitationConfiguration = (): void => {
   try {
     assertAdminInvitationConfiguration()
-    if (!process.env.AUTH0_MGMT_CLIENT_ID?.trim() || !process.env.AUTH0_MGMT_CLIENT_SECRET?.trim()) {
-      throw new Error('Configure AUTH0_MGMT_CLIENT_ID and AUTH0_MGMT_CLIENT_SECRET to provision administrator accounts in Auth0')
-    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Administrator invitation configuration is incomplete'
     throw new ApiFault(503, 'configuration_error', message)
@@ -3557,16 +3522,6 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/public/auth/otp') {
         throw new ApiFault(410, 'configuration_error', 'Authentication is managed by the configured Auth0 Universal Login application')
-      }
-      if (request.method === 'POST' && requestUrl.pathname === '/v1/public/passwordless/start') {
-        const parsed = z.object({ email: z.string().trim().toLowerCase().pipe(z.email().max(254)), application: z.enum(['admin', 'resident']) }).safeParse(await readJsonBody(request))
-        if (!parsed.success) throw new ApiFault(400, 'invalid_request', 'Enter a valid email address and application')
-        const { email, application } = parsed.data
-        if (application === 'admin') throw new ApiFault(410, 'invalid_request', 'Use admin email verification')
-        if (application === 'resident' && residentAuthProvider() !== 'auth0') throw new ApiFault(410, 'invalid_request', 'Use resident email verification')
-        await sendPasswordlessOtpToRegisteredUser(email, application)
-        respond(response, 200, { message: 'If this email is registered, a sign-in code has been sent.' }, requestId)
-        return
       }
       if (request.method === 'POST' && requestUrl.pathname === '/v1/public/admin-invitations/accept') {
         respond(response, 200, await acceptAdminInvitation(request, requestId), requestId)
@@ -3860,7 +3815,6 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       }
       const resetQrMatch = requestUrl.pathname.match(/^\/v1\/admin\/residents\/([^/]+)\/passkey-qr$/)
       if (request.method === 'POST' && resetQrMatch) {
-        if (residentAuthProvider() !== 'better-auth') throw new ApiFault(409, 'invalid_request', 'Resident passkey authentication is disabled')
         const access = await resolveTenantAccess(request, 'admin')
         respond(response, 201, await issueResidentResetQr(access, resetQrMatch[1]!), requestId)
         return

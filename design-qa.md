@@ -9,7 +9,7 @@ Implemented the split brand panel, bilingual copy, language control, rounded whi
 
 Visual comparison and browser interaction checks are blocked: this session exposes no in-app browser tools. No rendered screenshot comparison or live authentication verification is claimed.
 
-Resident Better Auth uses the existing native WebAuthn popup. Admin and legacy resident Auth0 use hosted sign-in; passkey availability depends on the Auth0 tenant/connection configuration. A direct admin WebAuthn popup is not implemented by the existing Auth0 integration. Email OTP retains the existing providers and code lengths.
+Resident and admin authentication use isolated Better Auth services; resident Auth0 fallback and Auth0 browser SDK dependencies have been removed. Operator authentication remains on Auth0. Resident passkey sign-in uses the native WebAuthn popup; email OTP remains available for verification and recovery.
 
 Validation: repository typecheck and lint passed; final admin/resident typechecks, lint, translation parity, and diff whitespace checks passed. Tests passed with a 20-second per-test timeout and permission to bind local test servers: 136 passed, 114 skipped. The default timeout failed the existing image decompression-bomb test; that test passed separately with the longer timeout. Database tests remain skipped without their configured database environment.
 

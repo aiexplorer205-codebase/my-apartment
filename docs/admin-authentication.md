@@ -1,6 +1,6 @@
 # Admin authentication
 
-Admin uses Better Auth 1.7.14 with email OTP and optional passkeys, independently of the resident provider flag. Operator remains on Auth0. There is no legacy identity migration.
+Admin uses Better Auth 1.7.14 with email OTP and optional passkeys, isolated from the resident Better Auth service. Operator remains on Auth0. There is no legacy identity migration.
 
 The private admin-auth service uses separate admin_auth_* platform tables, a restricted database login, ADMIN_AUTH_SECRET, host-only myapartment-admin cookies and betterauth-admin| identity subjects. Resident sessions cannot authorize admin routes. Platform memberships, explicit invitation acceptance, active tenant checks and tenant-bound RLS remain required. OTP alone creates no membership.
 

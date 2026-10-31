@@ -52,7 +52,7 @@ The Next version addresses the [published advisory](https://github.com/advisorie
    Audit-history deletion now fails even for ordinary owner statements; approved
    legal retention/purge would require a separate reviewed privileged procedure.
 4. Run full CI and provider/isolation tests. Verify actual browser flows for
-   Auth0 login, resident passkeys/OTP, invitations, mutation forms, private photo
+   operator Auth0 login, resident/admin Better Auth passkeys/OTP, invitations, mutation forms, private photo
    upload/view, downloads and PWA update. Inspect headers on pages and errors.
 5. Pre-commit hook activation is per checkout. CI secret scanning and audit must
    remain required checks; do not ignore new findings to pass a pilot release.

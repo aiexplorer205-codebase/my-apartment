@@ -1,6 +1,6 @@
 # MyApartment by BLOCK9
 
-Multi-tenant apartment operations for residents, apartment administrators, and platform operators. Identity is Auth0 email OTP. Each customer organization has its own PostgreSQL database.
+Multi-tenant apartment operations for residents, apartment administrators, and platform operators. Resident and admin sign-in use isolated Better Auth services; operator sign-in uses Auth0. Tenant data uses a shared PostgreSQL application database with forced RLS.
 
 This repository is a local, testable product. It is **not** a production-supported service: checkout, backups, production ingress, and several operational gates remain open. See [docs/security-and-ops.md](docs/security-and-ops.md).
 
@@ -49,7 +49,7 @@ Full Auth0 allowlists, migrations (including tenant `030`–`034` on the runner)
 
 ## Shipped vs gated
 
-**Shipped:** Auth0 OTP; operator org onboarding and lifecycle; admin/resident invitations; apartment setup and unused-setup deletion; billing rules, preview, publish, adjustments; offline payment report and admin confirmation; accounts/ledgers/reconciliation; complaints and maintenance; announcements and polls.
+**Shipped:** resident/admin email OTP and passkeys; operator Auth0 login, organization onboarding and lifecycle; admin/resident invitations; apartment setup and unused-setup deletion; billing rules, preview, publish, adjustments; offline payment report and admin confirmation; accounts/ledgers/reconciliation; complaints and maintenance; announcements and polls.
 
 **Gated or stubbed:** online checkout, worker job processors, operator campaigns/support, report file exports, production deploy.
 

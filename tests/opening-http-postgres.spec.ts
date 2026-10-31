@@ -97,19 +97,12 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS!=='1')('Opening balances 
     return{id:intent.body.id,metadata,bytes,intent}
   }
   it('onboards and deletes shared workspaces through restricted database roles',async()=>{
-    const externalKeys=['AUTH0_DOMAIN','AUTH0_MGMT_CLIENT_ID','AUTH0_MGMT_CLIENT_SECRET','RESEND_API_KEY','RESEND_FROM','ADMIN_WEB_PUBLIC_URL','OPERATOR_IDS']
+    const externalKeys=['RESEND_API_KEY','RESEND_FROM','ADMIN_WEB_PUBLIC_URL','OPERATOR_IDS']
     const saved=Object.fromEntries(externalKeys.map(key=>[key,process.env[key]]))
-    Object.assign(process.env,{AUTH0_DOMAIN:'provider.example.test',AUTH0_MGMT_CLIENT_ID:'test-client',AUTH0_MGMT_CLIENT_SECRET:'test-secret',RESEND_API_KEY:'test-email-key',RESEND_FROM:'test@example.test',ADMIN_WEB_PUBLIC_URL:'https://admin.example.test',OPERATOR_IDS:'operator|test'})
+    Object.assign(process.env,{RESEND_API_KEY:'test-email-key',RESEND_FROM:'test@example.test',ADMIN_WEB_PUBLIC_URL:'https://admin.example.test',OPERATOR_IDS:'operator|test'})
     const originalFetch=globalThis.fetch
-    const stub=vi.spyOn(globalThis,'fetch').mockImplementation(async(input,options)=>{
+    const stub=vi.spyOn(globalThis,'fetch').mockImplementation(async(input)=>{
       const url=String(input)
-      if(url.startsWith('https://provider.example.test/')){
-        if(url.endsWith('/oauth/token'))return Response.json({access_token:'management-test-token',expires_in:3600})
-        if(url.includes('/users-by-email?'))return Response.json([])
-        if(url.endsWith('/api/v2/users'))return Response.json({user_id:'email|test-admin'})
-        if(options?.method==='DELETE')return new Response(null,{status:204})
-        return Response.json({user_id:'email|test-admin',email:'onboarding@example.test',identities:[{connection:'email'}]})
-      }
       if(url==='https://api.resend.com/emails')return Response.json({id:'email-test'})
       return originalFetch(input,options)
     })

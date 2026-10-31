@@ -6,7 +6,7 @@ import { useResidentPulse, residentKeys } from './resident-queries'
 import { useResidentAuth } from '../app/auth-provider'
 
 export function ResidentQrBanner() {
-  const { provider, activeTenantId, user } = useResidentAuth()
+  const { activeTenantId, user } = useResidentAuth()
   const pulse = useResidentPulse()
   const queryClient = useQueryClient()
   const [error, setError] = useState('')
@@ -28,7 +28,7 @@ export function ResidentQrBanner() {
     onError: (cause) => setError(cause instanceof Error ? cause.message : 'Could not cancel this QR'),
   })
 
-  const pending = provider === 'better-auth' ? pulse.data?.resetPending : null
+  const pending = pulse.data?.resetPending
   if (!pending) return null
   return <aside className="card section-stack" role="alert" aria-label="Passkey reset request">
     <strong>Your administrator generated a new passkey reset QR.</strong>

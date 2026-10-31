@@ -1,10 +1,7 @@
-# Resident authentication providers
+# Resident authentication
 
-Residents can use self-hosted Better Auth or Auth0. Admin uses a separate Better Auth service; operator uses Auth0. See [admin authentication](admin-authentication.md).
-`RESIDENT_AUTH_PROVIDER=better-auth|auth0` is a **server-side deployment flag**, set consistently on API and resident web.
-Compose and `.env.example` select Better Auth. Without the variable, standalone processes retain Auth0.
-An unknown value fails closed. There is no automatic provider fallback, identity linking or migration.
-Switching providers creates independent identities and requires fresh resident onboarding; it is not a seamless rollback for existing accounts.
+Residents use self-hosted Better Auth only. Admin uses a separate Better Auth service; operator uses Auth0. See [admin authentication](admin-authentication.md).
+There is no resident provider flag or Auth0 fallback. Auth0 is not a resident-web dependency, and the API accepts only Better Auth resident sessions. Operator authentication and API JWT validation remain on Auth0.
 
 ## Architecture
 
@@ -20,7 +17,7 @@ The resident web backend forwards only the signed session cookie in a namespaced
 The API validates it against the auth service on a cache miss, checks verified email and expiry, namespaces
 the subject as `betterauth|id`, then resolves platform membership and the tenant-bound database as before.
 No browser-supplied identity or tenant claim is trusted. Better Auth identities cannot use admin or operator routes.
-Auth0 identities cannot use resident routes when Better Auth is selected. Suspended tenants remain denied.
+Auth0 identities cannot use resident routes. Suspended tenants remain denied.
 Do not configure operator IDs or tenant memberships to bypass these checks.
 
 Sessions have a fixed eight-hour lifetime and no sliding refresh. Sign-out invalidates server state; cached session validation can remain usable for at most the configured five-minute cache lifetime.
@@ -61,11 +58,6 @@ separately designed identity recovery procedure; administrators cannot bypass ma
 5. Invite residents by email or generate a QR from Flats & Residents. QR signup may include a resident email for
    Email OTP recovery or leave it blank for passkey-only access. Verify the optional email by OTP before testing
    self-service replacement; test an admin-issued replacement QR and resident cancellation for passkey-only users.
-   Different providers do not
-   share sessions or memberships. Do not reuse old Auth0 identities as Better Auth identities.
-
-Setting the flag to `auth0` on API and resident web restores the existing embedded Auth0 OTP flow, which still
-requires its Auth0 resident client configuration. The resident auth service can be stopped in that mode.
 
 ## Cloud and managed PostgreSQL
 

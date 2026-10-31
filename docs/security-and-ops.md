@@ -11,7 +11,7 @@ for source evidence, gaps and acceptance criteria reviewed on 2026-10-29.
 - Parameterized SQL only. Tenant repositories use the scoped shared-database interface bound to server-side `TenantContext`, with transaction-local RLS. Runtime roles cannot own tables or bypass RLS.
 - UI visibility is not authorization. Enforce role and membership on every API read/write.
 - Operator access fails closed unless `OPERATOR_IDS` lists the exact Auth0 `sub`.
-- Admin/operator identity uses Auth0. Residents use the explicitly configured Auth0 or Better Auth provider; see [resident authentication](resident-authentication.md). Do not invent another OTP issuer or skip invitation acceptance.
+- Admin and resident identity use isolated Better Auth services. Operator identity and API JWT validation use Auth0; see [resident authentication](resident-authentication.md). Do not invent another OTP issuer or skip invitation acceptance.
 - Do not fake payment success, checkout, or worker job completion.
 - Invitation links are single-use and expire after seven days; delivery is email only.
 - Minutes of Meeting drafts are admin-only. Published notes/attendance snapshots are immutable; resident responses include attendee names and block/flat labels but no contact details, internal attendee IDs, or publisher subjects. Attendance never grants access.
@@ -62,4 +62,4 @@ Encrypted backups must include BOTH platform and application databases, role
 configuration, and the migration ledger. A tenant JSON export is a maintenance
 artifact, not a complete disaster-recovery backup. Do not log its contents.
 
-Resident authentication can use a separate self-hosted Better Auth service behind the resident web proxy. Admin/operator remain on Auth0. See [resident provider configuration, database provisioning and deployment](resident-authentication.md).
+Resident authentication uses a separate self-hosted Better Auth service behind the resident web proxy. Auth0 is reserved for the operator app and API JWT validation. See [resident authentication, database provisioning and deployment](resident-authentication.md).

@@ -1,7 +1,6 @@
 import './globals.css'
 import '@block9/design-tokens/tokens.css'
 import { ResidentQrBanner } from '../lib/resident-qr-banner'
-import { residentAuthProvider } from '../lib/resident-auth-config'
 import type { ReactNode } from 'react'
 import { AuthProvider } from './auth-provider'
 import { ResidentQueryProvider } from './query-provider'
@@ -24,7 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <I18nProvider namespaces={['common', 'resident', 'validation']}>
           <ResidentQueryProvider>
-            <AuthProvider provider={residentAuthProvider()}>
+            <AuthProvider>
               <AppMessagesProvider>
                 <AuthenticatedPwaControls appName={config.application.productName} />
                 <ResidentQrBanner />

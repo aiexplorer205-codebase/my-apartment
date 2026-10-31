@@ -18,18 +18,11 @@ export function evictResidentSessionCacheForUser(userId: string) {
   return hashes.size
 }
 
-export function residentAuthProvider(): 'auth0' | 'better-auth' {
-  const provider = process.env.RESIDENT_AUTH_PROVIDER ?? 'auth0'
-  if (provider !== 'auth0' && provider !== 'better-auth') throw new ApiFault(503, 'configuration_error', 'Invalid resident authentication provider')
-  return provider
-}
-
 export function identityMayUseRole(provider: 'auth0' | 'better-auth' | 'better-auth-admin', role: 'resident' | 'admin'): boolean {
-  return role === 'admin' ? provider === 'better-auth-admin' : provider === residentAuthProvider()
+  return role === 'admin' ? provider === 'better-auth-admin' : provider === 'better-auth'
 }
 
 export async function authenticateResidentSession(token: string, options: { bypassCache?: boolean } = {}) {
-  if (residentAuthProvider() !== 'better-auth') throw new ApiFault(401, 'unauthorized', 'Resident session authentication is disabled')
   const encoded = token.slice('resident-session.'.length)
   const cookie = Buffer.from(encoded, 'base64url').toString('utf8')
   if (!encoded || encoded.length > 2048 || Buffer.from(cookie).toString('base64url') !== encoded || !/^[A-Za-z0-9._~%+-]+$/.test(cookie)) {
