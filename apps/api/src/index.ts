@@ -20,6 +20,9 @@ import { adminAssignees } from './admin-assignment.js'
 import { adminCommunications } from './admin-communications.js'
 import { publishCommunication } from './communication-publications.js'
 import { residentUpdates } from './resident-updates.js'
+import { getPushSettings, registerPushSubscription, removePushSubscription, updatePushPreferences } from './push-subscriptions.js'
+import { enqueueTenantPush, snapshotPushMetrics } from './push-service.js'
+import { closePushDispatcherPools, startPushDispatcher } from './push-dispatcher.js'
 import { complaintPhoto, complaintPhotoLimits, createPhotoUpload, finalizePhotoUpload } from './complaint-photos.js'
 import { complaintRequest } from './complaints.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
@@ -59,6 +62,7 @@ const requestAuthTimings = new WeakMap<IncomingMessage, number>()
 const pulseDbTimings = new WeakMap<IncomingMessage, number>()
 const requestResponses = new WeakMap<IncomingMessage, ServerResponse>()
 const residentRequestWindows = new Map<string, { startedAt: number; count: number }>()
+const residentPushRequestWindows = new Map<string, { startedAt: number; count: number }>()
 const databaseTiming = new AsyncLocalStorage<{ duration: number }>()
 
 const enforceResidentRateLimit = (subject: string) => {
@@ -79,6 +83,27 @@ const enforceResidentRateLimit = (subject: string) => {
     }
   }
   if (window.count >= 60) throw new ApiFault(429, 'rate_limited', 'Resident request limit reached. Try again shortly.', Math.max(1, Math.ceil((60_000 - (now - window.startedAt)) / 1_000)))
+  window.count += 1
+}
+
+const enforceResidentPushRateLimit = (subject: string) => {
+  const now = Date.now()
+  let window = residentPushRequestWindows.get(subject)
+  if (!window || now - window.startedAt >= 60_000) {
+    window = { startedAt: now, count: 0 }
+    residentPushRequestWindows.set(subject, window)
+  }
+  if (residentPushRequestWindows.size > 10_000) {
+    for (const [key, value] of residentPushRequestWindows) {
+      if (now - value.startedAt >= 60_000) residentPushRequestWindows.delete(key)
+    }
+    while (residentPushRequestWindows.size > 10_000) {
+      const oldest = residentPushRequestWindows.keys().next().value
+      if (oldest === undefined) break
+      residentPushRequestWindows.delete(oldest)
+    }
+  }
+  if (window.count >= 10) throw new ApiFault(429, 'rate_limited', 'Notification settings changed too often. Try again shortly.', Math.max(1, Math.ceil((60_000 - (now - window.startedAt)) / 1_000)))
   window.count += 1
 }
 
@@ -586,6 +611,16 @@ export const createOpenApiBootstrap = (): OpenApiBootstrap => ({
     },
     '/v1/tenant/home': {
       get: { tags: ['tenant'], summary: 'Resident home summary', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Tenant-scoped resident home' }, '401': { description: 'Authentication required' }, '403': { description: 'An active resident profile is required' } } },
+    },
+    '/v1/tenant/push/settings': {
+      get: { tags: ['tenant'], summary: 'Read resident push capability, preferences and device count', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident-scoped notification settings' }, '403': { description: 'An active resident profile is required' } } },
+    },
+    '/v1/tenant/push/subscriptions': {
+      post: { tags: ['tenant'], summary: 'Register or reassign this device after explicit notification opt-in', security: [{ bearerAuth: [] }], responses: { '201': { description: 'Subscription registered' }, '400': { description: 'Unsupported endpoint or invalid keys' }, '409': { description: 'Device limit reached' }, '429': { description: 'Push route rate limit reached' } } },
+      delete: { tags: ['tenant'], summary: 'Remove this authenticated resident device subscription', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Subscription removed' }, '429': { description: 'Push route rate limit reached' } } },
+    },
+    '/v1/tenant/push/preferences': {
+      patch: { tags: ['tenant'], summary: 'Update resident notification categories, language and security-email preference', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Notification preferences updated' }, '400': { description: 'Invalid preference values' }, '429': { description: 'Push route rate limit reached' } } },
     },
     '/v1/tenant/pulse': {
       get: { tags: ['tenant'], summary: 'Resident change versions, lightweight counts and passkey reset status', description: 'Private conditional response; tenant is derived from validated membership. Supports ETag and If-None-Match.', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Resident-scoped pulse payload' }, '304': { description: 'Pulse has not changed' }, '429': { description: 'Resident rate limit reached; Retry-After is returned' } } },
@@ -1403,6 +1438,7 @@ const createAdminPoll = async (access: TenantAccess, input: unknown) => {
     const created=await client.query(`INSERT INTO polls(tenant_id,question,starts_at,ends_at,anonymous,show_results_live,results_retention_days,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[access.tenantId,question,payload.startsAt,payload.endsAt,v.anonymous,v.showResultsLive,v.resultsRetentionDays,access.subject])
     const id=created.rows[0].id as string
     for(let i=0;i<options.length;i++)await client.query('INSERT INTO poll_options(poll_id,label,position) VALUES($1,$2,$3)',[id,options[i],i])
+    await enqueueTenantPush(client, access.tenantId, 'poll', id)
     return{id}
   })
 }
@@ -1495,7 +1531,9 @@ const createAdminAnnouncement = async (access: TenantAccess, input: unknown) => 
   const payload={title,body,startsAt:startsAt.toISOString(),endsAt:endsAt.toISOString(),isImportant:value.isImportant,isBanner:value.isBanner}
   return publishCommunication(withTenantPool(access),access,'announcement',value.requestKey,payload,async(client)=>{
     const result=await client.query(`INSERT INTO notices(id,tenant_id,title,body,is_read,published_at,status,is_important,is_banner,starts_at,ends_at,created_by) VALUES(gen_random_uuid(),$1,$2,$3,FALSE,NOW(),'published',$4,$5,$6,$7,$8) RETURNING id`,[access.tenantId,title,body,value.isImportant,value.isBanner,payload.startsAt,payload.endsAt,access.subject])
-    return{id:result.rows[0].id as string}
+    const id=result.rows[0].id as string
+    await enqueueTenantPush(client, access.tenantId, 'notice', id)
+    return{id}
   })
 }
 
@@ -3478,6 +3516,7 @@ const applyCors = (request: IncomingMessage, response: ServerResponse): void => 
 }
 
 export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
+  const stopPushDispatcher = startPushDispatcher()
   const server = createServer((request, response) => {
     const timing = { duration: 0 }
     return databaseTiming.run(timing, async () => {
@@ -3493,6 +3532,17 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
 
     const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1')
     try {
+    if (request.method === 'GET' && requestUrl.pathname === '/internal/push/metrics') {
+      const configuredSecret = process.env.PUSH_METRICS_SECRET ?? ''
+      const providedSecret = request.headers['x-push-metrics-secret']
+      const expected = Buffer.from(configuredSecret)
+      const provided = Buffer.from(typeof providedSecret === 'string' ? providedSecret : '')
+      if (!configuredSecret || expected.length !== provided.length || !timingSafeEqual(expected, provided)) {
+        throw new ApiFault(403, 'forbidden', 'Push metrics access is not authorized')
+      }
+      respond(response, 200, snapshotPushMetrics(), requestId)
+      return
+    }
     if (request.method === 'POST' && requestUrl.pathname === '/internal/resident-session-cache/evict') {
       const configuredSecret = process.env.RESIDENT_AUTH_CACHE_INVALIDATION_SECRET ?? ''
       const providedSecret = request.headers['x-resident-cache-invalidation-secret']
@@ -3555,6 +3605,32 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
       if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/home') {
         const access = await resolveTenantAccess(request, 'resident')
         respond(response, 200, await getResidentHome(access, access.subject), requestId)
+        return
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/push/settings') {
+        const access = await resolveTenantAccess(request, 'resident')
+        respond(response, 200, await getPushSettings(withTenantPool(access), access), requestId)
+        return
+      }
+      if (requestUrl.pathname === '/v1/tenant/push/subscriptions' && request.method === 'POST') {
+        const access = await resolveTenantAccess(request, 'resident')
+        enforceResidentPushRateLimit(access.subject)
+        respond(response, 201, await registerPushSubscription(
+          withTenantPool(access), access, await readJsonBody(request, 8_192),
+          typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
+        ), requestId)
+        return
+      }
+      if (requestUrl.pathname === '/v1/tenant/push/subscriptions' && request.method === 'DELETE') {
+        const access = await resolveTenantAccess(request, 'resident')
+        enforceResidentPushRateLimit(access.subject)
+        respond(response, 200, await removePushSubscription(withTenantPool(access), access, await readJsonBody(request, 4_096)), requestId)
+        return
+      }
+      if (requestUrl.pathname === '/v1/tenant/push/preferences' && request.method === 'PATCH') {
+        const access = await resolveTenantAccess(request, 'resident')
+        enforceResidentPushRateLimit(access.subject)
+        respond(response, 200, await updatePushPreferences(withTenantPool(access), access, await readJsonBody(request, 4_096)), requestId)
         return
       }
       if (request.method === 'GET' && requestUrl.pathname === '/v1/tenant/pulse') {
@@ -3980,6 +4056,12 @@ export const startApiServer = (port = Number(process.env.PORT ?? 4001)) => {
 
   server.listen(port, '0.0.0.0', () => {
     console.log(JSON.stringify({ level: 'info', event: 'server_started', service: 'api', port }))
+  })
+  server.once('close', () => {
+    stopPushDispatcher()
+    void closePushDispatcherPools().catch(() => {
+      console.error(JSON.stringify({ event: 'push_dispatcher_pool_close_failed' }))
+    })
   })
 
   const shutdown = () => {

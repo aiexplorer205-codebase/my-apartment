@@ -6,18 +6,21 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Pool } from '../apps/api/node_modules/pg'
 import { closeDatabasePools, deleteTenantData, getTenantPool } from '../apps/api/src/persistence'
+import { closePushDispatcherPools, registerPushSubscriptionForTenant, removeStalePushSubscription } from '../apps/api/src/push-dispatcher'
+import { removePushSubscription } from '../apps/api/src/push-subscriptions'
 import { tenantData } from '../scripts/tenant-data.mjs'
 
 describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant database isolation and recovery', () => {
   const suffix=randomUUID().replaceAll('-',''),database=`shared_rls_${suffix}`,restored=`restored_${suffix}`
-  const login=`app_${suffix}`,lifecycle=`life_${suffix}`,a=randomUUID(),b=randomUUID()
+  const login=`app_${suffix}`,lifecycle=`life_${suffix}`,pushLogin=`push_${suffix}`,a=randomUUID(),b=randomUUID()
   const unitA=randomUUID(),unitB=randomUUID(),residentA=randomUUID(),residentB=randomUUID()
   const directory=mkdtempSync(join(tmpdir(),'myapartment-tenant-'))
   const previous={...process.env}
-  let control:Pool,owner:Pool,raw:Pool,life:Pool,ownerUrl:URL
+  let control:Pool,owner:Pool,raw:Pool,life:Pool,push:Pool,ownerUrl:URL
   const pa=()=>getTenantPool(a),pb=()=>getTenantPool(b)
   beforeAll(async()=>{
-    const password=execFileSync('docker',['exec','myapartment-schema-check-postgres-1','printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
+    const postgresContainer=process.env.MYAPARTMENT_TEST_POSTGRES_CONTAINER??'myapartment-schema-check-postgres-1'
+    const password=execFileSync('docker',['exec',postgresContainer,'printenv','POSTGRES_PASSWORD'],{encoding:'utf8'}).trim()
     const url=new URL(`postgresql://postgres@127.0.0.1:${process.env.MYAPARTMENT_TEST_DATABASE_PORT ?? '55434'}/postgres`);url.password=password
     control=new Pool({connectionString:url.toString()})
     await control.query(`CREATE DATABASE ${database}`)
@@ -25,11 +28,12 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
     owner=new Pool({connectionString:ownerUrl.toString(),options:'-c search_path=block9_tenant,public'})
     const migrations=new URL('../migrations/myapartment_tenant_db/',import.meta.url)
     for(const file of readdirSync(migrations).filter(name=>name.endsWith('.sql')).sort())await owner.query(readFileSync(new URL(file,migrations),'utf8'))
-    await owner.query(`CREATE ROLE ${login} LOGIN PASSWORD 'isolated-test-only'; GRANT myapartment_runtime TO ${login}; CREATE ROLE ${lifecycle} LOGIN PASSWORD 'isolated-test-only'; GRANT myapartment_lifecycle TO ${lifecycle}`)
+    await owner.query(`CREATE ROLE ${login} LOGIN PASSWORD 'isolated-test-only'; GRANT myapartment_runtime TO ${login}; CREATE ROLE ${lifecycle} LOGIN PASSWORD 'isolated-test-only'; GRANT myapartment_lifecycle TO ${lifecycle}; CREATE ROLE ${pushLogin} LOGIN PASSWORD 'isolated-test-only'; GRANT myapartment_push_dispatcher TO ${pushLogin}`)
     const appUrl=new URL(ownerUrl);appUrl.username=login;appUrl.password='isolated-test-only'
     process.env.POSTGRES_TENANT_URL=appUrl.toString()
     raw=new Pool({connectionString:appUrl.toString(),max:1,options:'-c search_path=block9_tenant,public'})
     appUrl.username=lifecycle;process.env.POSTGRES_MAINTENANCE_URL=appUrl.toString();life=new Pool({connectionString:appUrl.toString()})
+    appUrl.username=pushLogin;process.env.POSTGRES_PUSH_TENANT_URL=appUrl.toString();push=new Pool({connectionString:appUrl.toString(),options:'-c search_path=block9_tenant,public'})
     for(const [id,unit,resident]of [[a,unitA,residentA],[b,unitB,residentB]]){
       const pool=getTenantPool(id)
       await pool.query("INSERT INTO organizations(id,tenant_id,name,locale,currency,timezone) VALUES($1,$2,'Community','en','INR','Asia/Kolkata')",[randomUUID(),id])
@@ -40,10 +44,16 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
     }
   },120000)
   afterAll(async()=>{
+    await closePushDispatcherPools()
     await closeDatabasePools()
-    await Promise.all([owner?.end(),raw?.end(),life?.end()])
-    if(control){await control.query(`DROP DATABASE IF EXISTS ${database}`);await control.query(`DROP DATABASE IF EXISTS ${restored}`);await control.query(`DROP ROLE IF EXISTS ${login}; DROP ROLE IF EXISTS ${lifecycle}`);await control.end()}
-    for(const key of ['POSTGRES_TENANT_URL','POSTGRES_MAINTENANCE_URL']){if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key]}
+    await Promise.all([owner?.end(),raw?.end(),life?.end(),push?.end()])
+    if(control){
+      await control.query(`DROP DATABASE IF EXISTS ${database}`)
+      await control.query(`DROP DATABASE IF EXISTS ${restored}`)
+      await control.query(`DROP ROLE IF EXISTS ${login}; DROP ROLE IF EXISTS ${lifecycle}; DROP ROLE IF EXISTS ${pushLogin}`)
+      await control.end()
+    }
+    for(const key of ['POSTGRES_TENANT_URL','POSTGRES_MAINTENANCE_URL','POSTGRES_PUSH_TENANT_URL']){if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key]}
     rmSync(directory,{recursive:true,force:true})
   },30000)
   it('protects every tenant table, including children and the payment credits view',async()=>{
@@ -75,6 +85,101 @@ describe.skipIf(process.env.MYAPARTMENT_DATABASE_TESTS !== '1')('shared tenant d
     await expect(pa().query('UPDATE units SET tenant_id=$1 WHERE id=$2',[b,unitA])).rejects.toMatchObject({code:'42501'})
     await expect(pa().query("INSERT INTO residents(auth_subject,unit_id,full_name,email) VALUES('forged',$1,'Wrong','wrong@example.test')",[unitB])).rejects.toMatchObject({code:'23503'})
     expect((await pb().query('SELECT full_name FROM residents WHERE id=$1',[residentB])).rows[0].full_name).toBe('Resident')
+  })
+  it('reassigns an authenticated device endpoint, caps devices, scopes subscriptions, and recovers outbox leases at least once',async()=>{
+    expect((await push.query('SELECT * FROM push_subscriptions')).rowCount).toBe(0)
+    await expect(push.query('SELECT * FROM residents')).rejects.toMatchObject({code:'42501'})
+    for(const [tenantId,residentId]of [[a,residentA],[b,residentB]]){
+      await getTenantPool(tenantId).query(`INSERT INTO push_preferences(tenant_id,resident_id,auth_subject,email)
+        VALUES($1,$2,'same-subject','resident@example.test')`,[tenantId,residentId])
+    }
+    const endpoint=(id:string)=>`https://fcm.googleapis.com/fcm/send/${id}`
+    const logoutEndpoint=endpoint('logout-device')
+    await registerPushSubscriptionForTenant({tenantId:a,residentId:residentA,subject:'same-subject',endpoint:logoutEndpoint,
+      p256dh:'B'.repeat(65),auth:'A'.repeat(24),userAgent:'test'})
+    await removePushSubscription(pa(),{tenantId:a,subject:'same-subject',role:'resident'},{endpoint:logoutEndpoint})
+    expect((await pa().query('SELECT endpoint FROM push_subscriptions WHERE endpoint=$1',[logoutEndpoint])).rowCount).toBe(0)
+    await registerPushSubscriptionForTenant({tenantId:b,residentId:residentB,subject:'same-subject',endpoint:logoutEndpoint,
+      p256dh:'C'.repeat(65),auth:'D'.repeat(24),userAgent:'test'})
+    expect((await pa().query('SELECT endpoint FROM push_subscriptions WHERE endpoint=$1',[logoutEndpoint])).rowCount).toBe(0)
+    expect((await pb().query('SELECT endpoint FROM push_subscriptions WHERE endpoint=$1',[logoutEndpoint])).rowCount).toBe(1)
+    await removePushSubscription(pb(),{tenantId:b,subject:'same-subject',role:'resident'},{endpoint:logoutEndpoint})
+    await registerPushSubscriptionForTenant({tenantId:a,residentId:residentA,subject:'same-subject',endpoint:endpoint('shared-device'),
+      p256dh:'B'.repeat(65),auth:'A'.repeat(24),userAgent:'test'})
+    await registerPushSubscriptionForTenant({tenantId:b,residentId:residentB,subject:'same-subject',endpoint:endpoint('shared-device'),
+      p256dh:'C'.repeat(65),auth:'D'.repeat(24),userAgent:'test'})
+    expect((await pa().query('SELECT endpoint FROM push_subscriptions')).rows).toEqual([])
+    expect((await pb().query('SELECT endpoint FROM push_subscriptions')).rows).toEqual([{endpoint:endpoint('shared-device')}])
+    await expect(registerPushSubscriptionForTenant({tenantId:b,residentId:residentB,subject:'same-subject',endpoint:endpoint('shared-device'),
+      p256dh:'E'.repeat(65),auth:'F'.repeat(24),userAgent:'test'})).resolves.toBeUndefined()
+    for(let index=1;index<5;index++){
+      await registerPushSubscriptionForTenant({tenantId:b,residentId:residentB,subject:'same-subject',endpoint:endpoint(`device-${index}`),
+        p256dh:'G'.repeat(65),auth:'H'.repeat(24),userAgent:'test'})
+    }
+    await expect(registerPushSubscriptionForTenant({tenantId:b,residentId:residentB,subject:'same-subject',endpoint:endpoint('device-over-limit'),
+      p256dh:'J'.repeat(65),auth:'K'.repeat(24),userAgent:'test'})).rejects.toThrow('Remove a device')
+    await pb().query(`UPDATE push_preferences SET language='te',notices_enabled=FALSE,reset_email_enabled=TRUE
+      WHERE tenant_id=$1 AND resident_id=$2`,[b,residentB])
+    expect((await pb().query('SELECT language,notices_enabled,reset_email_enabled FROM push_preferences WHERE tenant_id=$1 AND resident_id=$2',[b,residentB])).rows[0])
+      .toEqual({language:'te',notices_enabled:false,reset_email_enabled:true})
+
+    const eventId=randomUUID()
+    const client=await pb().connect()
+    try{
+      await client.query('BEGIN')
+      await client.query(`INSERT INTO push_outbox(tenant_id,event_type,event_id) VALUES($1,'notice',$2)
+        ON CONFLICT(tenant_id,event_type,event_id) DO NOTHING`,[b,eventId])
+      await client.query(`INSERT INTO push_outbox(tenant_id,event_type,event_id) VALUES($1,'notice',$2)
+        ON CONFLICT(tenant_id,event_type,event_id) DO NOTHING`,[b,eventId])
+      await client.query('COMMIT')
+    }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
+    const outbox=(await pb().query('SELECT id FROM push_outbox WHERE tenant_id=$1 AND event_id=$2',[b,eventId])).rows[0]
+    const subscription=(await pb().query('SELECT id FROM push_subscriptions WHERE endpoint=$1',[endpoint('shared-device')])).rows[0]
+    const preferenceInsert=await owner.query(`INSERT INTO block9_tenant.push_outbox_deliveries(tenant_id,outbox_id,subscription_id)
+      SELECT $1,$2,s.id FROM block9_tenant.push_subscriptions s
+      JOIN block9_tenant.push_preferences p ON p.tenant_id=s.tenant_id AND p.resident_id=s.resident_id
+      WHERE s.tenant_id=$1 AND s.id=$3 AND p.notices_enabled
+      ON CONFLICT(outbox_id,subscription_id) DO NOTHING`,[b,outbox.id,subscription.id])
+    expect(preferenceInsert.rowCount).toBe(0)
+    await owner.query('UPDATE block9_tenant.push_preferences SET notices_enabled=TRUE WHERE tenant_id=$1 AND resident_id=$2',[b,residentB])
+    await owner.query(`INSERT INTO block9_tenant.push_outbox_deliveries(tenant_id,outbox_id,subscription_id)
+      VALUES($1,$2,$3) ON CONFLICT(outbox_id,subscription_id) DO NOTHING`,[b,outbox.id,subscription.id])
+    expect((await pb().query('SELECT COUNT(*)::int AS count FROM push_outbox WHERE tenant_id=$1 AND event_id=$2',[b,eventId])).rows[0].count).toBe(1)
+
+    const claimDelivery=async()=>{
+      const dispatcher=await push.connect()
+      try{
+        await dispatcher.query('BEGIN')
+        await dispatcher.query('SET LOCAL ROLE myapartment_push_dispatcher')
+        await dispatcher.query("SELECT set_config('app.tenant_id',$1,true)",[b])
+        const claimed=await dispatcher.query(`SELECT d.id FROM push_outbox_deliveries d
+          JOIN push_outbox o ON o.id=d.outbox_id AND o.tenant_id=d.tenant_id
+          JOIN push_subscriptions s ON s.id=d.subscription_id AND s.tenant_id=d.tenant_id
+          JOIN push_preferences p ON p.tenant_id=s.tenant_id AND p.resident_id=s.resident_id
+          WHERE d.completed_at IS NULL AND d.next_attempt_at<=NOW()
+            AND (d.locked_at IS NULL OR d.locked_at<NOW()-INTERVAL '2 minutes')
+            AND o.completed_at IS NULL
+          ORDER BY d.next_attempt_at,d.id FOR UPDATE OF d SKIP LOCKED LIMIT 50`)
+        for(const row of claimed.rows)await dispatcher.query('UPDATE push_outbox_deliveries SET locked_at=NOW(),attempts=attempts+1 WHERE id=$1',[row.id])
+        await dispatcher.query('COMMIT')
+        return claimed.rows as Array<{id:string}>
+      }catch(error){await dispatcher.query('ROLLBACK');throw error}finally{dispatcher.release()}
+    }
+    expect(await claimDelivery()).toHaveLength(1)
+    await owner.query("UPDATE block9_tenant.push_outbox_deliveries SET locked_at=NOW()-INTERVAL '3 minutes' WHERE outbox_id=$1",[outbox.id])
+    const afterCrashBeforeSend=await claimDelivery()
+    expect(afterCrashBeforeSend).toHaveLength(1)
+    let providerAcceptances=1
+    await owner.query("UPDATE block9_tenant.push_outbox_deliveries SET locked_at=NOW()-INTERVAL '3 minutes' WHERE outbox_id=$1",[outbox.id])
+    expect(await claimDelivery()).toHaveLength(1)
+    providerAcceptances+=1
+    expect(providerAcceptances).toBe(2)
+    const visibleTags=new Set([`myapartment:notice:${eventId}`,`myapartment:notice:${eventId}`])
+    expect(visibleTags.size).toBe(1)
+    await owner.query('UPDATE block9_tenant.push_outbox_deliveries SET completed_at=NOW(),locked_at=NULL WHERE outbox_id=$1',[outbox.id])
+    await owner.query('UPDATE block9_tenant.push_outbox SET completed_at=NOW(),locked_at=NULL WHERE id=$1',[outbox.id])
+    await removeStalePushSubscription(b,endpoint('device-1'))
+    expect((await pb().query('SELECT endpoint FROM push_subscriptions WHERE endpoint=$1',[endpoint('device-1')])).rowCount).toBe(0)
   })
   it('keeps resident pulse versions scoped to the authorized tenant',async()=>{
     const before=(await pa().query('SELECT entity,version::int AS version FROM resident_change_versions WHERE tenant_id=$1',[a])).rows

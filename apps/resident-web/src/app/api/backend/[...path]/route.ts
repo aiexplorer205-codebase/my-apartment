@@ -12,7 +12,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   const incomingUrl = new URL(request.url)
   const targetUrl = `${API_BASE_URL}${apiPath}${incomingUrl.search}`
   const headers = new globalThis.Headers()
-  for (const name of ['accept', 'content-type', 'x-tenant-id']) {
+  for (const name of ['accept', 'content-type', 'x-tenant-id', 'user-agent']) {
     const value = request.headers.get(name)
     if (value) headers.set(name, value)
   }

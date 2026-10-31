@@ -63,6 +63,57 @@ Current resident-visible data and its signal scope:
 - **Not implemented:** money-transparency feeds and resident scheduler data have
   no current tables, endpoints, or change signals.
 
+### Resident Web Push
+
+Resident push uses the opt-in resident service worker and the server-side VAPID
+configuration. Subscription endpoints are HTTPS-only and restricted to the
+supported FCM, Mozilla, Apple, and Windows Push hosts. Each resident has
+community-scoped category and language preferences, with at most five registered
+devices per community. Push content is limited to event type, record UUID, and
+resident-selected language; notification copy is generic and localized in the
+service worker.
+
+Notices and polls insert their `push_outbox` records in the same tenant
+transaction as publication. Admin complaint status changes enqueue a
+resident-targeted event in the same tenant transaction. The platform reset-QR
+outbox is written in the same platform transaction as QR issuance and rechecks
+pending status and expiry before every channel attempt. Reset alerts bypass
+category preferences, use high urgency and the remaining QR lifetime, and never
+include a QR token or personal content. Reset email requires a separate resident
+opt-in, uses an outbox idempotency key with Resend, and is rate-limited per
+resident.
+
+Delivery is **at-least-once**, not exactly-once. The event/subscription delivery
+key deduplicates enqueueing; a crash after provider acceptance may cause a retry.
+The worker uses a stable `(type,event id)` notification tag so retries replace
+the visible notification rather than stacking it. The API process dispatches
+bounded batches with `FOR UPDATE SKIP LOCKED`, leases, and exponential retries;
+the health-only worker remains unchanged.
+
+The dedicated dispatcher logins can assume roles with grants only on push
+outboxes, delivery rows, preferences, and subscriptions. Tenant outbox and
+delivery access remains under forced RLS with a transaction-local tenant id.
+The API enumerates active tenant ids from the platform registry and invokes the
+dispatcher separately for each tenant. Because subscription endpoints are
+globally unique and can be reassigned only during an authenticated registration,
+the restricted tenant push role has an explicit cross-tenant policy on the
+subscription table alone. This means the dispatcher credential can read
+subscription endpoints and encryption keys across tenants; the registration code
+uses that access only to delete the submitted endpoint before inserting it for
+the authenticated resident. The role has no access to other tenant tables, and
+tenant-owned outboxes, delivery rows, and preferences remain filtered by RLS.
+The platform dispatcher reads only its reset outbox; a
+fixed-search-path security-definer function reveals only whether a QR is pending
+and its remaining TTL, not QR credentials or personal data.
+
+The push-type registry in `apps/api/src/push-service.ts` records targeting scope,
+category, TTL, urgency, localization key, and click destination. The currently
+registered types are notice, poll, passkey reset, and complaint status change.
+Add a registry/coverage decision for every newly added resident-visible entity.
+This feature does not cache authenticated content and is not supported on
+browsers lacking Push API/Notification support. iOS requires an installed PWA
+and iOS 16.4 or newer.
+
 Every new resident-visible entity must be registered here as per-community or
 per-resident, define how its changes reach the appropriate client, and extend
 the trigger-registry and behavior tests. Only per-community writes bump a shared
@@ -100,7 +151,7 @@ or broadcast invalidation.
 | `infrastructure/ports` | Ports |
 | `infrastructure/adapters` | Auth0, Postgres, Redis, Resend |
 
-Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`015`) and `migrations/myapartment_tenant_db` (`001`–`042`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
+Schema is ordered SQL in `migrations/myapartment_platform_db` (`001`–`016`) and `migrations/myapartment_tenant_db` (`001`–`044`). SQL objects are created in PostgreSQL schemas `block9_platform` and `block9_tenant`; each API pool sets the matching `search_path`. Prisma in root `package.json` is unused.
 
 Copy lives in `packages/app-platform/locales/{en,te}/{common,admin,resident,validation}.json`. Keep key parity. Validate with `pnpm platform:validate`.
 

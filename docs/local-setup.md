@@ -60,7 +60,7 @@ Firebase and Filebase variables in `.env.example` are unused by current flows.
 
 Fresh initialization creates `myapartment_platform_db` (`block9_platform`) and
 `myapartment_app_db` (`block9_tenant`), applying every ordered SQL migration through
-tenant `042` and platform `015`. Migration `040_resident_change_signals.sql`
+tenant `044` and platform `016`. Migration `040_resident_change_signals.sql`
 converts version triggers to statement-level triggers and adds signals for
 resident-visible records. Migration `041_resident_signal_scopes.sql` keeps
 community-wide signals only for community-scoped data and removes version bumps
@@ -88,6 +88,27 @@ The runner targets one platform or shared application database, records SHA-256
 checksums, skips applied files, rejects changed history, and serializes runners.
 Individual filenames are optional. `all-tenants` and database-name arguments are
 removed. Rebuild/restart `api` after SQL or route changes.
+
+## Resident Web Push
+
+Web Push is opt-in in resident Profile settings. Generate VAPID keys with
+`pnpm --filter @block9/api exec web-push generate-vapid-keys`, set
+`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` in the server
+environment, and never expose the private key to a web build. Configure a
+separate random `PUSH_DATABASE_PASSWORD`; the API uses the least-privilege
+`POSTGRES_PUSH_TENANT_URL` and `POSTGRES_PUSH_PLATFORM_URL` dispatcher logins.
+Fresh Compose databases provision those logins. For an existing database, run
+the role provisioning SQL against each database with a database administrator
+and `-v push_password="$PUSH_DATABASE_PASSWORD"`:
+`scripts/provision-push-tenant.sql` on `myapartment_app_db` and
+`scripts/provision-push-platform.sql` on `myapartment_platform_db`.
+
+The API dispatcher retries the transactional outboxes at least once. A crash
+after provider acceptance but before marking delivery complete may result in
+a duplicate; the service worker collapses matching `(type,event id)` tags.
+The Web Push provider keys, endpoints, and payloads must not be logged. The
+optional process-local counters endpoint requires `PUSH_METRICS_SECRET` in the
+`X-Push-Metrics-Secret` header at `/internal/push/metrics`.
 
 Nothing is seeded. Prefer operator onboarding to create a community and invite
 its administrator. Local SQL fixtures must explicitly identify their tenant;

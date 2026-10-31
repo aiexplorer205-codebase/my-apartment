@@ -70,7 +70,7 @@ be operator-authorized, narrowly scoped and audited.
 | --- | --- | --- |
 | Never cache authenticated data | Implemented conservative policy | [Resident worker](../apps/resident-web/public/sw.js) and [admin worker](../apps/admin-web/public/sw.js) use network-only navigation with a generic offline response; no Cache API storage or offline write queue. API requests are not intercepted for caching. App-shell precaching is not currently implemented and is optional. |
 | Worker updates / versioning | Partial | [PWA controls](../packages/ui/src/pwa-controls.tsx) handle waiting workers, updatefound and deliberate activation while guarding forms. Browser byte-change updates exist; no explicit build version/cache namespace exists. Deploy sw.js with revalidation rather than immutable caching. If caches are introduced, use build-versioned names and remove old caches without caching private pages. |
-| Push only when needed | Meets current scope | No implemented push delivery was found. Unused environment variables/snippets are not a push service. Keep it opt-in to a separately reviewed requirement. |
+| Push only when needed | Implemented opt-in delivery foundation | Resident Web Push uses VAPID, endpoint validation, a table-limited dispatcher role and transactional outboxes. Verify VAPID secrets, provider delivery, role provisioning, retention and operational metrics before production; see [architecture](architecture.md#resident-web-push). |
 
 ## Required rules for future changes
 

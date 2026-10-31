@@ -38,7 +38,7 @@ Pilot configuration and remaining evidence: [pilot release gates](pilot-release-
 | Report exports | Admin reports placeholder | Tenant-scoped export |
 | Support access to tenant data | Default deny; no elevation tool | Time-limited audited access if ever allowed |
 | Worker / queues | Health only | Processors only behind ports, with retries and poison handling |
-| Object storage / push | Private S3-compatible complaint photo flow implemented; push absent | Verify private per-environment storage, lifecycle/CORS/cleanup; separately review push if needed |
+| Object storage / push | Private S3-compatible complaint photos and opt-in resident Web Push implemented | Verify private per-environment storage, lifecycle/CORS/cleanup, VAPID configuration, provider delivery, dispatcher credentials, expiry, retry and alerting |
 | CI/CD production | Foundation CI for PRs | Named approver, rollback owner, secret manager |
 | Paid cloud fallback | Not permitted without explicit approval | Written approval |
 

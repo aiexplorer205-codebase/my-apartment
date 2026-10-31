@@ -140,6 +140,23 @@ function ResidentContent() {
   const pulse = useResidentPulse()
   const home = useResidentQuery<ResidentHome>('/v1/tenant/home', { enabled: activeTab === 'home' || activeTab === 'payments' })
   const profile = useResidentQuery<ResidentProfile>('/v1/tenant/profile', { enabled: activeTab === 'profile' })
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const type = url.searchParams.get('push'), id = url.searchParams.get('id')
+    if (!type) return
+    if (type === 'notice' && id && /^[0-9a-f-]{36}$/i.test(id)) {
+      setUpdatesState((current) => ({ ...current, record: { kind: 'announcement', id } }))
+      setActiveTab('notices')
+    } else if (type === 'poll' && id && /^[0-9a-f-]{36}$/i.test(id)) {
+      setUpdatesState((current) => ({ ...current, record: { kind: 'poll', id } }))
+      setActiveTab('notices')
+    } else if (type === 'complaint-status-change') {
+      setActiveTab('complaints')
+    }
+    url.searchParams.delete('push')
+    url.searchParams.delete('id')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [])
   const refreshUpdates=useCallback(()=>{
     pulse.reload()
     void queryClient.invalidateQueries({queryKey:residentKeys.resourcePrefix(activeTenantId,user?.sub,'home')})

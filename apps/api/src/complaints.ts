@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { complaintUploadIds, attachComplaintPhotos } from './complaint-photos.js'
 import type { TenantDatabase as Pool } from './persistence.js'
 import { ApiFault } from './api-fault.js'
+import { enqueueTenantPush } from './push-service.js'
 
 type Access = { tenantId: string; subject: string; role: 'admin' | 'resident' }
 export const complaintCategories = ['Plumbing','Electrical','Lift','Water supply','Cleaning','Security','Common area','Other'] as const
@@ -127,7 +128,14 @@ export async function complaintRequest(pool: Pool, access: Access, method: 'GET'
     await client.query(`UPDATE complaints SET status=$2, priority=$3, assigned_subject=$4, version=version+1, updated_at=NOW() WHERE id=$1`, [id,next,priority,assigned])
     // Store a public, idempotent action marker even for status/assignment-only operations.
     await client.query(`INSERT INTO complaint_messages(complaint_id,actor_subject,actor_role,body,internal,request_key,payload_hash) VALUES($1,$2,$3,$4,$5,$6,$7)`, [id,access.subject,access.role,body || (next !== record.status ? `Status changed to ${next}.` : 'Request management details updated.'),internal,input.requestKey,fingerprint])
-    if (next !== record.status) await client.query(`INSERT INTO complaint_events(complaint_id,actor_subject,previous_status,next_status,version) VALUES($1,$2,$3,$4,$5)`, [id,access.subject,record.status,next,record.version+1])
+    if (next !== record.status) {
+      const event = await client.query<{ id: string }>(
+        `INSERT INTO complaint_events(complaint_id,actor_subject,previous_status,next_status,version)
+         VALUES($1,$2,$3,$4,$5) RETURNING id`,
+        [id,access.subject,record.status,next,record.version+1],
+      )
+      if (admin) await enqueueTenantPush(client, access.tenantId, 'complaint-status-change', event.rows[0]!.id, record.resident_id)
+    }
     await client.query('COMMIT')
     return { id, version: record.version+1 }
   } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }

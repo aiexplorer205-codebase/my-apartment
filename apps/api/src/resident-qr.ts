@@ -19,6 +19,13 @@ export async function issueResidentQr(input: { tenantId: string; subject: string
     const result = await client.query(`INSERT INTO resident_auth_qr(tenant_id, invitation_id, user_id, full_name, email, purpose, token_hash, issued_by, expires_at)
       VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,NOW()+INTERVAL '7 days') RETURNING id, expires_at AS "expiresAt"`,
     [input.tenantId, input.invitationId ?? null, userId, input.fullName, input.email ?? '', input.invitationId ? 'invitation' : 'reset', tokenHash, input.subject])
+    if (!input.invitationId) {
+      await client.query(
+        `INSERT INTO push_reset_qr_outbox(tenant_id,subject,qr_request_id,channels)
+         VALUES($1,$2,$3,ARRAY['push','email']) ON CONFLICT(qr_request_id) DO NOTHING`,
+        [input.tenantId, `betterauth|${userId}`, result.rows[0].id],
+      )
+    }
     await client.query('COMMIT')
     const base = (process.env.RESIDENT_WEB_PUBLIC_URL ?? 'http://localhost:3098').replace(/\/$/, '')
     return { ...result.rows[0], invitationUrl: createResidentInvitationUrl(base, token, 'qr') }

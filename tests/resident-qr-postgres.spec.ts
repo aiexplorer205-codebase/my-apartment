@@ -1,9 +1,11 @@
 import { Pool } from '../apps/resident-auth/node_modules/pg'
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cancelQr, completeQrRegistration, lookupQr, qrRegistrationOptions, qrTokenHash } from '../apps/resident-auth/src/qr'
 import { createResidentInvitationToken } from '../apps/api/src/resident-invitations'
+import { issueResidentQr } from '../apps/api/src/resident-qr'
+import { closeDatabasePools } from '../apps/api/src/persistence'
 import type { RegistrationResponseJSON } from '../apps/resident-auth/node_modules/@simplewebauthn/server'
 
 const databaseURL = process.env.MYAPARTMENT_QR_TEST_DATABASE_URL
@@ -46,12 +48,14 @@ describe.skipIf(!enabled)('resident QR transactions with PostgreSQL and WebAuthn
     await pool.query('CREATE TABLE block9_platform.tenant_records(tenant_id TEXT PRIMARY KEY, status TEXT NOT NULL)')
     await pool.query(await readFile('migrations/myapartment_platform_db/011_resident_auth.sql', 'utf8'))
     await pool.query(await readFile('migrations/myapartment_platform_db/012_resident_qr_enrollment.sql', 'utf8'))
+    await pool.query(await readFile('migrations/myapartment_platform_db/016_web_push_reset_outbox.sql', 'utf8'))
     await pool.query("INSERT INTO tenant_records VALUES($1,'active')", [tenantId])
     await pool.query(`INSERT INTO resident_auth_user(id,name,email,"emailVerified") VALUES($1,'Resident','resident@example.test',TRUE)`, [userId])
     await pool.query(`INSERT INTO resident_auth_passkey(id,"publicKey","userId","credentialID",counter,"deviceType","backedUp") VALUES('old','fixture',$1,'old-credential',0,'singleDevice',FALSE)`, [userId])
     await pool.query(`INSERT INTO resident_auth_session(id,token,"userId","expiresAt") VALUES('old-session','old-token',$1,NOW()+INTERVAL '8 hours')`, [userId])
+    vi.stubEnv('POSTGRES_PLATFORM_URL', databaseURL!)
   })
-  afterAll(async () => { await pool?.end() })
+  afterAll(async () => { await closeDatabasePools(); await pool?.end(); vi.unstubAllEnvs() })
   it('blocks new QR options and completion after apartment deactivation', async () => {
     const grant = await issue('invitation')
     const options = await qrRegistrationOptions(pool, grant.token, config)
@@ -61,6 +65,26 @@ describe.skipIf(!enabled)('resident QR transactions with PostgreSQL and WebAuthn
       await expect(completeQrRegistration(pool, grant.token, attestation(options.challenge), config)).rejects.toThrow()
       expect((await pool.query('SELECT 1 FROM resident_auth_passkey WHERE "userId"=$1', [grant.userId])).rowCount).toBe(0)
     } finally { await pool.query("UPDATE tenant_records SET status='active' WHERE tenant_id=$1", [tenantId]) }
+  })
+  it('commits reset-QR notifications atomically and exposes only pending expiry to the dispatcher', async () => {
+    const qr = await issueResidentQr({ tenantId, subject: 'auth0|administrator', fullName: 'Private Resident', userId: 'push-reset-resident' })
+    const row = (await pool.query(
+      'SELECT id,tenant_id,subject,qr_request_id,channels FROM push_reset_qr_outbox WHERE qr_request_id=$1',
+      [qr.id],
+    )).rows[0]
+    expect(row).toMatchObject({
+      tenant_id: tenantId,
+      subject: 'betterauth|push-reset-resident',
+      qr_request_id: qr.id,
+      channels: ['push', 'email'],
+    })
+    expect(Object.keys(row).sort()).toEqual(['channels', 'id', 'qr_request_id', 'subject', 'tenant_id'])
+    expect((await pool.query('SELECT push_reset_qr_remaining_ttl($1)>0 AS pending',[qr.id])).rows[0].pending).toBe(true)
+    await pool.query("UPDATE resident_auth_qr SET status='cancelled' WHERE id=$1",[qr.id])
+    expect((await pool.query('SELECT push_reset_qr_remaining_ttl($1) AS ttl',[qr.id])).rows[0].ttl).toBeNull()
+    const expired = await issueResidentQr({ tenantId, subject: 'auth0|administrator', fullName: 'Private Resident', userId: 'push-reset-expired' })
+    await pool.query("UPDATE resident_auth_qr SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1",[expired.id])
+    expect((await pool.query('SELECT push_reset_qr_remaining_ttl($1) AS ttl',[expired.id])).rows[0].ttl).toBeNull()
   })
   it('allows signup without email, using real origin-bound, user-verified WebAuthn registration', async () => {
     const grant = await issue('invitation')
